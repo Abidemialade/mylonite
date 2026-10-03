@@ -478,14 +478,20 @@ and `request.headers`, and each secret-looking `env` value (a key such as `GITHU
 or `DB_PASSWORD`, or a value shaped like an API key), becomes a `${MYLONITE_TARGET_...}`
 placeholder. Plain values such as `LOG_LEVEL: debug` stay as written.
 
-A value that is ALREADY a `${VAR}` reference — your own hand-written
+A value that is PURELY a `${VAR}` reference — your own hand-written
 `Authorization: Bearer ${MY_TOKEN}`, or a `GITHUB_TOKEN: ${MY_GH_TOKEN}` you set up
-yourself — is left exactly as written instead of being re-wrapped into a second,
-disconnected `${MYLONITE_TARGET_...}` placeholder. Re-wrapping it would silently orphan
-the variable you already export in your shell, and — for a header — require the NEW
-variable to hold the whole header value rather than just the token. Writing a target
-file never resolves a `${VAR}` reference from the live environment either way: only
-*loading* one does, so no live secret can reach the written file through this path.
+yourself, optionally preceded by one `Bearer`/`Basic`/`Token` auth-scheme word — is left
+exactly as written instead of being re-wrapped into a second, disconnected
+`${MYLONITE_TARGET_...}` placeholder. Re-wrapping it would silently orphan the variable
+you already export in your shell, and — for a header — require the NEW variable to hold
+the whole header value rather than just the token. A value that merely *contains* one of
+these references alongside a literal secret — a DB URL with a real password and a
+`${DB_HOST}` reference, or a cookie with a real session value and a `${X}` reference —
+is **not** this shape and is masked whole, exactly as a
+value with no reference at all: the check is purely-this-shape, never
+anywhere-in-the-string. Writing a target file never resolves a `${VAR}` reference from
+the live environment either way: only *loading* one does, so no live secret can reach
+the written file through this path.
 
 A credential in the query string of `url` or `request.url` is masked too. A parameter
 with a credential name (`api_token`, `access_key`, `client_secret`, `key`, `sig`, ...),
@@ -540,19 +546,30 @@ $env:MYLONITE_TARGET_ENV_GITHUB_TOKEN = 'ghp_...'
 mylonite scan --target-file app.yaml --dry-run
 ```
 
-To keep the values in a `.env` file instead, load it into your shell first
-(`set -a; . ./.env; set +a` in bash or zsh). Mylonite's own `--env-file` flag reads only
-recognised provider credential/config names (see [Choose a model](choose-a-model.md)) —
-not a `MYLONITE_TARGET_...` placeholder or a user-named token, both of which it drops
-with a warning rather than loading. In CI, set the target's own variables as secrets on
-the job.
+To keep the values in a `.env` file instead, pass `--env-file`. Besides the recognised
+provider credential/config names (see [Choose a model](choose-a-model.md)), it also
+loads:
 
-For the provider/config names `--env-file` DOES load: a value that is itself an
-unresolved `${VAR}`-shaped placeholder (a templating tool's or secrets manager's
-reference that was never substituted, e.g. `ANTHROPIC_API_KEY=${SOME_SECRET_MANAGER_VAR}`
-left in the file as written) is a clear error naming the variable and the file, not a
-silent load — that literal text is never a usable credential, and sending it to a
-provider as one fails confusingly at best.
+- every `MYLONITE_TARGET_...`-prefixed name — the placeholders Mylonite itself writes
+  into a redacted target file;
+- every name the **targeted file itself references** as `${NAME}` in its
+  `headers`/`request.headers`/`env` sections — a user-named token such as `MY_TOKEN` in
+  a hand-written `Authorization: Bearer ${MY_TOKEN}`, not only ones Mylonite wrote. This
+  is scoped to the SAME target file the current command is about to load — not an open
+  allowlist for any name — so pass `--env-file` together with `--target-file` (or let
+  `mylonite.yaml`'s `target_file:` supply it) for this to take effect.
+
+Anything else — a name neither provider-shaped nor referenced by the target file you're
+using — is still dropped with a warning rather than loaded; a stray `.env` reused from a
+wider project cannot inject arbitrary environment this way. In CI, set the target's own
+variables as secrets on the job instead of relying on a committed `.env`.
+
+For every name `--env-file` DOES load: a value that is itself an unresolved
+`${VAR}`-shaped placeholder (a templating tool's or secrets manager's reference that was
+never substituted, e.g. `ANTHROPIC_API_KEY=${SOME_SECRET_MANAGER_VAR}` left in the file
+as written) is a clear error naming the variable and the file, not a silent load — that
+literal text is never a usable credential, and sending it to a provider or target as one
+fails confusingly at best.
 
 If a variable is unset, loading the file stops with exit code 2 and names the variable,
 the key it holds and the `export` line to run. Mylonite never starts your server with an
