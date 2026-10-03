@@ -869,14 +869,14 @@ def tree_redaction(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptu
     """Install the redaction (caplog's handler is on the root logger by now,
     so it gets a filter like any configured handler) with one registered
     value, and remove both afterwards so nothing leaks into later tests."""
-    from mylonite._redaction import clear_secret_values, register_secret_value
+    from mylonite._redaction import clear_masked_values, register_masked_value
 
     install_log_redaction(enabled=True)
-    register_secret_value(_TREE_SENTINEL)
+    register_masked_value(_TREE_SENTINEL)
     try:
         yield caplog
     finally:
-        clear_secret_values()
+        clear_masked_values()
         install_log_redaction(enabled=False)
 
 
@@ -994,7 +994,7 @@ def test_a_handler_already_on_the_mylonite_logger_is_filtered() -> None:
     from a module logger created after install, must not print the value."""
     import io
 
-    from mylonite._redaction import clear_secret_values, register_secret_value
+    from mylonite._redaction import clear_masked_values, register_masked_value
 
     own = logging.getLogger("mylonite")
     stream = io.StringIO()
@@ -1004,11 +1004,11 @@ def test_a_handler_already_on_the_mylonite_logger_is_filtered() -> None:
     own.setLevel(logging.INFO)
     try:
         install_log_redaction(enabled=True)
-        register_secret_value(_TREE_SENTINEL)
+        register_masked_value(_TREE_SENTINEL)
         logging.getLogger("mylonite.created_after_install_n8").info("v %s", _TREE_SENTINEL)
         assert any(isinstance(f, SecretRedactingFilter) for f in handler.filters)
     finally:
-        clear_secret_values()
+        clear_masked_values()
         install_log_redaction(enabled=False)
         own.removeHandler(handler)
         own.setLevel(previous_level)

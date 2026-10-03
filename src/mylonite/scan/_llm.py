@@ -47,7 +47,7 @@ from typing import Any, Final
 
 from pydantic import BaseModel
 
-from mylonite._redaction import mask_secret_values, redact_exception
+from mylonite._redaction import mask_registered_values, redact_exception
 from mylonite.scan.diagnostics import Diagnosis, classify_provider_error
 from mylonite.scan.llm_parse import (
     _extract_json_candidate,
@@ -878,7 +878,7 @@ def _exc_detail(exc: BaseException, limit: int = 200) -> str:
     Registered secret values (``--llm-header`` values) are masked: this text is
     logged and persisted in the verdict, and a provider error may echo a header.
     """
-    return mask_secret_values(f"{type(exc).__name__}: {exc}")[:limit]
+    return mask_registered_values(f"{type(exc).__name__}: {exc}")[:limit]
 
 
 def _classify_or_swallow(

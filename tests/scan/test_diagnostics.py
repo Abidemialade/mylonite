@@ -190,13 +190,13 @@ def test_a_401_from_plain_text_without_a_status_does_not_claim_http_401() -> Non
 
 
 def test_the_detail_masks_a_registered_header_value() -> None:
-    from mylonite._redaction import clear_secret_values, register_secret_value
+    from mylonite._redaction import clear_masked_values, register_masked_value
 
-    register_secret_value("wrkspc-detail-sentinel")
+    register_masked_value("wrkspc-detail-sentinel")
     try:
         diag = classify_provider_error(RuntimeError("echoed wrkspc-detail-sentinel back"))
     finally:
-        clear_secret_values()
+        clear_masked_values()
     assert "wrkspc-detail-sentinel" not in diag.detail
 
 

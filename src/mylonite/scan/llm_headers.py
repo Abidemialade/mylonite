@@ -31,7 +31,7 @@ import re
 from collections.abc import Sequence
 from typing import Final
 
-from mylonite._redaction import clear_secret_values, register_secret_value
+from mylonite._redaction import clear_masked_values, register_masked_value
 
 LLM_HEADERS_ENV: Final = "MYLONITE_LLM_HEADERS"
 
@@ -102,7 +102,7 @@ def configure_llm_headers(cli_values: Sequence[str] | None) -> LLMHeaders:
     global _configured
     _configured = headers
     for _name, value in headers:
-        register_secret_value(value)
+        register_masked_value(value)
     return headers
 
 
@@ -115,7 +115,7 @@ def reset_llm_headers() -> None:
     """Forget the configured headers, their redaction, and the preflight memo."""
     global _configured
     _configured = ()
-    clear_secret_values()
+    clear_masked_values()
     from mylonite.scan.auth_preflight import reset_auth_preflight
     from mylonite.scan.providers import reset_emitted_warnings
 

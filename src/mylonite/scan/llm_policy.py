@@ -134,10 +134,10 @@ class LLMPolicy:
         validate_api_base(self.api_base)
         # Header values are secrets however the policy was built (the CLI
         # registers them too; a library caller building one directly may not).
-        from mylonite._redaction import register_secret_value
+        from mylonite._redaction import register_masked_value
 
         for _name, value in self.extra_headers:
-            register_secret_value(value)
+            register_masked_value(value)
 
     def kwargs(self) -> dict[str, Any]:
         """The dict to spread into a ``litellm.completion``/``acompletion`` call."""

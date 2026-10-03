@@ -16,7 +16,7 @@ import sys
 from dataclasses import dataclass
 from typing import Literal
 
-from mylonite._redaction import mask_secret_values
+from mylonite._redaction import mask_registered_values
 from mylonite.scan.providers import env_vars_for
 
 DiagnosisCategory = Literal[
@@ -46,7 +46,7 @@ class Diagnosis:
 def _detail(exc: BaseException) -> str:
     """``Type: message``, with registered secret values (``--llm-header``
     values) masked: the detail reaches exception messages and reports."""
-    return mask_secret_values(f"{type(exc).__name__}: {exc}")
+    return mask_registered_values(f"{type(exc).__name__}: {exc}")
 
 
 def _isinstance_litellm(exc: BaseException, *names: str) -> bool:
@@ -184,7 +184,7 @@ def _header_remedy(low: str) -> str:
     name = _named_header(low)
     what = f"the {name} header" if name else "a required request header"
     # The header name comes from the provider's text, so mask it at source.
-    return mask_secret_values(
+    return mask_registered_values(
         f"The provider needs {what} with this key (HTTP 400) -- pass "
         f"--llm-header {name or 'NAME'}=<value> or set {LLM_HEADERS_ENV}."
     )
