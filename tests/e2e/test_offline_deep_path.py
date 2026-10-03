@@ -39,9 +39,28 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+#: Set in CI's Windows deep-path job: put the gate dir as deep as `gate`'s own
+#: path check accepts. This run is a single kept finding, so it writes a few
+#: characters short of the modelled bound; what it shows is that no file the
+#: check does not model goes past the limit.
+DEEP_OUT = os.environ.get("MYLONITE_E2E_DEEP_OUT") == "1"
+
+
+def _out_dir(base: Path) -> Path:
+    if not DEEP_OUT:
+        return base / "gate"
+    from mylonite.gate.orchestrator import WINDOWS_MAX_PATH, gate_path_problem
+
+    out = base / "g"
+    assert gate_path_problem(out, limit=WINDOWS_MAX_PATH) is None, f"{base} is already too deep"
+    while gate_path_problem(out.with_name(out.name + "g"), limit=WINDOWS_MAX_PATH) is None:
+        out = out.with_name(out.name + "g")
+    return out
+
+
 @pytest.fixture(scope="module")
 def gate_run(tmp_path_factory: pytest.TempPathFactory) -> Any:
-    out_dir = tmp_path_factory.mktemp("offline-deep-path") / "gate"
+    out_dir = _out_dir(tmp_path_factory.mktemp("offline-deep-path"))
     return counter.run_reference_gate(out_dir)
 
 
@@ -75,3 +94,16 @@ def test_the_emitted_test_passes_offline(gate_run: Any) -> None:
 def test_the_gate_stays_within_its_call_budget(gate_run: Any) -> None:
     total = gate_run.scan.total + gate_run.validate.total
     assert counter.over_budget({"gate": total}, counter.load_baseline()) == []
+
+
+@pytest.mark.skipif(not DEEP_OUT, reason="set MYLONITE_E2E_DEEP_OUT=1 (CI's Windows deep-path job)")
+def test_every_written_path_fits_the_windows_limit(gate_run: Any) -> None:
+    from mylonite.gate.orchestrator import WINDOWS_MAX_PATH, gate_paths
+
+    # The gate dir sits right at the edge the path check allows...
+    assert max(len(str(p)) for p in gate_paths(gate_run.out_dir)) == WINDOWS_MAX_PATH
+    # ...and nothing the run wrote went past the limit.
+    written = list(gate_run.out_dir.parent.rglob("*"))
+    assert written
+    too_long = [p for p in written if len(str(p)) > WINDOWS_MAX_PATH]
+    assert too_long == []

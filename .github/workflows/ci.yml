@@ -282,6 +282,93 @@ jobs:
       - name: Offline deep path, labelled corpus and LLM call counts
         run: pytest tests/e2e/test_offline_deep_path.py tests/corpus tests/test_llm_call_count.py -q
 
+  gate-deep-path-windows:
+    # A committed gate dir has to fit under Windows' 260-character path limit
+    # when the project sits about 200 characters deep. This job turns Windows
+    # long paths off and then:
+    #   1. checks that `gate` refuses a 230-character project root with exit 2,
+    #      before it needs a model (no provider key is set), and that it does
+    #      not refuse a 200-character one;
+    #   2. runs the two-finding offline gate (recording, then `pytest <gate
+    #      dir>` in a fresh process) in a 200-character project root with the
+    #      default .mylonite/gate;
+    #   3. runs the offline gate path with the gate dir as deep as the path
+    #      check accepts, and checks that every file the run wrote fits.
+    # The repository itself is checked out one folder deeper than usual; the
+    # project roots above are built under the workspace, because Mylonite's
+    # own longest file (121 characters) would not fit 200 characters down.
+    # Not a required check, so a docs-only PR skips it outright.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      MYLONITE_OFFLINE_E2E: "1"
+      MYLONITE_E2E_DEEP_OUT: "1"
+      ANTHROPIC_API_KEY: ""
+      OPENAI_API_KEY: ""
+      DEEP_CHECKOUT: a-deep-checkout-folder-standing-in-for-a-long-windows-project-path
+    defaults:
+      run:
+        # Git Bash, so the exit-code checks below read the same as elsewhere.
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: ${{ env.DEEP_CHECKOUT }}
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # uv comes from PyPI at a pinned version: the repository's Actions policy
+      # allows only GitHub-owned actions, so there is no setup-uv step.
+      - name: Install
+        working-directory: ${{ env.DEEP_CHECKOUT }}
+        run: |
+          python -m pip install "uv==0.12.19"
+          uv pip install --system -e ".[dev]" -e ./reference_targets/mcp_kitchen_sink
+      - name: Turn Windows long paths off
+        shell: pwsh
+        run: |
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 0 -Type DWord
+          python -c "from mylonite.gate.orchestrator import _path_limit as f; print('gate path limit:', f()); raise SystemExit(f() != 259)"
+      - name: gate refuses a 230-character project root, accepts a 200-character one
+        working-directory: ${{ env.DEEP_CHECKOUT }}
+        run: |
+          ws="$(cd "$GITHUB_WORKSPACE" && pwd -W)"
+          root_of() { printf '%s/%s' "$ws" "$(printf 'p%.0s' $(seq 1 $(($1 - ${#ws} - 1))))"; }
+          long_out="$(root_of 230)/.mylonite/gate"
+          set +e
+          python -m mylonite gate reference:vulnerable --out "$long_out" 2> refusal.txt
+          code=$?
+          set -e
+          cat refusal.txt
+          if [ "$code" -ne 2 ] || ! grep -q "too long for Windows" refusal.txt; then
+            echo "::error::expected the path refusal with exit 2, got exit $code"
+            exit 1
+          fi
+          test ! -e "$long_out"
+          set +e
+          python -m mylonite gate reference:vulnerable --out "$(root_of 200)/.mylonite/gate" 2> fits.txt
+          set -e
+          cat fits.txt
+          if grep -q "too long for Windows" fits.txt; then
+            echo "::error::a 200-character project root was refused"
+            exit 1
+          fi
+      - name: Two-finding gate in a 200-character project root
+        working-directory: ${{ env.DEEP_CHECKOUT }}
+        # The gate fixture's folder (`two-finding-gate0`, 17 characters) is the
+        # project root, so a 182-character basetemp makes it 200. The collision
+        # test uses a longer folder name and is left to the main test jobs.
+        run: |
+          ws="$(cd "$GITHUB_WORKSPACE" && pwd -W)"
+          base="$ws/$(printf 'b%.0s' $(seq 1 $((182 - ${#ws} - 1))))"
+          pytest tests/gate/test_gate_multi_finding_offline.py -q -p no:cacheprovider --basetemp "$base" -k "not colliding"
+      - name: Offline gate path at the deepest accepted --out
+        working-directory: ${{ env.DEEP_CHECKOUT }}
+        run: pytest tests/e2e/test_offline_deep_path.py -q -p no:cacheprovider --basetemp "$(pwd -W)/.t"
+
   docs-consistency:
     # Guards the command examples embedded IN THE CODE (cli.py's --help epilogs)
     # against the real Typer app. Runs in

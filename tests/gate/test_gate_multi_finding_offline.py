@@ -161,6 +161,24 @@ def test_the_gate_dir_passes_pytest_on_its_first_run_offline(
     assert "2 passed" in run.stdout, run.stdout
 
 
+@pytest.mark.skipif(
+    os.environ.get("MYLONITE_E2E_DEEP_OUT") != "1",
+    reason="set MYLONITE_E2E_DEEP_OUT=1 (CI's Windows deep-path job)",
+)
+def test_every_path_in_the_project_fits_the_windows_limit(
+    two_finding_gate: tuple[Any, Path, list[Any]],
+) -> None:
+    """In CI's deep-path job the project root is 200 characters long. Every
+    file and folder the gate and its pytest run left there must fit."""
+    from mylonite.gate.orchestrator import WINDOWS_MAX_PATH
+
+    _result, out_dir, _captured = two_finding_gate
+    project = out_dir.parent.parent
+    written = list(project.rglob("*"))
+    assert written
+    assert [p for p in written if len(str(p)) > WINDOWS_MAX_PATH] == []
+
+
 def test_colliding_pattern_ids_still_collect_as_two_tests(tmp_path: Path) -> None:
     """Two similar pattern_ids get separate folders and, with the real
     generator, distinct test file names, so pytest collects both."""
