@@ -319,8 +319,13 @@ jobs:
           OLLAMA_API_BASE: http://127.0.0.1:11434
           MYLONITE_TPV_OLLAMA_MODEL: llama3.2:3b
         run: |
-          python -m pip install "openai-agents[litellm]==0.22.3" "fastapi==0.142.2" "uvicorn==0.54.0" "litellm==1.103.2"
-          python -m uvicorn verification.third_party.shims.openai_agents_ollama_shim:app \
+          # The agent under test gets its own virtualenv: it is the target, not
+          # Mylonite, and its openai-agents pin needs a newer `openai` than the
+          # LiteLLM Mylonite uses. Sharing one environment made pip refuse both.
+          python -m venv "$RUNNER_TEMP/tpv-shim-venv"
+          SHIM_PY="$RUNNER_TEMP/tpv-shim-venv/bin/python"
+          "$SHIM_PY" -m pip install --quiet "openai-agents[litellm]==0.22.3" "fastapi==0.142.2" "uvicorn==0.54.0"
+          "$SHIM_PY" -m uvicorn verification.third_party.shims.openai_agents_ollama_shim:app \
             --host 127.0.0.1 --port 8099 &
           for _ in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:8099/docs && break; sleep 1; done
 
