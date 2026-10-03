@@ -15,6 +15,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -434,6 +435,119 @@ def test_committed_TRENDS_md_is_current() -> None:
         "verification/TRENDS.md is stale. Regenerate it with "
         "`python -m verification.trends` and commit the result."
     )
+
+
+# --------------------------------------------------------------------------- #
+# The third-party campaign section
+# --------------------------------------------------------------------------- #
+
+
+def _write_third_party_results(
+    results_root: Path,
+    version: str,
+    *,
+    rollups: dict[str, dict[str, Any]] | None = None,
+    product_issues: list[dict[str, Any]] | None = None,
+    spend: dict[str, dict[str, float]] | None = None,
+    recorded_at: str = "2026-10-03",
+) -> Path:
+    version_dir = results_root / version / "third-party"
+    version_dir.mkdir(parents=True, exist_ok=True)
+    data = {
+        "schema_version": "1.0",
+        "recorded_at": recorded_at,
+        "rollups": rollups
+        if rollups is not None
+        else {
+            "tpv-server-memory/anthropic": {"result": "KEPT", "met_bar": True},
+            "tpv-streamablehttp/anthropic": {"result": "PRODUCT_DEFECT", "met_bar": True},
+        },
+        "product_issues": product_issues if product_issues is not None else [{"state": "open"}],
+        "spend_counted_usd": spend
+        if spend is not None
+        else {"anthropic": {"cost_usd": 0.91}, "openai": {"cost_usd": 0.08}},
+    }
+    results_path = version_dir / "results.json"
+    results_path.write_text(json.dumps(data), encoding="utf-8")
+    return results_path
+
+
+def test_third_party_section_renders_kept_targets_and_spend(tmp_path: Path) -> None:
+    results_root = tmp_path / "results"
+    _write_third_party_results(results_root, "0.12.0")
+
+    table = render_trends(results_root)
+
+    assert "## Third-party verification campaigns" in table
+    row = next(line for line in table.splitlines() if line.startswith("| 0.12.0"))
+    assert "`tpv-server-memory`" in row
+    assert "`tpv-streamablehttp`" not in row  # PRODUCT_DEFECT, not a KEPT bar
+    assert "1 (1 open)" in row
+    assert "anthropic $0.91" in row
+    assert "openai $0.08" in row
+
+
+def test_third_party_only_version_is_not_reported_as_skipped(tmp_path: Path) -> None:
+    """A version directory holding ONLY third-party evidence (no top-level
+    meta.json -- the real 0.12.0 shape) must render its own row, never a
+    "skipped: no meta.json" note, which would misread a deliberate shape as a
+    broken commit."""
+    results_root = tmp_path / "results"
+    _write_third_party_results(results_root, "0.12.0")
+
+    table = render_trends(results_root)
+
+    assert "skipped" not in table.lower()
+
+
+def test_third_party_section_absent_when_no_campaign_committed(tmp_path: Path) -> None:
+    results_root = tmp_path / "results"
+    _write_meta(results_root, "0.9.0")
+    _write_layer_summaries(results_root, "0.9.0")
+
+    table = render_trends(results_root)
+
+    assert "Third-party verification campaigns" not in table
+
+
+def test_third_party_and_academic_evidence_can_coexist_for_one_version(
+    tmp_path: Path,
+) -> None:
+    results_root = tmp_path / "results"
+    _write_meta(results_root, "0.50.0")
+    _write_layer_summaries(results_root, "0.50.0")
+    _write_third_party_results(results_root, "0.50.0")
+
+    table = render_trends(results_root)
+
+    assert any(line.startswith("| 0.50.0") for line in table.splitlines()[:5])
+    assert "## Third-party verification campaigns" in table
+
+
+def test_third_party_unreadable_results_json_is_noted_not_silent(tmp_path: Path) -> None:
+    results_root = tmp_path / "results"
+    bad_dir = results_root / "0.12.0" / "third-party"
+    bad_dir.mkdir(parents=True)
+    (bad_dir / "results.json").write_text("{not json", encoding="utf-8")
+
+    table = render_trends(results_root)
+
+    assert "skipped" in table.lower()
+    assert "0.12.0" in table
+
+
+def test_committed_third_party_section_is_current() -> None:
+    """Same idiom as ``test_committed_TRENDS_md_is_current``, for the new
+    section: the committed file must match a fresh render of the committed
+    ``verification/results/`` tree."""
+    from verification.trends import render_trends
+
+    results_root = ROOT / "verification" / "results"
+    committed = (ROOT / "verification" / "TRENDS.md").read_text(encoding="utf-8")
+
+    regenerated = render_trends(results_root)
+
+    assert regenerated in committed
 
 
 def test_the_trend_table_shows_both_injecagent_splits() -> None:

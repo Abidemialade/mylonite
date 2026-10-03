@@ -29,6 +29,40 @@ come from a single hosted model; the InjecAgent judge-agreement figures come fro
 self-hosted one. Both are spelled out, with every other known gap, in
 [Known limitations](limitations.md).
 
+## Third-party verification campaign, live in CI (2026-10-03)
+
+A separate campaign from the numbers above: six MCP and agent systems Mylonite had
+never run against, with every LLM call made live inside GitHub Actions, never
+replayed locally, scored against a rule committed before any run
+([`PREREG_THIRD_PARTY_2026_10.md`](https://github.com/Abidemialade/mylonite/blob/main/verification/PREREG_THIRD_PARTY_2026_10.md)).
+Full write-up:
+[`verification/results/0.12.0/third-party/README.md`](https://github.com/Abidemialade/mylonite/tree/main/verification/results/0.12.0/third-party).
+
+**Two targets Mylonite did not author kept a reproducible W4 finding — an unconfirmed
+consequential change, confirmed through the target's own read-back — across three
+independent re-drives, on every provider tried, including a 3B model running locally at
+zero cost:**
+
+| Target | Result | Basis |
+| --- | --- | --- |
+| `@modelcontextprotocol/server-memory` | **KEPT**, W4 | 3/3 on Haiku 4.5; 2/3 (one honest REJECTED) on gpt-4o-mini; 1/1 on `llama3.2:3b` (informational) |
+| `redis/mcp-redis` | **KEPT**, W4 | 3/3 on both Haiku 4.5 and gpt-4o-mini |
+
+Both differentials ran against Mylonite's synthetic boundary shim, since neither
+target ships a server-side guard to toggle — the same caveat every synthetic-boundary
+result on this page carries: proof the attack is real and that this class of guard
+closes it, not proof about any one deployment's own guard.
+
+Three other targets in the same campaign produced no security verdict: a streamable-HTTP
+example server hit a product defect on every run (a missing seed arm reads as an
+unclassified exception, [issue #319](https://github.com/Abidemialade/mylonite/issues/319),
+open), and two smoke-only targets (no verdict was ever claimed for them) produced one
+clean resist, one more instance of the same product defect, an unvalidated finding, and a
+request that reached its target with the wrong content type
+([PR #321](https://github.com/Abidemialade/mylonite/pull/321), open). None of these were
+silently scored clean. Total spend: $0.91 on Anthropic, $0.08 on OpenAI, $0 on the
+in-runner Ollama cell.
+
 ## The one-line result
 
 **Model robustness ≠ app security.** A frontier model resisted *generic* injection

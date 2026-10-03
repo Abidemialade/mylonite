@@ -148,8 +148,60 @@ nothing left the machine).
    at the adapter boundary (the standard single-build check), not a second real build — the same
    honest caveat as always.
 
+## Run log — 2026-10-03 (third-party verification campaign, six systems, every LLM call live in CI)
+
+Full write-up, per-cell numbers and sources:
+[`results/0.12.0/third-party/README.md`](results/0.12.0/third-party/README.md). Rule:
+[`PREREG_THIRD_PARTY_2026_10.md`](PREREG_THIRD_PARTY_2026_10.md). Six systems Mylonite had
+never run against before — `@modelcontextprotocol/server-memory`, `redis/mcp-redis`, the
+MCP Python SDK's `simple-streamablehttp` example, `@modelcontextprotocol/server-everything`,
+the MCP Go SDK's memory example, and the OpenAI Agents SDK driving a local Ollama model over
+`rest` — on `claude-haiku-4-5-20251001`, `gpt-4o-mini`, and (one cell) `llama3.2:3b`.
+
+- **#4 control-efficacy check — ✅✅ KEPT, twice, on targets we did not author.**
+  `server-memory` and `mcp-redis` each kept a W4 finding (an unconfirmed consequential
+  change, confirmed through the target's own read-back) across 3 independent re-drives,
+  on every provider tried, meeting the pre-registered ≥2/3 bar every time — including the
+  one `gpt-4o-mini` run on `server-memory` that read REJECTED honestly (the guarded side
+  leaked nothing, but the effect probe's own calibration failed, so 2 of 3 guarded runs
+  reached no verdict at all; `validate`'s text wrongly said the guard "did not block",
+  fixed in PR #318). The differential used Mylonite's synthetic boundary shim on both
+  targets (neither ships a server-side guard to toggle) — the same honest caveat as every
+  other synthetic-boundary result on this page.
+- **#2 W4 detection — ✅ PASS, twice.** Both catches above are also external W4 detection:
+  a destructive knowledge-graph edit on `server-memory`, an unconfirmed `delete`/`expire`/
+  `rename` on `mcp-redis`.
+- **#1 scaffold + #3 transport — ✅ PASS** on every target that supports `--scaffold`
+  (targets 1, 2, 4, 5; target 3 is a remote `http` server with no scaffold path for that
+  transport yet, a documented CLI gap, not a run failure).
+- **A third target, `simple-streamablehttp` — ❌ product defect, not a security result,
+  reproduced 3/3 on both providers.** `scan --allow-no-seed-arm` is meant to record a
+  seed with no planting arm as a clean skip; instead the exception it raises is wrapped in
+  nested `asyncio` task groups the attempt classifier doesn't unwrap, so the attempt reads
+  as an unclassified `planner_exception`. The printed coverage line still names the right
+  reason code (no false clean), but the per-attempt record doesn't carry it, so the
+  campaign's own scorer counts the run as a product defect. Logged as issue #319 (open).
+  The same root cause produced one more product defect on the `server-everything` smoke
+  cell (a target-side crash this time, not a missing seed arm).
+- **Two smoke cells (`server-everything`, `go-sdk` memory, the Agents-SDK-on-Ollama
+  target) ran and claimed no verdict, exactly as pre-registered.** `go-sdk` memory found a
+  W4 candidate on both providers but couldn't validate it (effect-probe calibration
+  failed) — a candidate under never-keep-unproven, never a verdict. The Agents-SDK cell
+  hit a harness install conflict first (fixed, PR #320, merged), then a real product bug
+  on the re-run: the `rest` adapter sent no JSON content-type header, so the target
+  rejected the request with HTTP 422 before any LLM call (PR #321, open).
+- **Spend:** $0.91 on Anthropic (173 calls), $0.08 on OpenAI (211 calls), $0 on the
+  in-runner Ollama cell — both providers well inside the campaign's $4.50/$5.00 budget.
+
+**This is the first campaign where every counted LLM call ran live inside CI** — the
+committed `third-party-campaign.yml` workflow, never a local replay.
+
 ## Headline numbers (fill as runs complete)
 
+- **Third-party campaign, live in CI (2026-10-03):** ✅✅ **KEPT, twice, each across 3
+  independent re-drives on every provider tried** — `@modelcontextprotocol/server-memory`
+  and `redis/mcp-redis`, both W4. Full numbers, caveats and product-bug links:
+  [`results/0.12.0/third-party/README.md`](results/0.12.0/third-party/README.md).
 - **Detection (MCPSecBench `maliciousadd`):** ✅ **1 W1 finding** caught with Haiku on a
   third-party target — the external detection proof. (Recall over the full MCPSecBench server
   set: pending more servers.)
@@ -237,6 +289,17 @@ nothing left the machine).
    evidence in the *reason* text an operator reads. (b) `gpt-oss:20b` is **unusable in any
    LLM role here**: it returns empty `message.content` (its output routes to a reasoning
    field), so it fails silently rather than loudly.
+
+9. **"Correctly named in the console, missing from the record" is its own failure mode.**
+   The 2026-10-03 third-party campaign's dominant finding wasn't a missed attack — it was
+   that an attempt's own stored record can lack the reason code its printed coverage line
+   already names, so a harness that (correctly, per the prereg) scores from the record
+   alone reads a clean skip as a product defect. Two independent causes produced the same
+   symptom (a missing `seed_arm` on one target, a target-side transport crash on another),
+   both landing in the same unclassified `planner_exception` bucket (issue #319, open).
+   The lesson generalizes past this campaign: a coverage summary that explains an attempt
+   is not the same claim as an attempt record that explains itself, and only the latter is
+   safe to score automatically.
 
 ## How to run
 

@@ -849,6 +849,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ASI Top 10 entries, and 2 MITRE ATLAS techniques are ever emitted, and `W4`
   carries no ATLAS technique at all. `docs/reading-results.md`'s compliance
   section links to it with the same wording.
+- **The first third-party verification campaign's results are committed.**
+  `scan`, `generate` and `validate`, unmodified, ran live in CI against six
+  MCP and agent systems Mylonite had never run against before. Two —
+  `@modelcontextprotocol/server-memory` and `redis/mcp-redis` — kept a
+  reproducible W4 finding across three independent re-drives, on every
+  provider tried, including a 3B model running locally at zero cost. Full
+  numbers, caveats, and the three product bugs it surfaced:
+  `verification/results/0.12.0/third-party/README.md`, with
+  `verification/CAPABILITY_MATRIX.md`, `verification/FINDINGS.md` and
+  `verification/TRENDS.md` (now carrying a third-party section alongside the
+  academic one) updated to match.
 
 ## [0.11.0] - 2026-10-01
 
