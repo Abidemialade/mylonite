@@ -2365,6 +2365,60 @@ def test_validate_preflight_reports_the_rate_limit_category(
     assert failure.category == "rate_limit"
 
 
+def test_validate_reachability_preflight_applies_the_configured_api_base(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T7 repro: standalone `validate` against a reference target failed
+    4/4 on a local model that `scan` used fine, because the reachability
+    preflight ran outside `llm_scope` and ignored a configured `api_base` --
+    a perfectly reachable custom endpoint (a remote Ollama, a self-hosted
+    vLLM, an OpenAI-compatible proxy) read as 'provider unreachable'."""
+    import litellm
+
+    calls: list[dict[str, Any]] = []
+
+    async def fake(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        message = SimpleNamespace(content="ok", tool_calls=None)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)], usage=None)
+
+    monkeypatch.setattr(litellm, "acompletion", fake)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
+    monkeypatch.setenv(
+        "MYLONITE_API_BASE", "http://example-llm-host:9999"
+    )  # allow-literal: example
+    out_dir = _generated_dir(tmp_path)
+    _patch_validator(monkeypatch, kept=True)
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert calls, "the reachability preflight never made a call"
+    assert all(
+        c.get("api_base") == "http://example-llm-host:9999"  # allow-literal: example
+        for c in calls
+    ), calls
+
+
+def test_validate_banner_names_the_configured_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """V2: the pre-run banner named "(Haiku)" regardless of `--model`; it now
+    names the model the run actually resolved."""
+    out_dir = _generated_dir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+    _patch_validator(monkeypatch, kept=True)
+
+    model = "anthropic/claude-haiku-test"
+    result = runner.invoke(app, ["validate", str(out_dir), "--model", model])
+
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    out = result.stderr or result.output
+    assert model in out
+    assert "Haiku)" not in out
+
+
 def test_scan_exits_nonzero_when_every_attempt_errored_without_formal_abort(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

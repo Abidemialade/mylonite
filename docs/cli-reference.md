@@ -324,6 +324,14 @@ stuck or slow run is cut off cleanly, is reported as reaching no verdict, never
 counts as the guard resisting, and never hangs the job. The robustness re-drives
 and the fixture recording have their own call budget instead).
 
+Before any live run, `validate` prints a banner naming the model it resolved
+(`--model`/`mylonite.yaml`/`MYLONITE_MODEL`) and checks that model — and the planner,
+customiser and judge models when they differ — is reachable with one tiny completion
+each, not a full scan, so a slow-but-working model (a local or self-hosted one in
+particular) answers well inside `--iteration-timeout` instead of being misdiagnosed as
+unreachable. The check honours a configured `api_base` (see
+[Self-hosted models](self-hosted-models.md)).
+
 The report's notes record the models the test was proved against
 (`validated against model: <planner>`, plus the customiser and judge when they differ).
 To re-prove a committed test after a model change, see

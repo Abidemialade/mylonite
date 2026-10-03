@@ -462,7 +462,11 @@ output boundary as every other message (see
 [Self-hosted models](self-hosted-models.md#the-approved-provider-registry)). The message describes
 the last failed call, so a streak that mixed causes is reported by its final one. `validate` checks the provider before it starts and
 gives the same messages; for a rate limit it suggests fewer `--iterations`, and a check
-that stalls past its timeout reads as unreachable.
+that stalls past its timeout reads as unreachable. The check itself is one tiny completion
+per role model (planner, customiser and judge can each run on a different model), not a
+full scan, so a slow-but-working model answers well inside the timeout; it honours a
+configured `api_base`, so a self-hosted or proxied model is actually asked rather than
+silently checked against the default endpoint.
 
 ## SARIF 2.1.0 — `--sarif` (GitHub code scanning)
 

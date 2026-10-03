@@ -347,6 +347,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`validate`'s provider check no longer mistakes a slow model for an
+  unreachable one, and now reaches a custom `api_base`.** On the reference
+  path it used to run a full nine-seed scan under the same timeout meant for
+  one tiny call, so a model that was up but slow (a local one especially)
+  could outrun the bound and get the credentials hint instead of a timeout
+  message. It's now one small completion per role model (planner, customiser
+  and judge, when they differ), the same check the custom-target path already
+  used — and, on both paths, that check is scoped to the run's own
+  `api_base`, which it previously ignored: a working self-hosted or proxied
+  model used to read as unreachable. The pre-run banner also names the model
+  the run resolved instead of a generic line.
 - **An attack carried out through a tool named like a read no longer reads
   RESISTED (#297).** The trace used to count a call as a read when a read word
   appeared anywhere in the tool's name, so an undeclared `post_to_thread`

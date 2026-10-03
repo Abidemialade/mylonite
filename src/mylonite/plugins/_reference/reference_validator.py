@@ -279,13 +279,19 @@ def validated_model_stamp(planner: str, customiser: str, judge: str) -> str:
     return stamp
 
 
-def workload_message(iterations: int, *, fast: bool) -> str:
-    """The pre-run statement of what a reference ``validate`` will drive."""
+def workload_message(iterations: int, *, model: str, fast: bool) -> str:
+    """The pre-run statement of what a reference ``validate`` will drive.
+
+    V2: names the model actually configured (via ``--model``/
+    ``mylonite.yaml``/``MYLONITE_MODEL``) instead of a generic "the model you
+    configured", which used to read as hardcoded "(Haiku)" regardless of
+    ``--model`` before PR1/PR2 removed the default.
+    """
     perturbations = 1 if fast else len(_deterministic_strategies())
     return (
         f"validate runs {iterations} iterations x 2 twins live, each a full "
         f"scan, plus {perturbations} metamorphic re-drive(s) x 2 twins, against "
-        "the model you configured; needs a configured provider -- see "
+        f"{model}; needs a configured provider -- see "
         "docs/cli-reference.md. LLM calls and tokens are reported at the end."
     )
 
