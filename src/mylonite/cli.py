@@ -3056,6 +3056,21 @@ def gate(
                 f"See SECURITY.md. {bundled_authorize_fix(target)}"
             )
             raise typer.Exit(code=EXIT_CONFIG)
+        # #224: a bundled target has no target.yaml for the gate to commit, so
+        # the scaffolded workflow would have nothing to check out and no
+        # per-secret env wiring for the server's credentials -- it cannot
+        # launch in CI. Refuse the combination up front, before the adapter is
+        # built or any LLM call is made, rather than spend a whole scan on a
+        # PR that can't run. The non-PR path (plain `gate mcp:<family>`) is
+        # unaffected.
+        if open_pr or workflows:
+            echo_err(
+                f"gate: committing a gate for a bundled target ({target!r}) needs a "
+                "target file -- a scaffolded workflow has no file to check out or wire "
+                "secrets into, so it can't launch in CI. Run `mylonite scan --scaffold "
+                "<path>` to write one, then gate with --target-file <path> --open-pr."
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
         adapter_factory = functools.partial(
             _build_adapter_for_mcp, target, authorize, effective_planner_model
         )
