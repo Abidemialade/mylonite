@@ -1487,7 +1487,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         tool_annotations: Mapping[str, Mapping[str, object]] | None = None,
     ) -> dict[str, str]:
         """``trace_outcome`` / ``link`` / ``marker_kind`` / ``marker_linked`` /
-        ``calibrated`` / ``seed_control`` evidence, stamped by both ``invoke()`` and
+        ``calibrated`` / ``confirm_capable`` / ``seed_control`` evidence, stamped by both ``invoke()`` and
         ``drive_planner`` from the planner trace each already built.
 
         Cheap and pure over data already in hand (no new tool calls): the
@@ -1620,6 +1620,14 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             allowed_hosts=allowed_hosts,
         )
         calibrated = cal is not None and cal.calibrated and dispatched <= set(cal.certified_tools)
+        # Whether calibration showed the probe sees a write land in the record
+        # it reads. Independent of which tools this attempt dispatched: it lets
+        # a change the probe saw raise a dispatch to "effect-confirmed" under
+        # the verdict rule's own guard, and it never clears one.
+        confirm_capable = cal is not None and cal.status in (
+            calibration.STATUS_CERTIFIED,
+            calibration.STATUS_CONFIRM_ONLY,
+        )
         seed_control_status = (
             cal.seed_control.status if cal is not None else calibration.SEED_NOT_RUN
         )
@@ -1629,6 +1637,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             "marker_kind": marker_kind_value,
             "marker_linked": "true" if marker_linked else "false",
             "calibrated": "true" if calibrated else "false",
+            "confirm_capable": "true" if confirm_capable else "false",
             "any_deferred": "true" if any_deferred else "false",
             "seed_control": seed_control_status,
         }
