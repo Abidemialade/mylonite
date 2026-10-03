@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **A CI rehearsal now runs the launch journey exactly as the docs write
+  it.** `rehearsal.yml` (manual dispatch) runs
+  `verification/rehearsal/journey.sh` on clean Linux and Windows runners,
+  against the official MCP memory server and the reference app, with
+  Anthropic, OpenAI or a local Ollama model. A reader holding only
+  `docs/journey/` wrote the script, so a failing cell points at a docs gap.
+  Step 6 now shows the per-scan cap on `gate` and the git identity a fresh
+  repository needs before committing.
+
 - **The seven-step journey (`docs/journey/`) now stands on its own.** A
   reader who follows only those eight pages, start to finish, can run the
   whole thing without opening any other doc: two worked, copy-pasteable
