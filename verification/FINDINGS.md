@@ -114,10 +114,10 @@ write-up: [`results/0.12.0/third-party/README.md`](results/0.12.0/third-party/RE
 | --- | --- | --- |
 | `@modelcontextprotocol/server-memory` | **KEPT**, W4 | 3/3 re-drives on Haiku 4.5; 2/3 (one honest REJECTED) on gpt-4o-mini; 1/1 on `llama3.2:3b` (informational) |
 | `redis/mcp-redis` | **KEPT**, W4 | 3/3 on both Haiku 4.5 and gpt-4o-mini |
-| `simple-streamablehttp` (MCP Python SDK example) | product defect, not a verdict | 3/3 on both providers — a missing seed arm reads as an unclassified exception (issue #319, open), not a false clean |
+| `simple-streamablehttp` (MCP Python SDK example) | product defect, not a verdict | 3/3 on both providers — a missing seed arm reads as an unclassified exception (issue #319, fixed after the measured build in #322), not a false clean |
 | `@modelcontextprotocol/server-everything` (smoke) | 1 clean resist, 1 product defect | the Haiku run hit a target-side transport crash, same root cause as issue #319 |
 | MCP Go SDK memory example (smoke) | finding, unvalidated | W4 fired on both providers; effect-probe calibration failed, so it is a candidate under never-keep-unproven, never a verdict |
-| OpenAI Agents SDK agent on Ollama (smoke) | product defect, two causes | a harness install conflict (fixed, PR #320), then a request missing its JSON content type (PR #321, open) |
+| OpenAI Agents SDK agent on Ollama (smoke) | product defect, two causes | a harness install conflict (fixed, PR #320), then a request missing its JSON content type (fixed after the measured build in PR #321) |
 
 **Two targets Mylonite did not author kept a reproducible W4 finding — an
 unconfirmed consequential change, confirmed through the target's own

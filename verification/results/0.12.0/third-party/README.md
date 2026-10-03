@@ -65,8 +65,8 @@ names the right reason code (`MYL-NT-002`), so no scan read falsely clean — bu
 the per-attempt record carries no code of its own, so this page's own scorer
 (which requires the code on the attempt, not just the summary line) counts the
 run as a product defect. Logged as
-[issue #319](https://github.com/Abidemialade/mylonite/issues/319), open at the
-time of this write-up.
+[issue #319](https://github.com/Abidemialade/mylonite/issues/319) and fixed after
+the measured build in [PR #322](https://github.com/Abidemialade/mylonite/pull/322).
 
 ## Targets 4–6: N=1 smoke cells (no verdict claimed)
 
@@ -91,9 +91,8 @@ spent). Fixed by installing the shim in its own virtualenv
 re-run reached the target and failed there instead: the `rest` adapter's
 request carried no JSON content-type header, the target agent rejected it with
 HTTP 422, and the one attempt errored before any Mylonite LLM call ($0 spent).
-A fix is open as
-[PR #321](https://github.com/Abidemialade/mylonite/pull/321), not yet merged
-at the time of this write-up.
+Fixed after the measured build in
+[PR #321](https://github.com/Abidemialade/mylonite/pull/321).
 
 ## Harness issues, not product issues
 
@@ -138,7 +137,8 @@ Both are well inside the prereg's $4.50 / $5.00 allocation for this campaign.
   guard.
 - **The Ollama cell on `server-memory` is one run, reported for information.**
   It is not held to the N=3 bar and is not re-driven.
-- **Issues #319 and #321 are open, not fixed, as of this write-up.** Neither
+- **Both product defects were fixed after the measured build** (#322 and #321);
+  the results above are for the measured build and are not re-scored. Neither
   defect produced a false-clean result: every affected run still printed the
   correct reason code to its console output, even where the per-attempt record
   and this page's scorer disagreed about whether that was enough to call the
