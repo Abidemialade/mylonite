@@ -317,6 +317,14 @@ for a `vulnerable_launch` twin.
     - **`destructive_tools`** — sinks where an injection-driven call is damage in itself
       (delete/overwrite/transfer). These refuse untrusted context outright. Inferred
       from MCP's `destructiveHint` and name hints when you don't declare them.
+    - **`accepts_untrusted_tools`** — the opposite exemption: tools explicitly cleared to
+      act on untrusted content regardless of taint state. Declare a tool here only when
+      it is genuinely safe to drive from untrusted input, for example a summarizer with
+      no side effect — it is never refused for acting on untrusted content once listed.
+    - **`description_pins`** — tool name to the sha256 hex digest of its approved
+      description text (W1). A tool whose live description hash no longer matches its
+      pin is refused at call time — the deterministic answer to a rug-pull, where a
+      tool's description changes after a user already approved it.
   `verdict_read_tools` is separate from every control. It names tools whose calls the
   effect verdict counts as reads, not as an action the attack could carry out, for a
   reader whose name it cannot tell from an action (`web_search`, `fetch_note`). No
