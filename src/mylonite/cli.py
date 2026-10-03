@@ -313,6 +313,13 @@ def _load_env_file(path: Path) -> None:
     An explicitly-passed flag OVERRIDES an ambient value (standard CLI
     precedence: explicit > ambient — the exact case the flag exists for is a
     wrong key already in the shell), warning on stderr when it does.
+
+    A recognised key whose value is an UNRESOLVED ``${VAR}``-shaped
+    placeholder (a templating tool's reference that was never substituted —
+    see :func:`mylonite._redaction.is_unresolved_var_placeholder`) is a clear
+    error naming the key and the file, not a silent load: that literal text is
+    never a usable credential, and sending it to a provider as one fails
+    confusingly at best (#183).
     """
     from mylonite.scan.providers import looks_like_provider_env_var
 
@@ -339,6 +346,17 @@ def _load_env_file(path: Path) -> None:
         if not _recognised(key):
             dropped.append(key)
             continue
+        from mylonite._redaction import is_unresolved_var_placeholder
+
+        if is_unresolved_var_placeholder(value):
+            echo_err(
+                f"{path} sets {key} to the unresolved placeholder {value!r}, not a real "
+                "value. Mylonite never sends a ${VAR}-shaped placeholder to a provider "
+                "as a literal credential: resolve the referenced variable first (set it "
+                f"in the environment and substitute it into the file), or put the real "
+                f"value in {key} directly."
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
         if key in os.environ and os.environ[key] != value:
             echo_err(f"warning: overriding ambient {key} with the value from {path}.")
         os.environ[key] = value
@@ -1062,6 +1080,27 @@ def scan(
     planner_model = planner_model or env_rc.planner_model
     customiser_model = customiser_model or env_rc.customiser_model
     judge_model = judge_model or env_rc.judge_model
+
+    # #183: --command/--arg/--env build an INLINE mcp:custom target. Once
+    # --target-file is also given (and this isn't --scaffold, which uses these
+    # flags to BUILD the file in the first place), the file's own
+    # command/args/env always win and these three were silently ignored, with
+    # no sign the flag you passed had no effect. Refuse instead, naming
+    # exactly the flag(s) passed and the fix — checked here, before any model
+    # is resolved/required, like the scaffold-mode check above it.
+    if target_file is not None and scaffold is None:
+        _ignored_with_target_file = [
+            flag for flag, val in (("--command", command), ("--arg", arg), ("--env", env)) if val
+        ]
+        if _ignored_with_target_file:
+            flags_named = ", ".join(_ignored_with_target_file)
+            echo_err(
+                f"scan: {flags_named} {'has' if len(_ignored_with_target_file) == 1 else 'have'} "
+                "no effect together with --target-file -- the file's own command/args/env "
+                "always win. Put the launch override in the target file's env: block "
+                "instead, or drop --target-file to build the target from these flags."
+            )
+            raise typer.Exit(code=EXIT_CONFIG)
 
     # Scaffold mode: introspect a custom MCP server and write a starter target.yaml
     # instead of scanning. No LLM call and no attack, so it does NOT require
