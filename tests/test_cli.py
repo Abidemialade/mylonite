@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 import typer
+from tests.gate._proven import proven_legs
 from typer.testing import CliRunner
 
 import mylonite
@@ -25,6 +26,7 @@ from mylonite.cli import (
     EXIT_SUCCESS,
     app,
 )
+from mylonite.exit_codes import EXIT_GATE_KEPT
 
 runner = CliRunner()
 
@@ -5425,7 +5427,9 @@ def _stub_differential_validator(monkeypatch: pytest.MonkeyPatch, target: str) -
             captured.update(kw)
 
         def validate(self, *_a: Any, **_k: Any) -> Any:
-            return ValidationReport(test_filename="test_security_x.py", kept=True)
+            return ValidationReport(
+                test_filename="test_security_x.py", kept=True, outcomes=proven_legs()
+            )
 
     monkeypatch.setattr(target, _StubValidator)
     return captured
@@ -5699,7 +5703,7 @@ def test_gate_raw_side_honours_control_env(tmp_path: Path, monkeypatch: pytest.M
                 "--no-workflows",
             ],
         )
-        assert result.exit_code == EXIT_SUCCESS, result.output
+        assert result.exit_code == EXIT_GATE_KEPT, result.output
         assert captured.get("control_weakness") == "W2"
         assert captured.get("guarded_is_server_layer") is True
         # The core assertion: build the adapter gate actually WOULD drive the raw
@@ -5794,7 +5798,7 @@ def test_gate_bundled_mcp_route_validates_a_real_finding(
                 "--no-workflows",
             ],
         )
-        assert result.exit_code == EXIT_SUCCESS, result.output
+        assert result.exit_code == EXIT_GATE_KEPT, result.output
         out = result.stderr or result.output
         assert "internal:" not in out
     finally:
@@ -5845,7 +5849,7 @@ def test_gate_reference_and_custom_use_the_same_vuln_threshold_formula(
                 "--no-workflows",
             ],
         )
-        assert ref_result.exit_code == EXIT_SUCCESS, ref_result.output
+        assert ref_result.exit_code == EXIT_GATE_KEPT, ref_result.output
 
         mcp_captured = _stub_differential_validator(
             monkeypatch, "mylonite.plugins._reference.reference_validator.DifferentialValidator"
@@ -5864,7 +5868,7 @@ def test_gate_reference_and_custom_use_the_same_vuln_threshold_formula(
                 "--no-workflows",
             ],
         )
-        assert mcp_result.exit_code == EXIT_SUCCESS, mcp_result.output
+        assert mcp_result.exit_code == EXIT_GATE_KEPT, mcp_result.output
 
         expected = max(1, 4 - 1)
         assert reference_captured.get("vuln_threshold") == expected
@@ -6089,7 +6093,7 @@ def test_gate_and_validate_produce_identical_twin_plans(
                 "--no-workflows",
             ],
         )
-        assert result.exit_code == EXIT_SUCCESS, result.output
+        assert result.exit_code == EXIT_GATE_KEPT, result.output
         gate_raw_env = gate_captured["target_adapter_factory"]()._launch_env
         gate_guarded_env = gate_captured["guarded_adapter_factory"]()._launch_env
 
@@ -6185,7 +6189,7 @@ def test_gate_fast_passes_fast_to_plan_twins_in_validate_fn(
                 "--fast",
             ],
         )
-        assert result.exit_code == EXIT_SUCCESS, result.output
+        assert result.exit_code == EXIT_GATE_KEPT, result.output
         assert calls == [{"weakness": None, "fast": True}]
     finally:
         target_registry.clear_runtime_targets()

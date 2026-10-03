@@ -50,4 +50,13 @@ jobs:
         run: |
           git config user.email ci@example.com
           git config user.name ci
+          # Exit 9 means a proven finding was kept and its gate test written,
+          # which is what this run exists to show. Anything else fails.
+          set +e
           mylonite gate reference:vulnerable --no-workflows --out .mylonite/gate
+          code=$?
+          set -e
+          if [ "$code" -ne 9 ]; then
+            echo "::error::expected exit 9 (a proven finding was gated), got exit $code"
+            exit 1
+          fi
