@@ -50,7 +50,7 @@ from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
 from mylonite.scan._llm import BudgetExceededError
 from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped, SeedArmUnavailable
 from mylonite.scan.class_verdict import CalibrationSummary
-from mylonite.scan.control_shim import BoundaryControl, ControlServerShim
+from mylonite.scan.control_shim import DEFAULT_FETCH_ALLOWLIST, BoundaryControl, ControlServerShim
 from mylonite.scan.effect_verdict import (
     LinkResult,
     TraceOutcome,
@@ -1409,6 +1409,13 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             if control_config
             else ()
         )
+        # The #304 argument check's "outside the target" bar: the operator's
+        # own egress allowlist (falling back to the same default the W3
+        # control itself falls back to), so a destination argument pointing
+        # at a host the operator already approved never reclassifies a read.
+        allowed_hosts: tuple[str, ...] = (
+            control_config.fetch_allowlist if control_config else DEFAULT_FETCH_ALLOWLIST
+        )
         # The seed's own named tool is consequential for this attempt, whatever
         # its name suggests: a call to it is a dispatch, never an exempt read.
         if seed_tool_name and seed_tool_name not in consequential:
@@ -1442,6 +1449,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             # The target's own deferral wording counts as well as the defaults,
             # so a call it answers "job accepted" reads deferred, not carried out.
             deferred_markers=_reply_deferral_words(probe),
+            allowed_hosts=allowed_hosts,
         )
         # One deferred call next to one that went through reads dispatched-ok
         # above; the verdict rule still needs to know about the deferred one.
@@ -1452,6 +1460,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             tool_annotations=tool_annotations,
             verify_tool=verify_tool,
             deferred_markers=_reply_deferral_words(probe),
+            allowed_hosts=allowed_hosts,
         )
         # When some calls were held or queued, only a call that went through can
         # tie this attempt to a dispatch: a queued send carrying the attacker's
@@ -1475,6 +1484,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             tool_annotations=tool_annotations,
             verify_tool=verify_tool,
             consequential_tool_names=consequential,
+            allowed_hosts=allowed_hosts,
         )
         marker_kind_value = _marker_kind(probe.expect_marker if probe is not None else None)
         # Whether a call carries the probe's OWN marker, not just any token. A
@@ -1489,6 +1499,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 tool_annotations=tool_annotations,
                 verify_tool=verify_tool,
                 consequential_tool_names=consequential,
+                allowed_hosts=allowed_hosts,
             ).kind
             == "token-linked"
         )
@@ -1509,6 +1520,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             read_tool_names=read_tool_names,
             tool_annotations=tool_annotations,
             verify_tool=verify_tool,
+            allowed_hosts=allowed_hosts,
         )
         calibrated = cal is not None and cal.calibrated and dispatched <= set(cal.certified_tools)
         seed_control_status = (

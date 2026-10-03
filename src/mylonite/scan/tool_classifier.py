@@ -29,8 +29,9 @@ from __future__ import annotations
 
 import ipaddress
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any
+from urllib.parse import urlparse
 
 # A bare hostname / domain: at least one label separator, label characters only.
 # Deliberately permissive (this is a "could this be a destination?" heuristic
@@ -210,6 +211,141 @@ _FILENAME_SUFFIXES: tuple[str, ...] = (
     ".db",
     ".sqlite",
 )
+
+
+#: Schemes that are a genuine network egress for :func:`external_destination_values`
+#: (effect_verdict.is_read_tool, #304). Deliberately NOT every scheme
+#: ``looks_like_destination`` would accept: an MCP ``read_resource``/``read_file``
+#: call routinely carries a ``file://`` or an app-defined ``memo://`` URI, and
+#: that is a resource locator, not egress.
+_EXTERNAL_DESTINATION_SCHEMES: frozenset[str] = frozenset({"http", "https", "ws", "wss", "ftp"})
+
+#: Parameter-name TOKENS (see :func:`hint_matches`) that make a bare,
+#: scheme-less host or IP literal count as a destination for
+#: :func:`external_destination_values`. Deliberately narrower than
+#: :data:`_DESTINATION_PARAM_HINTS`: that vocabulary also matches ``query``,
+#: ``body`` and similar content-carrying parameters, and this check's caller
+#: (the effect verdict's read/dispatch call) must not count the attacker's own
+#: injected host turning up in a search query or a message body as egress —
+#: only an argument that is itself NAMED as a destination.
+_EXTERNAL_DESTINATION_KEY_HINTS: tuple[str, ...] = (
+    "url",
+    "uri",
+    "host",
+    "domain",
+    "endpoint",
+    "target",
+)
+
+#: Never "outside the target", whatever the operator's own allowlist says.
+_LOOPBACK_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1", "::1"})
+
+#: Dotted suffixes that make a bare host-shaped string a FILENAME, not a host,
+#: for :func:`external_destination_values` only. A superset of
+#: :data:`_FILENAME_SUFFIXES`: that list deliberately excludes ``.md`` (it is
+#: also the Moldova ccTLD, and the discovery report's cost of a false negative
+#: outweighs a false positive there). This check's cost runs the other way — a
+#: false positive here turns an ordinary resource read into a phantom dispatch
+#: and erodes RESISTED coverage — so ``.md`` is excluded here even though it
+#: can be a real TLD.
+_BARE_HOST_FILENAME_SUFFIXES: tuple[str, ...] = (*_FILENAME_SUFFIXES, ".md")
+
+
+def _looks_like_bare_host(host: str) -> bool:
+    """Host SHAPE only (no scheme), for the narrower #304 check.
+
+    An IP literal or ``localhost`` always qualifies. A dotted string qualifies
+    unless it ends in a filename suffix (``README.md``, ``report.pdf``) or
+    every label is pure digits (``0.10.5``, ``3.14`` — a version string, or a
+    malformed IP that failed the literal check above): neither is a real host,
+    and both are common schema-default / version-argument values that must
+    not be mistaken for egress.
+    """
+    if not host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    if host.lower() == "localhost":
+        return True
+    lowered = host.lower()
+    if lowered.endswith(_BARE_HOST_FILENAME_SUFFIXES):
+        return False
+    labels = host.split(".")
+    if len(labels) > 1 and all(label.isdigit() for label in labels):
+        return False
+    return bool(_HOSTNAME_RE.match(host))
+
+
+def _outside_target(host: str, allowed_hosts: Collection[str]) -> bool:
+    lowered = host.lower()
+    if lowered in _LOOPBACK_HOSTS:
+        return False
+    return lowered not in {h.lower() for h in allowed_hosts}
+
+
+def external_destination_values(
+    arguments: Mapping[str, Any], *, allowed_hosts: Collection[str] = ()
+) -> list[str]:
+    """Argument values that are a network destination OUTSIDE the target (#304).
+
+    Narrower than :func:`url_values`, which is right for the live egress
+    control (a false positive there just costs a refusable call) and wrong for
+    the effect verdict's read/dispatch call (a false positive there turns an
+    ordinary read into a phantom dispatch, eroding RESISTED coverage, and lets
+    the agent's own injected text, echoed into an unrelated argument such as a
+    search query, token-link a false FOUND — see
+    ``tests/scan/test_read_tool_whole_word.py``, #304 review C1/I2).
+
+    Counts only:
+
+    * a value with an ``http``, ``https``, ``ws``, ``wss`` or ``ftp`` scheme,
+      in ANY argument — never a ``file://`` or ``memo://`` resource URI, which
+      a legitimate ``read_resource``/``read_file`` call routinely carries;
+    * a bare hostname or IP literal, with no scheme, but ONLY in an argument
+      whose own name is a destination token (:data:`_EXTERNAL_DESTINATION_KEY_HINTS`)
+      — so the same literal in a ``query`` or ``body`` argument never counts.
+
+    Either way, a host in ``allowed_hosts`` (the target's own egress
+    allowlist) or a loopback/``localhost`` literal is never "outside the
+    target", so it is excluded.
+    """
+    found: list[str] = []
+
+    def _walk(key: str | None, value: object) -> None:
+        if isinstance(value, str):
+            candidate = value.strip()
+            if not candidate:
+                return
+            if "://" in candidate:
+                scheme = candidate.split("://", 1)[0].lower()
+                if scheme not in _EXTERNAL_DESTINATION_SCHEMES:
+                    return
+                host = urlparse(candidate).hostname or ""
+                if host and _outside_target(host, allowed_hosts):
+                    found.append(candidate)
+                return
+            if key is None or not hint_matches(key, _EXTERNAL_DESTINATION_KEY_HINTS):
+                return
+            host = candidate.split("/", 1)[0]
+            if host.count(":") == 1:
+                head, _, tail = host.partition(":")
+                if tail.isdigit():
+                    host = head
+            if _looks_like_bare_host(host) and _outside_target(host, allowed_hosts):
+                found.append(candidate)
+        elif isinstance(value, Mapping):
+            for k, v in value.items():
+                _walk(k, v)
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+            for v in value:
+                _walk(key, v)
+
+    for k, v in arguments.items():
+        _walk(k, v)
+    return found
 
 
 def _is_reportable_destination(sample: str) -> bool:
