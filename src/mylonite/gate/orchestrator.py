@@ -20,7 +20,6 @@ from mylonite._cli_io import echo
 from mylonite._redaction import redact_value
 from mylonite._verdict import (
     STABLE_NOT_PROVEN,
-    has_proof,
     is_black_box_keep,
     verdict_label,
     verdict_reason,
@@ -338,12 +337,71 @@ def _rejected_evidence_dir(out_dir: Path, finding_id: str) -> Path:
     return out_dir.parent / f"{out_dir.name}-rej" / finding_id
 
 
+@dataclass(frozen=True)
+class _EarlierFiles:
+    """What a finding's folder held, under the names this run writes, before
+    the run wrote into it: usually an earlier run's KEPT test, exploit and
+    replay fixtures for the same finding id (ids are stable run to run)."""
+
+    #: The test and exploit files that existed, with their bytes.
+    files: dict[Path, bytes]
+    #: ``fixtures/`` relative path -> bytes, or ``None`` when there was none.
+    fixtures: dict[str, bytes] | None
+
+
+def _snapshot_earlier(this_out: Path, paths: list[Path]) -> _EarlierFiles:
+    """Read what ``paths`` and ``this_out/fixtures`` hold before this run
+    overwrites them, so a run that does not keep can put them back."""
+    files = {path: path.read_bytes() for path in paths if path.is_file()}
+    fixtures_dir = this_out / "fixtures"
+    fixtures = (
+        {
+            item.relative_to(fixtures_dir).as_posix(): item.read_bytes()
+            for item in fixtures_dir.rglob("*")
+            if item.is_file()
+        }
+        if fixtures_dir.is_dir()
+        else None
+    )
+    return _EarlierFiles(files=files, fixtures=fixtures)
+
+
+def _put_back_earlier(this_out: Path, rejected_dir: Path, earlier: _EarlierFiles) -> None:
+    """Restore what this finding's folder held before the run.
+
+    Whatever the run left in ``this_out/fixtures`` (a single-finding run
+    records into the gate root's shared folder) moves to the evidence folder
+    first, so this run's recordings never mix into a kept test's fixtures.
+    Then the earlier files are written back byte for byte.
+    """
+    fixtures_dir = this_out / "fixtures"
+    if fixtures_dir.is_dir():
+        rejected_dir.mkdir(parents=True, exist_ok=True)
+        dest = rejected_dir / "fixtures"
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.move(str(fixtures_dir), str(dest))
+    for path, data in earlier.files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    for rel, data in (earlier.fixtures or {}).items():
+        target = fixtures_dir / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+
+
 def _finish_unkept(
-    this_out: Path, out_dir: Path, finding_id: str, message: str, written: list[Path]
+    this_out: Path,
+    out_dir: Path,
+    finding_id: str,
+    message: str,
+    written: list[Path],
+    earlier: _EarlierFiles,
 ) -> None:
     """Echo the per-finding verdict, then relocate the files this REJECTED,
     candidate or validate-failed finding wrote into
-    :func:`_rejected_evidence_dir`.
+    :func:`_rejected_evidence_dir`, and put back what the finding's folder
+    held before the run (see :func:`_put_back_earlier`).
     Evidence stays on disk there for local debugging; it is simply outside
     anywhere a commit — automatic or printed for the operator to run by
     hand — ever looks.
@@ -356,16 +414,16 @@ def _finish_unkept(
     evidence, so other findings' evidence is never touched. A per-finding
     subdirectory left empty by the move is removed.
 
-    The one directory that moves is a per-finding subdirectory's own
-    ``fixtures/``, which the validator recorded for this finding alone. In
-    a single-finding run ``out_dir/fixtures`` may belong to an earlier kept
-    run, so it stays.
+    The one directory that moves is ``fixtures/``: a per-finding
+    subdirectory's own, or, in a single-finding run, the gate root's. An
+    earlier run's KEPT test, exploit and fixtures under the same id are put
+    back byte for byte, so a run that does not keep never removes or alters a
+    proven test.
     """
     echo(message)
     present = [p for p in written if p.exists()]
     fixtures = this_out / "fixtures"
-    own_fixtures = fixtures if this_out != out_dir and fixtures.is_dir() else None
-    if not present and own_fixtures is None:
+    if not present and not fixtures.is_dir() and not earlier.files:
         return
     rejected_dir = _rejected_evidence_dir(out_dir, finding_id)
     rejected_dir.mkdir(parents=True, exist_ok=True)
@@ -374,11 +432,7 @@ def _finish_unkept(
         if dest.exists():
             dest.unlink()
         shutil.move(str(path), str(dest))
-    if own_fixtures is not None:
-        dest = rejected_dir / "fixtures"
-        if dest.exists():
-            shutil.rmtree(dest)
-        shutil.move(str(own_fixtures), str(dest))
+    _put_back_earlier(this_out, rejected_dir, earlier)
     if this_out != out_dir and this_out.exists() and not any(this_out.iterdir()):
         this_out.rmdir()
     echo(
@@ -391,13 +445,13 @@ def _how_to_prove(report: ValidationReport) -> str:
     """One sentence on what would turn this candidate into a kept finding."""
     if is_black_box_keep(report):
         return "Gate cannot prove a finding on a black-box target."
-    if not has_proof(report):
-        return (
-            "To prove it, let a guarded side run (declare `control_env` so Mylonite "
-            "can switch your real safeguard off and on, and drop `--fast`) or "
-            "declare an `effect_probe` in the target file, then re-run `mylonite gate`."
-        )
-    return "To prove it, re-run validation with the build leg on."
+    # `gate` always runs the build leg, so a missing proof leg is the only
+    # other way a keep reads STABLE, NOT PROVEN here.
+    return (
+        "To prove it, let a guarded side run (declare `control_env` so Mylonite "
+        "can switch your real safeguard off and on, and drop `--fast`) or "
+        "declare an `effect_probe` in the target file, then re-run `mylonite gate`."
+    )
 
 
 def candidate_reason(report: ValidationReport) -> str:
@@ -490,9 +544,12 @@ def _process_one_finding(
 
     this_out.mkdir(parents=True, exist_ok=True)
     test_path = this_out / generated.filename
-    test_path.write_text(generated.source, encoding="utf-8")
     exploit_path = this_out / expected_exploit
     written = [test_path, exploit_path]
+    # An earlier run may have kept a test under this same id. Read it first,
+    # so a run that does not keep can put it back untouched.
+    earlier = _snapshot_earlier(this_out, written)
+    test_path.write_text(generated.source, encoding="utf-8")
     _write_redacted_exploit(exploit_path, exploit)
 
     # The pending tag only shapes the emitted test. Hand the validator the
@@ -512,7 +569,7 @@ def _process_one_finding(
     if report is None:
         reason = "the validator returned nothing"
         message = f"{prefix}{reason} — skipping." if multi else f"{prefix}{reason} — cannot gate."
-        _finish_unkept(this_out, out_dir, finding_id, message, written)
+        _finish_unkept(this_out, out_dir, finding_id, message, written, earlier)
         return _FindingOutcome(exploit=exploit, stage="validate_failed", reason=reason)
 
     if not report.kept:
@@ -523,7 +580,7 @@ def _process_one_finding(
         message = (
             f"{prefix}{console_reason}." if multi else f"{prefix}{console_reason} — no PR opened."
         )
-        _finish_unkept(this_out, out_dir, finding_id, message, written)
+        _finish_unkept(this_out, out_dir, finding_id, message, written, earlier)
         return _FindingOutcome(
             exploit=exploit, stage="rejected", report=report, reason=_rejection_reason(report)
         )
@@ -534,7 +591,9 @@ def _process_one_finding(
         # way a rejected finding's are, so no commit can pick them up, and
         # keep the validation report with that evidence (never in the gate
         # dir, where it could overwrite an earlier kept run's report).
-        _finish_unkept(this_out, out_dir, finding_id, candidate_line(exploit, report), written)
+        _finish_unkept(
+            this_out, out_dir, finding_id, candidate_line(exploit, report), written, earlier
+        )
         _write_validation_report(_rejected_evidence_dir(out_dir, finding_id), report)
         return _FindingOutcome(
             exploit=exploit, stage="candidate", report=report, reason=candidate_reason(report)
@@ -746,7 +805,7 @@ def run_gate(
     if not kept and candidates:
         echo(
             f"Mylonite gate: no proven finding to gate - {len(candidates)} candidate(s), "
-            "nothing written as a gate test, no PR opened."
+            "nothing written as a gate test, no workflows written, no PR opened."
         )
         return _finish(
             GateResult(
