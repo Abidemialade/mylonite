@@ -169,3 +169,123 @@ def test_action_pins_its_own_litellm_install_to_the_constraints_file():
     assert "constraints.txt" in blob
     assert Path("gate-action/constraints.txt").is_file()
     assert "litellm==" in Path("gate-action/constraints.txt").read_text(encoding="utf-8")
+
+
+def test_action_s_own_install_step_passes_its_constraints_path_through_env():
+    """`${{ github.action_path }}` travels through `env:` (ACTION_PATH),
+    never interpolated directly into `run:` -- the same rule this file's
+    other inputs already follow, and what zizmor flags otherwise."""
+    doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
+    install_step = next(s for s in doc["runs"]["steps"] if s.get("name") == "Install mylonite")
+    assert install_step["env"]["ACTION_PATH"] == "${{ github.action_path }}"
+    assert "github.action_path" not in install_step["run"]
+
+
+def test_action_never_writes_the_api_key_to_github_env():
+    """The key is never persisted to $GITHUB_ENV (which would expose it
+    to every later step of the CALLER's job) or to any file -- only the
+    credential variable's NAME (never secret-shaped) goes to
+    $GITHUB_OUTPUT. The key itself travels as a plain env var (API_KEY),
+    scoped to the one step that exports it into its own process right
+    before calling mylonite."""
+    doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
+    keymap_step = next(s for s in doc["runs"]["steps"] if s.get("id") == "keymap")
+    assert "GITHUB_ENV" not in keymap_step["run"]
+    assert "GITHUB_OUTPUT" in keymap_step["run"]
+
+    run_step = doc["runs"]["steps"][-1]
+    assert run_step["env"]["API_KEY"] == "${{ inputs.api-key }}"
+    assert run_step["env"]["KEY_VAR"] == "${{ steps.keymap.outputs.var }}"
+    assert 'export "$KEY_VAR=$API_KEY"' in run_step["run"]
+
+
+def _run_bash_step(step: dict, env: dict[str, str], tmp_path: Path) -> subprocess.CompletedProcess:
+    """Execute one composite-action step's own `run:` script, exactly as
+    GitHub Actions does (`bash --noprofile --norc -eo pipefail`), with a
+    real $GITHUB_OUTPUT file so the step's own `>> "$GITHUB_OUTPUT"` writes
+    land somewhere real. Used to prove the runtime-detection step
+    survives the flags GitHub actually runs it under, not a re-
+    implementation of what it does.
+    """
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash not available to execute the rendered step")
+    github_output = tmp_path / "github_output"
+    github_output.write_text("", encoding="utf-8")
+    base_env = {
+        "PATH": __import__("os").environ.get("PATH", ""),
+        "PYTHONPATH": __import__("os").environ.get("PYTHONPATH", ""),
+        "GITHUB_OUTPUT": str(github_output),
+    }
+    result = subprocess.run(
+        [bash, "--noprofile", "--norc", "-eo", "pipefail", "-c", step["run"]],
+        env={**base_env, **env},
+        capture_output=True,
+        text=True,
+    )
+    result.github_output = github_output.read_text(encoding="utf-8")  # type: ignore[attr-defined]
+    return result
+
+
+def _runtime_step() -> dict:
+    doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
+    return next(s for s in doc["runs"]["steps"] if s.get("id") == "runtime")
+
+
+@pytest.mark.parametrize("transport", ["sse", "http"])
+def test_runtime_detection_step_survives_a_remote_target_with_no_command(
+    tmp_path: Path, transport: str
+) -> None:
+    """GitHub runs `shell: bash` as `bash --noprofile --norc -eo
+    pipefail {0}`. A remote target (transport: sse|http) declares no
+    `command:` line at all -- the previous grep-based step exited 1 (and
+    `-e` aborted the whole step) here; this must not."""
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text(
+        f"family: demo\ntransport: {transport}\nurl: https://example.invalid/mcp\n",
+        encoding="utf-8",
+    )
+    result = _run_bash_step(_runtime_step(), {"TARGET_FILE": str(target_file)}, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "needs=\n" in result.github_output
+
+
+def test_runtime_detection_step_finds_a_bare_npx_command(tmp_path: Path) -> None:
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text('family: demo\ncommand: npx\nargs: ["-y", "x"]\n', encoding="utf-8")
+    result = _run_bash_step(_runtime_step(), {"TARGET_FILE": str(target_file)}, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "needs=node\n" in result.github_output
+
+
+def test_runtime_detection_step_unquotes_a_quoted_command(tmp_path: Path) -> None:
+    """`command: "npx"` -- a quoted value a line-oriented grep would
+    not match. The real YAML parser unquotes it before this step ever
+    compares it."""
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text('family: demo\ncommand: "npx"\nargs: []\n', encoding="utf-8")
+    result = _run_bash_step(_runtime_step(), {"TARGET_FILE": str(target_file)}, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "needs=node\n" in result.github_output
+
+
+def test_runtime_detection_step_reduces_an_absolute_path_to_its_basename(tmp_path: Path) -> None:
+    """An absolute-path command (e.g. `/usr/bin/npx`) still needs Node --
+    a bare string-equality/membership test would miss it."""
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text(
+        'family: demo\ncommand: /usr/local/bin/uvx\nargs: ["x"]\n', encoding="utf-8"
+    )
+    result = _run_bash_step(_runtime_step(), {"TARGET_FILE": str(target_file)}, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "needs=uv\n" in result.github_output
+
+
+def test_runtime_detection_step_survives_a_missing_target_file(tmp_path: Path) -> None:
+    """Never the job's problem to fail on -- a missing/unreadable target
+    file is caught properly, with a real error, by the step that actually
+    runs `mylonite gate`."""
+    missing = tmp_path / "does-not-exist.yaml"
+    result = _run_bash_step(_runtime_step(), {"TARGET_FILE": str(missing)}, tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "needs=\n" in result.github_output

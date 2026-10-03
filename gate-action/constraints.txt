@@ -1,11 +1,25 @@
 # Pins the scaffolded gate workflow's install to an exact, verified
 # LiteLLM release, rather than whatever PyPI serves `pip install` that day --
 # LiteLLM had a real supply-chain compromise (24 Mar 2026, 1.82.7/1.82.8).
+# This exact pin is the real protection; pyproject.toml's own `<2.0` floor
+# cap admits every 1.x patch on its own.
+#
+# 1.93.0 is the floor pyproject.toml's own comment names for Python 3.14
+# support (declares Requires-Python >=3.10,<3.15 -- confirmed against
+# PyPI's published metadata), so one pin covers the whole 3.11-3.14 matrix
+# this package supports, rather than needing environment markers for two.
 #
 # This is an EXACT pin, not a hash lock. `pip install -c constraints.txt
 # --require-hashes` needs a hash for every package in the resolved tree
 # (not just this one), which in turn needs a network resolve to collect --
 # unavailable where this file was written. Raise the pin alongside
-# pyproject.toml's own litellm floor; never past its <2.0 ceiling without
-# re-verifying against the new range first.
-litellm==1.88.1
+# pyproject.toml's own litellm floor; never past its <2.0 ceiling, and
+# never below 1.93.0 while 3.14 is supported, without re-verifying first.
+# See tests/gate/test_workflows.py's
+# test_the_vendored_constraints_pin_satisfies_pyprojects_litellm_range,
+# which keeps this file and gate-action/constraints.txt identical and
+# checks the pin against pyproject.toml's own specifier.
+litellm==1.93.0
+# Pinned for the same reason as litellm above -- a target launched via
+# uvx/uv otherwise installs whatever uv PyPI serves that day.
+uv==0.12.22
