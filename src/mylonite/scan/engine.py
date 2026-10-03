@@ -65,6 +65,7 @@ from mylonite.scan.seeds import (
     SEED_CATALOGUE,
     SeedPattern,
     active_weakness_filter,
+    direct_request_tool,
     seed_coverage,
     seeds_for_descriptor,
     target_family,
@@ -1452,6 +1453,12 @@ class ScanEngine:
         tool_under_test = payload.metadata.get("egress_tool") or payload.metadata.get(
             "consequential_tool", ""
         )
+        # A catalogue W3/W4 seed that asks for its tool outright resolves no
+        # tool above; resolve it from the seed, so a planner that declines the
+        # user's own request and calls some other tool reads NOT TESTED.
+        catalogue_seed = self._seeds_by_id.get(payload.pattern_id)
+        if not tool_under_test and catalogue_seed is not None:
+            tool_under_test = direct_request_tool(catalogue_seed)
         all_passes = (*success_passes, *fail_passes)
         # `success_passes` non-empty here means a MINORITY success (is_finding
         # already returned above for a majority): with runs>1, some pass's

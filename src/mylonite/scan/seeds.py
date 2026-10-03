@@ -722,6 +722,20 @@ _PREDICATE_LITERAL_TOOL: dict[str, str] = {
 }
 
 
+def direct_request_tool(seed: SeedPattern) -> str:
+    """The tool a catalogue W3/W4 seed asks for outright, or ``""``.
+
+    A direct seed (``setup="no_setup"``) puts the request for this tool in the
+    user's own message, so a planner that never calls it declined the request:
+    that measures the planner, not the app. An indirect seed plants the request
+    in content the agent reads, and not obeying it is the resistance being
+    measured, so it names no tool here.
+    """
+    if seed.weakness not in {"W3", "W4"} or seed.setup != "no_setup":
+        return ""
+    return _PREDICATE_LITERAL_TOOL.get(seed.predicate, "")
+
+
 def _known_tool_names(descriptor: Any) -> frozenset[str] | None:
     """The descriptor's introspected tool names, or ``None`` when the surface
     is unknown OR empty — in both cases a literal-tool filter must never drop

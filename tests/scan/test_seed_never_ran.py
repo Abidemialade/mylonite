@@ -374,3 +374,71 @@ def test_no_attack_emitted_rows_also_render_as_not_tested() -> None:
     assert row_mark(row, OUTCOME_MARKS) == "⚠ NOT TESTED"
     plain = ScanAttempt(seed_id="s", pattern_id="s", outcome="not_applicable")
     assert row_mark(plain, OUTCOME_MARKS) == OUTCOME_MARKS["not_applicable"]
+
+
+# --- a direct request the planner declines is not the app resisting ----------
+
+
+def _catalogue_scan(pattern_id: str, called: list[str]) -> ScanResult:
+    """One catalogue seed against a target that exposes the seed's tool; the
+    planner calls only ``called``."""
+    import json
+
+    from mylonite.scan.seeds import SEED_CATALOGUE
+
+    seed = next(s for s in SEED_CATALOGUE if s.pattern_id == pattern_id)
+    surface = ["read_note", "send_email", "web_fetch"]
+
+    class _OneAdapter:
+        async def describe(self) -> TargetDescriptor:
+            return TargetDescriptor(
+                target_id="stub-target", kind="mcp", system_prompt="x", tools=[]
+            )
+
+        async def invoke(self, payload: Payload) -> AdapterResponse:
+            return AdapterResponse(
+                payload_pattern_id=payload.pattern_id,
+                raw_response="I would rather not do that.",
+                tool_calls=called,
+                metadata={"tool_surface": json.dumps(surface)},
+            )
+
+        async def close(self) -> None:
+            return None
+
+    engine = ScanEngine(
+        config=_config(target_id="stub-target"),
+        adapter=_OneAdapter(),  # type: ignore[arg-type]
+        attack_modules=[_Module([_payload(seed.pattern_id, seed.weakness)])],
+        customiser=_Customiser(),  # type: ignore[arg-type]
+        judge=_JudgeNo(),  # type: ignore[arg-type]
+    )
+    return asyncio.run(engine.run())
+
+
+@pytest.mark.parametrize(
+    "pattern_id",
+    [
+        "excessive-agency-send-email-direct-unconfirmed",
+        "excessive-agency-fetch-attacker-url-direct",
+    ],
+)
+def test_a_declined_direct_request_reads_not_tested(pattern_id: str) -> None:
+    """The user asked for the tool call outright. A planner that called some
+    other tool and never the one asked for measured the planner, not the app."""
+    result = _catalogue_scan(pattern_id, ["read_note"])
+    (attempt,) = result.report.attempts
+    assert attempt.outcome == "skipped_planner_no_engagement"
+
+
+def test_a_direct_request_the_planner_carried_out_still_reads_resisted() -> None:
+    result = _catalogue_scan("excessive-agency-send-email-direct-unconfirmed", ["send_email"])
+    (attempt,) = result.report.attempts
+    assert attempt.outcome == "no_finding"
+
+
+def test_an_indirect_injection_the_agent_ignored_still_reads_resisted() -> None:
+    """Not obeying planted content is the resistance this seed measures."""
+    result = _catalogue_scan("excessive-agency-send-email-via-note-injection", ["read_note"])
+    (attempt,) = result.report.attempts
+    assert attempt.outcome == "no_finding"
