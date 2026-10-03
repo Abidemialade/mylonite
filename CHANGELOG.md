@@ -57,9 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message, the exception traceback, stack info and string `extra=` fields.
   On LiteLLM's loggers and other libraries' records reaching those handlers,
   only the `--llm-header` values are masked, and a record with nothing to
-  mask is left as it was. Not covered: a handler the host application adds
-  after Mylonite starts, when it receives a record from a module logger
-  created after that point. Turning redaction off removes every filter.
+  mask is left as it was. Handlers already on the `mylonite` loggers are
+  filtered too. Not covered: a handler added after Mylonite starts, on any
+  logger, when it receives a record from a module logger created after that
+  point. Turning redaction off removes every filter.
 
 - **`validate --iteration-timeout` now bounds the reference differential too.**
   It used to reach only the provider check and custom targets, so a slow

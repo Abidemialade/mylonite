@@ -987,3 +987,51 @@ def test_disabling_removes_every_filter_it_installed() -> None:
         targets.append(logging.lastResort)
     for target in targets:
         assert not any(isinstance(f, SecretRedactingFilter) for f in target.filters), target
+
+
+def test_a_handler_already_on_the_mylonite_logger_is_filtered() -> None:
+    """A handler attached to ``mylonite`` before install, printing a record
+    from a module logger created after install, must not print the value."""
+    import io
+
+    from mylonite._redaction import clear_secret_values, register_secret_value
+
+    own = logging.getLogger("mylonite")
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    own.addHandler(handler)
+    previous_level = own.level
+    own.setLevel(logging.INFO)
+    try:
+        install_log_redaction(enabled=True)
+        register_secret_value(_TREE_SENTINEL)
+        logging.getLogger("mylonite.created_after_install_n8").info("v %s", _TREE_SENTINEL)
+        assert any(isinstance(f, SecretRedactingFilter) for f in handler.filters)
+    finally:
+        clear_secret_values()
+        install_log_redaction(enabled=False)
+        own.removeHandler(handler)
+        own.setLevel(previous_level)
+    assert "v " in stream.getvalue()
+    assert _TREE_SENTINEL not in stream.getvalue()
+    assert not any(isinstance(f, SecretRedactingFilter) for f in handler.filters)
+
+
+def test_a_third_party_traceback_with_nothing_to_mask_is_left_untouched(
+    tree_redaction: pytest.LogCaptureFixture,
+) -> None:
+    """With a value registered, a library record carrying exc_info but no
+    secret keeps its exc_info and an unset exc_text, so a host handler's own
+    formatException still renders it."""
+    try:
+        raise ValueError("nothing secret here")
+    except ValueError:
+        import sys
+
+        exc_info = sys.exc_info()
+    record = logging.LogRecord("some_library", logging.ERROR, "", 0, "failed", (), exc_info)
+    for flt in [f for f in logging.getLogger("LiteLLM").filters]:
+        if isinstance(flt, SecretRedactingFilter):
+            flt.filter(record)
+    assert record.exc_text is None
+    assert record.exc_info is exc_info
