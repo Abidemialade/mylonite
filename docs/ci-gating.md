@@ -92,9 +92,47 @@ and commits every KEPT one's test to a single branch behind a single PR:
 1 kept, 1 rejected
 ```
 
-A kept finding whose validation had no differential and no effect proof is
-labelled **STABLE, NOT PROVEN** in `PR_BODY.md` rather than KEPT, and
-`recommend` reports it as not proven. Its test is still committed.
+`gate` never commits an unproven finding. A finding whose validation passed
+but had no passing differential or effect leg (or a black-box keep that rests on
+the LLM judge alone) reads **STABLE, NOT PROVEN**. `gate` treats it as a
+candidate:
+
+- no test, exploit or report for it is written to the gate directory or
+  committed; its evidence goes to the `-rej` folder next to `--out`, with its
+  validation report;
+- the console prints one line per candidate, with the reason and how to get it
+  proven: declare `control_env` or an `effect_probe` in the target file and
+  re-run `gate`;
+- when another finding was kept, `PR_BODY.md` lists the candidates under
+  "Candidates (not proven, not committed)";
+- with nothing kept, no PR is opened and `gate` exits `10`.
+
+```text
+3 findings: validating each (about 3x the single-finding validation cost)
+1 kept, 1 not proven (candidates, not committed), 1 rejected
+```
+
+### Exit codes
+
+`gate`'s exit code tells a CI script what the run produced:
+
+| Code | Meaning |
+|------|---------|
+| `0` | The scan ran and found nothing to gate. |
+| `9` | At least one proven finding was kept; its gate test is written (and committed with `--open-pr`). |
+| `10` | Nothing was kept, but at least one finding is a STABLE, NOT PROVEN candidate. No test was written. |
+| `5` | Every finding that reached a verdict was rejected. |
+
+An aborted scan still wins over all of these (see
+[Budget exhaustion and findings](#budget-exhaustion-and-findings)). The full table
+is in [Reading the results](reading-results.md#exit-codes-for-ci).
+
+**Upgrading:** `gate` used to exit `0` both for a kept finding and for a clean
+run. A kept finding now exits `9`. A CI script that treated `0` as "gated" needs
+to check for `9`; one that treats any non-zero exit as a failure now fails when
+`gate` keeps a finding, which is the point of a gate. The scaffolded discovery
+workflow runs `gate --open-pr` as its last step, so a night that opens a gate PR
+now shows as a failed run.
 
 A finding that was generated and validated but not kept is still named in
 `PR_BODY.md`, with the reason, under "Other findings (not gated)" — it isn't

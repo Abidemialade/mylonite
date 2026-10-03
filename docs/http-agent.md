@@ -88,8 +88,9 @@ mylonite gate --target-file my-agent.yaml --authorize my-agent
   [evidence tier](reading-results.md#evidence-tier) is `judge-only`. `validate` and
   `gate` decide `kept` by stability and consensus, and a kept test is capped at
   **STABLE, NOT PROVEN** ("black-box target: the LLM judge is the only evidence"). It
-  never reads KEPT, even when the input-framing differential below passes. The test
-  still gates reproduction in CI; it does not prove a safeguard stops the attack.
+  never reads KEPT, even when the input-framing differential below passes. `validate`
+  still writes the test, which gates reproduction only; `gate` lists the finding as a
+  candidate and never commits it (see [CI gating](ci-gating.md#exit-codes)).
 - **Test an input defence: `--prove-input-control`.** Opt into an **input
   data-framing ("spotlighting")** differential — Mylonite drives the same attack
   raw and again wrapped as untrusted data, and `kept` then means that input framing

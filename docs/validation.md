@@ -143,8 +143,9 @@ Every validation reports three headline figures.
   but nothing showed a safeguard stops it. That happens on a custom target run with
   `--fast` (no differential) and no `effect_probe`, or with no control and no probe.
   The label appears in the verdict line, the `gate:` line, the notes in
-  `validation_report.json` and the gate's pull-request body; `kept` and the exit code
-  are unchanged, so existing pipelines keep working. After a STABLE, NOT PROVEN keep,
+  `validation_report.json`; `validate`'s `kept` and exit code are unchanged. `gate`
+  never commits a STABLE, NOT PROVEN finding: it lists it as a candidate and exits
+  `10` when nothing else was kept (see [CI gating](ci-gating.md#exit-codes)). After a STABLE, NOT PROVEN keep,
   `validate` says the test gates reproduction only, instead of telling you to commit it. Add a guarded side (drop `--fast`,
   or declare `control_env`) or an `effect_probe` to turn it into KEPT.
 
