@@ -351,14 +351,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resisted.** Two cases used to leave no trace in the result. On a custom
   target with more than 8 candidate tools in one class, the tools past the
   per-class probe ceiling were only named in a log warning; each is now a
-  `⚠ NOT TESTED` row with the new code `MYL-NT-018`, and the warning no longer
-  suggests raising `--max-llm-calls`, which cannot lift the ceiling. When the
+  `⚠ NOT TESTED` row with the new code `MYL-NT-018`. The new target-file
+  field `seed_tool_ceiling` (3 to 50, default 8) raises the ceiling; each
+  extra probe costs LLM calls. For W4, a `control_config.consequential_tools`
+  list also clears it, because it replaces the classifier. The cap warning
+  now names these and is logged once per scan instead of suggesting
+  `--max-llm-calls`, which cannot lift the ceiling. When the
   call budget, the provider or the wall-clock limit stops a scan early, each
   seed that had not finished is now a NOT TESTED row with the new code
   `MYL-NT-019`, so a class whose seeds were all cut off reads NOT TESTED
   instead of dropping out of the class summary. A scan whose only gap is
-  `MYL-NT-018` exits `2`. Both codes are listed in
-  `docs/reason-codes.md` (reason-code snapshot updated).
+  `MYL-NT-018` exits `2`. Rows for a class no attack module emitted an attack
+  for (`MYL-NT-016`) or whose effect can't be confirmed (`MYL-NT-017`) now
+  also show `⚠ NOT TESTED` instead of `⚠ N/A (no such capability)`. The new
+  codes are listed in `docs/reason-codes.md` (reason-code snapshot updated),
+  and the new field in `docs/target-file.md`.
 - **Known limitations now says when a resisted result measures the planner
   model, not your app.** A new section in `docs/limitations.md` covers the
   two cases where a planner that declines still reads resisted: indirect W1

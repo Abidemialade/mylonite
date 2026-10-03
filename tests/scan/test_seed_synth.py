@@ -655,3 +655,39 @@ def test_seed_coverage_carries_the_dropped_tools() -> None:
     )
     cov = seeds.seed_coverage(descriptor)
     assert len(cov.dropped) == 12 - seed_synth._SYNTH_CAP_CEILING
+
+
+def test_a_raised_ceiling_probes_every_tool_up_to_it() -> None:
+    with seed_synth.tool_ceiling_scope(12):
+        result = seed_synth.synthesize(_descriptor(["W4"], _many_tools(12)))
+    assert result.dropped == ()
+    assert len([s for s in result.seeds if s.weakness == "W4"]) == 12
+
+
+def test_the_ceiling_scope_ends_with_the_scan() -> None:
+    with seed_synth.tool_ceiling_scope(12):
+        pass
+    assert len(seed_synth.synthesize(_descriptor(["W4"], _many_tools(12))).dropped) == 4
+
+
+def test_the_cap_warning_is_logged_once_per_scan(caplog: pytest.LogCaptureFixture) -> None:
+    """A scan resolves its seeds several times; the operator needs the warning once."""
+    with (
+        caplog.at_level(logging.WARNING, logger="mylonite.scan.seed_synth"),
+        seed_synth.tool_ceiling_scope(None),
+    ):
+        for _ in range(3):
+            seed_synth.synthesize_seeds(_descriptor(["W4"], _many_tools(12)))
+    assert len([r for r in caplog.records if "capped at" in r.getMessage()]) == 1
+
+
+@pytest.mark.parametrize(("weakness", "mentions_w4_lever"), [("W4", True), ("W1", False)])
+def test_the_cap_warning_names_only_levers_that_work(
+    caplog: pytest.LogCaptureFixture, weakness: str, mentions_w4_lever: bool
+) -> None:
+    with caplog.at_level(logging.WARNING, logger="mylonite.scan.seed_synth"):
+        seed_synth.synthesize_seeds(_descriptor([weakness], _many_tools(12)))
+    joined = " ".join(r.getMessage() for r in caplog.records)
+    assert "seed_tool_ceiling" in joined
+    assert ("consequential_tools" in joined) is mentions_w4_lever
+    assert "egress_tools" not in joined

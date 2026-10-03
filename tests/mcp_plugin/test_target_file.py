@@ -748,3 +748,57 @@ def test_a_rest_target_without_an_effect_probe_still_loads(tmp_path: Path) -> No
     target = tmp_path / "agent.yaml"
     target.write_text(_rest_with_probe_yaml().split("effect_probe:")[0], encoding="utf-8")
     assert load_target_file(target).effect_probe is None
+
+
+# --- seed_tool_ceiling -------------------------------------------------------
+
+
+def test_seed_tool_ceiling_defaults_to_none() -> None:
+    """An existing target file loads unchanged and keeps the built-in ceiling."""
+    assert _tf().seed_tool_ceiling is None
+    assert build_target_spec(_tf()).seed_tool_ceiling is None
+
+
+def test_seed_tool_ceiling_round_trips_through_yaml_into_the_spec(tmp_path: Path) -> None:
+    target = tmp_path / "t.yaml"
+    target.write_text(
+        "family: acme\ncommand: python\nargs: [-m, srv]\nseed_tool_ceiling: 20\n",
+        encoding="utf-8",
+    )
+    tf = load_target_file(target)
+    assert tf.seed_tool_ceiling == 20
+    assert build_target_spec(tf).seed_tool_ceiling == 20
+
+
+@pytest.mark.parametrize("value", [2, 51, 0, -1])
+def test_seed_tool_ceiling_out_of_bounds_is_rejected(value: int) -> None:
+    with pytest.raises(ValueError, match="seed_tool_ceiling must be between 3 and 50"):
+        _tf(seed_tool_ceiling=value)
+
+
+@pytest.mark.parametrize("value", [True, 8.5, "12"])
+def test_seed_tool_ceiling_must_be_a_whole_number(value: object) -> None:
+    with pytest.raises(ValueError, match="seed_tool_ceiling"):
+        _tf(seed_tool_ceiling=value)
+
+
+@pytest.mark.parametrize("value", [3, 50])
+def test_seed_tool_ceiling_bounds_are_inclusive(value: int) -> None:
+    assert _tf(seed_tool_ceiling=value).seed_tool_ceiling == value
+
+
+def test_a_target_spec_checks_its_own_seed_tool_ceiling() -> None:
+    """A spec built in code, not from a file, gets the same check."""
+    spec = build_target_spec(_tf())
+    with pytest.raises(ValueError, match="seed_tool_ceiling"):
+        type(spec)(**{**spec.__dict__, "seed_tool_ceiling": 99})
+
+
+def test_seed_tool_ceiling_is_rejected_on_a_rest_transport() -> None:
+    with pytest.raises(ValueError, match="seed_tool_ceiling is for MCP transports"):
+        _tf(
+            transport="rest",
+            command="",
+            request=RequestSpec(url="https://agent.example/chat", body='{"p": "{prompt}"}'),
+            seed_tool_ceiling=12,
+        )

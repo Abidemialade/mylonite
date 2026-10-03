@@ -60,6 +60,7 @@ from mylonite.scan.exec_context import ExecContext
 from mylonite.scan.exfil import randomize_payload_exfil
 from mylonite.scan.judge import SuccessJudge, never_exercised_tool_under_test
 from mylonite.scan.providers import provider_from_model
+from mylonite.scan.seed_synth import tool_ceiling_scope
 from mylonite.scan.seeds import (
     SEED_CATALOGUE,
     SeedPattern,
@@ -643,6 +644,13 @@ class ScanEngine:
         self._seeds_by_id: dict[str, SeedPattern] = dict(_SEEDS_BY_ID)
 
     async def run(self) -> ScanResult:
+        # The target file's seed_tool_ceiling applies to every seed resolution
+        # in this run, and each class's cap warning is logged once.
+        ceiling = getattr(self._adapter, "seed_tool_ceiling", None)
+        with tool_ceiling_scope(ceiling if isinstance(ceiling, int) else None):
+            return await self._run()
+
+    async def _run(self) -> ScanResult:
         counter = LiteLLMCallCounter(cap=self._config.max_llm_calls)
         start = time.monotonic()
         attempts: list[ScanAttempt] = []

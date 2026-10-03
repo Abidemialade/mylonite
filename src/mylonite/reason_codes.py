@@ -199,9 +199,10 @@ _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
     _rc(
         NT_SYNTHESIS_CAPPED,
         "The per-class probe ceiling left this tool without a probe, so it was never attacked.",
-        "name the tools that matter in the target file's control_config (egress_tools for W3, "
-        "consequential_tools for W4), which are probed first, or remove the class from "
-        "weakness_classes; a larger --max-llm-calls does not lift the ceiling",
+        "raise seed_tool_ceiling in the target file (each extra probe costs LLM calls; "
+        "--max-llm-calls alone does not lift the ceiling), or remove the class from "
+        "weakness_classes; for W4 only, a control_config.consequential_tools list replaces "
+        "the classifier, so listing just the tools that matter also clears it",
     ),
     _rc(
         NT_SEED_CUT_OFF,

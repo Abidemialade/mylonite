@@ -282,3 +282,95 @@ def test_never_ran_rows_render_as_not_tested_not_as_a_missing_capability() -> No
 def test_the_new_codes_are_registered_not_tested_codes(code: str) -> None:
     assert REGISTRY[code].category == "not-tested"
     assert code in NT_CODE_BY_BUCKET.values()
+
+
+def test_an_unprobed_tool_alone_makes_the_scan_exit_2() -> None:
+    """Incomplete coverage with nothing found: exit 2, never 0."""
+    from mylonite.exit_codes import EXIT_CONFIG
+
+    result = _capped_scan()
+    assert result.report.findings_count == 0
+    assert ScanOutcome.from_report(result.report).exit_code == EXIT_CONFIG == 2
+
+
+class _JudgeYes:
+    async def judge(self, payload: Payload, response: AdapterResponse) -> Verdict:
+        del payload, response
+        return Verdict(success=True, reason="landed", evidence={}, mechanism="llm")
+
+
+def test_a_finding_still_wins_over_never_ran_rows() -> None:
+    """A class with a finding reads FINDING even beside NT-018 rows."""
+    descriptor = TargetDescriptor(
+        target_id="mcp:custom-app",
+        kind="mcp",
+        system_prompt="x",
+        tools=_tools(12),
+        weakness_classes=["W4"],
+    )
+    engine = ScanEngine(
+        config=_config(),
+        adapter=_Adapter(descriptor),  # type: ignore[arg-type]
+        attack_modules=[_Module([_payload("synth-w4-unconfirmed-delete_record_0", "W4")])],
+        customiser=_Customiser(),  # type: ignore[arg-type]
+        judge=_JudgeYes(),  # type: ignore[arg-type]
+    )
+    result = asyncio.run(engine.run())
+    assert any(a.judge_evidence.get(SYNTHESIS_CAPPED_KEY) for a in result.report.attempts)
+    rows = {v.weakness: v for v in class_verdicts(result.report)}
+    assert rows["W4"].status == "FINDING"
+    assert rows["W4"].codes == ()
+
+
+def test_a_finding_still_wins_over_cut_off_rows() -> None:
+    from mylonite.contracts._types import ScanAttempt
+    from mylonite.scan.class_verdict import ClassVerdict, _one_class
+
+    attempts = [
+        ScanAttempt(seed_id="s1", pattern_id="s1", outcome="finding"),
+        ScanAttempt(
+            seed_id="s2",
+            pattern_id="s2",
+            outcome="not_applicable",
+            judge_evidence={SEED_CUT_OFF_KEY: "budget_exceeded", "weakness": "W4"},
+        ),
+    ]
+    verdict: ClassVerdict = _one_class("W4", attempts, None)
+    assert verdict.status == "FINDING"
+
+
+def test_a_target_file_ceiling_reaches_the_scan() -> None:
+    """An adapter that reports seed_tool_ceiling=12 gets every tool probed."""
+    descriptor = TargetDescriptor(
+        target_id="mcp:custom-app",
+        kind="mcp",
+        system_prompt="x",
+        tools=_tools(12),
+        weakness_classes=["W4"],
+    )
+    adapter = _Adapter(descriptor)
+    adapter.seed_tool_ceiling = 12  # type: ignore[attr-defined]
+    engine = ScanEngine(
+        config=_config(),
+        adapter=adapter,  # type: ignore[arg-type]
+        attack_modules=[_Module([_payload("synth-w4-unconfirmed-delete_record_0", "W4")])],
+        customiser=_Customiser(),  # type: ignore[arg-type]
+        judge=_JudgeNo(),  # type: ignore[arg-type]
+    )
+    result = asyncio.run(engine.run())
+    assert not any(a.judge_evidence.get(SYNTHESIS_CAPPED_KEY) for a in result.report.attempts)
+
+
+def test_no_attack_emitted_rows_also_render_as_not_tested() -> None:
+    from mylonite.contracts._types import ScanAttempt
+    from mylonite.scan.coverage import NO_ATTACK_EMITTED_KEY
+
+    row = ScanAttempt(
+        seed_id="no-attack-emitted:W4",
+        pattern_id="no-attack-emitted:W4",
+        outcome="not_applicable",
+        judge_evidence={NO_ATTACK_EMITTED_KEY: "true", "weakness": "W4"},
+    )
+    assert row_mark(row, OUTCOME_MARKS) == "⚠ NOT TESTED"
+    plain = ScanAttempt(seed_id="s", pattern_id="s", outcome="not_applicable")
+    assert row_mark(plain, OUTCOME_MARKS) == OUTCOME_MARKS["not_applicable"]

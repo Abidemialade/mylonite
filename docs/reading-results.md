@@ -40,8 +40,8 @@ evidence behind it:
     | `skipped_invalid_metadata` / `skipped_unknown_seed` | the attempt was malformed before it ran |
     | `skipped_planner_failure` / `error` | the run broke before a verdict |
     | `error` with [`MYL-NT-015`](reason-codes.md#myl-nt-015) | the attack module for this class failed to load; the `attack modules:` line names it |
-    | `not_applicable` with [`MYL-NT-016`](reason-codes.md#myl-nt-016) | no attack module in this run emitted an attack for this class, such as W3 or W4 on a `transport: rest` target |
-    | `not_applicable` with [`MYL-NT-017`](reason-codes.md#myl-nt-017) | a W3 or W4 class on a custom target that ran with no `effect_probe`: its effect can be neither confirmed nor ruled out |
+    | `not_applicable` with [`MYL-NT-016`](reason-codes.md#myl-nt-016) | no attack module in this run emitted an attack for this class, such as W3 or W4 on a `transport: rest` target — shown as `⚠ NOT TESTED` |
+    | `not_applicable` with [`MYL-NT-017`](reason-codes.md#myl-nt-017) | a W3 or W4 class on a custom target that ran with no `effect_probe`: its effect can be neither confirmed nor ruled out — shown as `⚠ NOT TESTED` |
     | `not_applicable` with [`MYL-NT-018`](reason-codes.md#myl-nt-018) | a tool the per-class probe ceiling left without a probe — shown as `⚠ NOT TESTED` |
     | `not_applicable` with [`MYL-NT-019`](reason-codes.md#myl-nt-019) | a seed that had not finished when the scan stopped early — shown as `⚠ NOT TESTED` |
 
