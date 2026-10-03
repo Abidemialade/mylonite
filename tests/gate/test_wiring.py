@@ -30,6 +30,11 @@ def _exploit(pattern_id: str) -> Any:
 class _FakePrMod:
     """Stands in for ``mylonite.gate.pr``: records the call, never touches git."""
 
+    # The real error type, not a stand-in -- open_pr_fn raises `pr_mod.GatePrError`
+    # off whichever `pr_mod` it was given, and cli.py's `except pr_mod.GatePrError`
+    # only works because production code always passes the real module.
+    GatePrError = pr_mod.GatePrError
+
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
@@ -108,6 +113,42 @@ def test_open_pr_fn_writes_target_before_workflows_and_threads_secret_vars(
     assert "repository secret" in body_sent.lower()
 
 
+def test_open_pr_fn_threads_the_targets_command_into_the_workflows(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """P3/P5: the scaffolded workflow gets a Node setup step when the
+    target's own `command:` is `npx` -- read back via `load_target_file`,
+    not re-parsed by hand."""
+    monkeypatch.chdir(tmp_path)
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text(
+        'family: demo\ncommand: npx\nargs: ["-y", "@modelcontextprotocol/server-fetch"]\n',
+        encoding="utf-8",
+    )
+    pr_mod_fake = _FakePrMod()
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest",
+        workflows=True,
+        target_file=target_file,
+        pr_mod=pr_mod_fake,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    out_dir.mkdir(parents=True)
+
+    open_pr_fn(
+        out_dir=out_dir,
+        findings=[(_exploit("p1"), SimpleNamespace(test_filename="test_p1.py"))],
+        body="## What Mylonite found\n",
+        open_pr=False,
+    )
+
+    gate_workflow = (tmp_path / ".github" / "workflows" / "mylonite-gate.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "setup-node" in gate_workflow
+
+
 def test_open_pr_fn_no_target_file_no_secrets_notice(tmp_path: Path, monkeypatch: Any) -> None:
     monkeypatch.chdir(tmp_path)
     pr_mod = _FakePrMod()
@@ -130,6 +171,121 @@ def test_open_pr_fn_no_target_file_no_secrets_notice(tmp_path: Path, monkeypatch
 
     body_sent = pr_mod.calls[0]["pr_body"]
     assert "repository secret" not in body_sent.lower()
+
+
+# ---------------------------------------------------------------------------
+# #224: a bundled MCP target (no --target-file, no file of its own) can't
+# publish a workflow/PR whose emitted test has no target.yaml to load.
+# ---------------------------------------------------------------------------
+
+
+def test_open_pr_fn_refuses_workflows_for_a_bundled_target_with_no_target_file(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    fake = _FakePrMod()
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest",
+        workflows=True,
+        target_file=None,
+        pr_mod=fake,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    out_dir.mkdir(parents=True)
+
+    bundled = SimpleNamespace(pattern_id="p1", target_id="mcp:github:owner/repo")
+    with pytest.raises(pr_mod.GatePrError, match="scan --scaffold"):
+        open_pr_fn(
+            out_dir=out_dir,
+            findings=[(bundled, SimpleNamespace(test_filename="test_p1.py"))],
+            body="## What Mylonite found\n",
+            open_pr=False,
+        )
+    assert not fake.calls, "must refuse before ever reaching the git/gh step"
+
+
+def test_open_pr_fn_refuses_open_pr_too_for_a_bundled_target(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """The same refusal on `--open-pr` alone, not just `--workflows`."""
+    monkeypatch.chdir(tmp_path)
+    fake = _FakePrMod()
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest",
+        workflows=False,
+        target_file=None,
+        pr_mod=fake,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    out_dir.mkdir(parents=True)
+
+    bundled = SimpleNamespace(pattern_id="p1", target_id="mcp:fetch")
+    with pytest.raises(pr_mod.GatePrError, match="scan --scaffold"):
+        open_pr_fn(
+            out_dir=out_dir,
+            findings=[(bundled, SimpleNamespace(test_filename="test_p1.py"))],
+            body="## What Mylonite found\n",
+            open_pr=True,
+        )
+
+
+def test_open_pr_fn_does_not_refuse_a_reference_target(tmp_path: Path, monkeypatch: Any) -> None:
+    """A reference-target run also has no target_file and no target.yaml --
+    but its test replays the bundled twin, never a co-located file, so it
+    is not the #224 gap."""
+    monkeypatch.chdir(tmp_path)
+    fake = _FakePrMod()
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest",
+        workflows=True,
+        target_file=None,
+        pr_mod=fake,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    out_dir.mkdir(parents=True)
+
+    reference = SimpleNamespace(pattern_id="p1", target_id="reference:vulnerable")
+    open_pr_fn(
+        out_dir=out_dir,
+        findings=[(reference, SimpleNamespace(test_filename="test_p1.py"))],
+        body="## What Mylonite found\n",
+        open_pr=False,
+    )
+    assert fake.calls, "a reference-target run must reach the git/gh step"
+
+
+def test_open_pr_fn_does_not_refuse_when_a_target_yaml_is_already_co_located(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """generate's own candidate-adoption check (is_custom) may already have
+    left a target.yaml next to the kept finding from an earlier run -- that
+    satisfies the same need --target-file would, so don't refuse."""
+    monkeypatch.chdir(tmp_path)
+    fake = _FakePrMod()
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest",
+        workflows=True,
+        target_file=None,
+        pr_mod=fake,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    out_dir.mkdir(parents=True)
+    (out_dir / "target.yaml").write_text(
+        "family: demo\ncommand: python\nargs: []\n", encoding="utf-8"
+    )
+
+    bundled = SimpleNamespace(pattern_id="p1", target_id="mcp:custom")
+    open_pr_fn(
+        out_dir=out_dir,
+        findings=[(bundled, SimpleNamespace(test_filename="test_p1.py"))],
+        body="## What Mylonite found\n",
+        open_pr=False,
+    )
+    assert fake.calls, "an already-co-located target.yaml must not be refused"
 
 
 # ---------------------------------------------------------------------------
