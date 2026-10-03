@@ -60,6 +60,7 @@ benchmarks. The harness is in this repository and you can run it yourself.
 
 ### Results against third-party targets
 
+<!-- claim:readme-email-server-kept -->
 - **A kept finding on a third-party MCP email server.** The attack succeeded **5 times out
   of 5** against the server as shipped, and **0 times out of 5** with the safeguard in
   place. Scope of that run: the server needed two fixes before it would start at all (a
@@ -67,13 +68,16 @@ benchmarks. The harness is in this repository and you can run it yourself.
   when the app's system prompt tells the agent to send without asking, and the safeguard
   was Mylonite's boundary stand-in rather than a second build of the server. Full detail in
   [the capability matrix](./verification/CAPABILITY_MATRIX.md).
+<!-- claim:readme-echo-mcp-no-false-alarms -->
 - **No false alarms** on a third-party server with nothing wrong with it (Enkrypt's
   `echo_mcp`). Running the same comparison against a *hardened* third-party server is still
   outstanding — see
   [verification](./docs/verification.md#layer-3--precision-false-positives-on-known-good-targets).
+<!-- claim:readme-mcpsecbench-discarded-flaky -->
 - **A real weakness found in a published vulnerable-MCP corpus** (MCPSecBench). When that
   finding was re-run to confirm it, it failed to reproduce (0 of 3 runs), so Mylonite
   discarded it instead of shipping a flaky test.
+<!-- claim:readme-judge-checked-agentdojo-transcripts -->
 - **The judge checked against real third-party examples** — AgentDojo transcripts from
   models that genuinely fell for attacks, not examples we wrote ourselves.
 - **The safety rails hold under test.** A check that could not be run is never reported as
@@ -84,17 +88,20 @@ benchmarks. The harness is in this repository and you can run it yourself.
 
 Published for the same reason the positive ones are.
 
+<!-- claim:readme-dvmcp-unmeasured -->
 - **DVMCP recall is unmeasured, not a result.** The published 0.9.0 figure read 0/8, but
   the harness that produced it had two defects that could each force a miss regardless of
   what the scan actually found: the scorer folded any untested challenge into "missed"
   instead of reporting it separately (fixed, issue #136), and the documented campaign
   workflow saves a report with no per-attempt weakness class, so the found count reads 0
   whatever the scan did (still open). Treat 0/8 as unmeasured until Layer 1 is re-run.
+<!-- claim:readme-injecagent-f1 -->
 - **On InjecAgent** (100 cases per split, using a local `llama3.2:3b`) the judge scored
   **F1 1.000** on the direct-harm split and **F1 0.833 at 0.714 recall** on the
   data-stealing split in 0.10.0 (0.9.0 measured 0.400 at 0.25 recall). That recall rests
   on only 7 attacks that succeeded, so we record it as unresolved at this sample size, not
   as an improvement. The gap between the splits is the finding, so both are published.
+<!-- claim:readme-agentdojo-judge-agreement -->
 - **Judge agreement of F1 0.81 (precision 0.68, recall 1.00)** against AgentDojo's own
   labels. The judge doesn't miss real attacks on this sample — it over-flags: it asks "did
   harm actually happen?", AgentDojo asks "was the exact goal achieved?", and on 7 of 27
@@ -114,6 +121,7 @@ Published for the same reason the positive ones are.
   [below](#finding-nothing-is-also-a-result).
 - **The evidence rests largely on one model** — Claude Haiku 4.5 — at small, deliberately
   cost-capped sample sizes.
+<!-- claim:readme-measurement-window -->
 - **The published figures were measured between 25 June and 14 September 2026.** The
   benchmark results carry the version they were measured against
   (`verification/results/0.9.0/` and `verification/results/0.10.0/`); the run logs in the
@@ -149,6 +157,7 @@ then hold the model constant and switch only your safeguard. The result is evide
 
 ## Project status
 
+<!-- claim:readme-project-status -->
 **Beta, and essentially a single maintainer** — one outside contribution to date, the rest
 of the history from the maintainer and Dependabot. Over 2,300 tests, with CI (ruff, mypy,
 pytest, pre-commit) enforced on every pull request. The extension points are versioned
@@ -181,6 +190,7 @@ never need a model at all, and `demo` replays recorded responses rather than cal
 uvx --from "mylonite[demo]" mylonite demo
 ```
 
+<!-- claim:readme-demo-ci-matrix -->
 On every pull request, CI builds Mylonite from source and runs this command against that
 build on Python 3.14, on Linux and Windows, in an 80-column terminal.
 
@@ -313,6 +323,7 @@ entry-point plugins are covered in the [architecture guide](./docs/architecture.
 
 ## Compliance metadata
 
+<!-- claim:readme-compliance-frameworks -->
 Every test and every finding carries tags from four frameworks: **OWASP LLM Top 10 2025**,
 **OWASP ASI 2026**, **MITRE ATLAS**, and **NIST AI RMF**. They ride into the pytest markers,
 the SARIF output and the JSON bundle, so a finding traces back to the control catalogue your
@@ -323,6 +334,8 @@ auditors already use. See [docs/standards-mapping.md](./docs/standards-mapping.m
 **Full docs site:** [abidemialade.github.io/mylonite](https://abidemialade.github.io/mylonite/)
 (or `mkdocs serve` from a checkout). Highlights:
 
+- [The journey](./docs/journey/index.md) — one page per step, from a clean
+  checkout to a committed, re-provable gate.
 - [Quickstart](./docs/quickstart.md) · [Test your own app](./docs/test-your-app.md) — install and point it at your MCP server.
 - [Weakness classes](./docs/weakness-classes.md) · [Attack modes](./docs/attack-modes.md) — what is tested, and how the attacks work.
 - [The validation engine](./docs/validation.md) — how the safeguard comparison works.
@@ -331,6 +344,7 @@ auditors already use. See [docs/standards-mapping.md](./docs/standards-mapping.m
 - [Reading the results](./docs/reading-results.md) · [CLI reference](./docs/cli-reference.md) · [target.yaml](./docs/target-file.md).
 - [CI gating](./docs/ci-gating.md) · [Re-validate on a new model](./docs/model-upgrade.md) — keep the gate proving your safeguard as models change.
 - [Architecture](./docs/architecture.md) · [Plugin authoring](./docs/plugin-authoring.md) · [Threat model](./docs/threat-model.md).
+- [Claims register](./docs/claims.md) — every factual claim above, with its evidence.
 - [ROADMAP.md](./ROADMAP.md) · [CONTRIBUTING.md](./CONTRIBUTING.md) · [GOVERNANCE.md](./GOVERNANCE.md) · [SECURITY.md](./SECURITY.md).
 
 ## Responsible use

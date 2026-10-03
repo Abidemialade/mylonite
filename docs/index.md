@@ -54,6 +54,8 @@ control of that class closes it, not that your specific implementation does.
 
 ## Where to go next
 
+- [The journey](journey/index.md) — the seven-step path from a clean checkout
+  to a committed, re-provable gate, one page per step.
 - [Quickstart](quickstart.md) — install and run the end-to-end pipeline in a few commands.
 - [Try it — the reference app](quarry.md) — run Mylonite against a deliberately
   vulnerable reference agent.
