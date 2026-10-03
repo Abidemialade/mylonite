@@ -17,6 +17,7 @@ context manager guarantees subprocess cleanup.
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
@@ -27,6 +28,8 @@ from mcp.client.stdio import stdio_client
 
 # Import the package init so per-target predicates register.
 import mylonite.plugins._mcp  # noqa: F401
+from mylonite._redaction import redact
+from mylonite.contracts import TargetDescriptor
 from mylonite.plugins._mcp import target_registry
 
 # Re-exported from the transport-agnostic base so existing import paths
@@ -47,9 +50,26 @@ from mylonite.plugins._mcp._session_adapter import (  # noqa: F401
     _render_seed_args,
     _serialise_tools,
     _truncate_result,
+    _unwrap_sole_exception,
     _user_message_for_drive,
 )
+from mylonite.scan._types import AdapterDescribeFailed
 from mylonite.scan.llm_types import CompletionFn
+
+# #195: the SDK's own stdio read loop calls `logger.exception(...)` for EVERY
+# line of a server's stdout that isn't valid JSON-RPC -- one full Python
+# traceback per line, straight to stderr via `logging.lastResort` (mylonite
+# configures no handler of its own for third-party loggers). A target that
+# prints debug/log noise to stdout instead of (or mixed with) the JSON-RPC
+# stream -- a common misconfiguration, not a mylonite bug -- floods the
+# console with tracebacks for every such line, on every attempt. The parse
+# failure is re-raised through the stream regardless, so our own
+# `MCPSessionAdapterBase.describe()`/`invoke()` catch sites already turn the
+# resulting connection failure into one clear, operator-facing line (e.g. "the
+# server closed the connection") -- this traceback spam adds nothing. Quiet
+# the SDK's logger at the source rather than at every one of our own catch
+# sites; CRITICAL still reaches a handler if this logger is ever elevated.
+logging.getLogger("mcp.client.stdio").setLevel(logging.CRITICAL)
 
 #: Parent-environment variables a spawned MCP server may inherit. Everything
 #: else — provider API keys, GITHUB_TOKEN, cloud credentials — is withheld: we
@@ -228,6 +248,34 @@ class MCPStdioAdapter(MCPSessionAdapterBase):
             f"MCP stdio target — family={self._family!r}, "
             f"scope={self._scope!r}. Fresh subprocess per invocation."
         )
+
+    async def describe(self) -> TargetDescriptor:
+        try:
+            return await super().describe()
+        except AdapterDescribeFailed:
+            # The base class already produced an operator-ready message (a
+            # timeout naming timeout_s) -- show it verbatim.
+            raise
+        except Exception as exc:
+            # #210: a launch failure (a typo'd `command:`, a binary not on
+            # PATH, an uninstalled npx/uvx package, or a server that exits
+            # immediately) used to reach the operator as a raw, unnamed
+            # exception -- "which command even tried to run?" is the first
+            # question, and nothing here answered it. Name it, the same way
+            # invoke()'s failure path already does for a live attempt (see
+            # MCPSessionAdapterBase.invoke's "For a launch failure also name
+            # the command" comment) -- redacted: args routinely carry a
+            # secret as a CLI flag (`npx server --api-key=...`).
+            cause = _unwrap_sole_exception(exc)
+            try:
+                where = redact("; ".join(self._describe_data_sources()))
+            except Exception:
+                where = ""
+            detail = f" [{where}]" if where else ""
+            raise AdapterDescribeFailed(
+                f"could not launch or connect to the target{detail}: "
+                f"{self._skip_exception_detail(cause)}"
+            ) from exc
 
 
 # --- v0.2.2 bundled 0-arg subclasses -----------------------------------------

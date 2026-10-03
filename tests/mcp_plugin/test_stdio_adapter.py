@@ -845,6 +845,71 @@ async def test_describe_timeout_message_says_bundled_targets_cannot_set_it() -> 
 
 
 @pytest.mark.asyncio
+async def test_describe_launch_failure_names_the_command() -> None:
+    """#210: a missing executable (a typo'd `command:`, a binary not on
+    PATH, an uninstalled npx/uvx package) used to reach the operator as a
+    raw, unnamed exception. It must now become an AdapterDescribeFailed that
+    names the command that failed to start."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.scan._types import AdapterDescribeFailed
+
+    @asynccontextmanager
+    async def _missing_binary_open(*_a: Any, **_kw: Any):
+        raise FileNotFoundError(2, "No such file or directory")
+        yield  # pragma: no cover - never reached
+
+    with patch.object(stdio_adapter, "_open_mcp_session", _missing_binary_open):
+        adapter = MCPStdioAdapter(family="fetch", scope=None)
+        with pytest.raises(AdapterDescribeFailed) as excinfo:
+            await adapter.describe()
+    message = str(excinfo.value)
+    assert "FileNotFoundError" not in message.split(":")[0]  # not a bare class-name lead
+    assert "mcp:fetch" in message or "fetch" in message
+
+
+@pytest.mark.asyncio
+async def test_describe_launch_failure_redacts_a_credential_shaped_arg(
+    tmp_path: Path,
+) -> None:
+    """The command/args a launch failure names can carry a credential as a
+    CLI flag (`server --api-key=...`) -- the message must redact it, the
+    same guarantee `invoke()`'s own launch-failure naming already gives."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+    from mylonite.scan._types import AdapterDescribeFailed
+
+    secret = "sk-live-abcdefghijklmnopqrstuvwxyz"  # pragma: allowlist secret
+    target_registry.clear_runtime_targets()
+    try:
+        tf = TargetFile(
+            family="custom-secret-srv",
+            command="python",
+            args=["-m", "srv", f"--api-key={secret}"],
+        )
+        target_registry.register_target(build_target_spec(tf))
+        adapter = MCPStdioAdapter(family="custom-secret-srv", scope=None)
+
+        @asynccontextmanager
+        async def _missing_binary_open(*_a: Any, **_kw: Any):
+            raise FileNotFoundError(2, "No such file or directory")
+            yield  # pragma: no cover - never reached
+
+        with (
+            patch.object(stdio_adapter, "_open_mcp_session", _missing_binary_open),
+            pytest.raises(AdapterDescribeFailed) as excinfo,
+        ):
+            await adapter.describe()
+    finally:
+        target_registry.clear_runtime_targets()
+    message = str(excinfo.value)
+    assert secret not in message
+    assert "--api-key=" in message  # the flag name/shape still shows -- only the value is masked
+
+
+@pytest.mark.asyncio
 async def test_invoke_happy_path_returns_adapter_response(tmp_path: Path) -> None:
     """Planner stub calls write_file once then says done; adapter records it."""
 

@@ -4283,11 +4283,34 @@ def test_render_validation_report_effect_remediation_is_generic_without_the_clau
 def test_scan_custom_w2_without_seed_arm_blocks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Declaring W2 (indirect-injection-only) with no seed_arm blocks a real scan."""
+    """Declaring W2 (indirect-injection-only) with no seed_arm blocks a real scan.
+
+    The fake session's tool surface has no store/recall-shaped tool at all,
+    so the auto-wire probe's own describe() call succeeds (no launch
+    failure to misreport -- #210) and the block comes from the real cause:
+    nothing to plant the indirect-injection payload into.
+    """
+    from contextlib import asynccontextmanager
+
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")  # pragma: allowlist secret
-    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp import stdio_adapter, target_registry
 
     target_registry.clear_runtime_targets()
+
+    class _FakeSession:
+        async def initialize(self) -> None:
+            return None
+
+        async def list_tools(self) -> Any:
+            tool = SimpleNamespace(name="lookup_status", description="read-only", inputSchema={})
+            return SimpleNamespace(tools=[tool])
+
+    @asynccontextmanager
+    async def _fake_open(*_a: Any, **_k: Any):  # type: ignore[no-untyped-def]
+        yield _FakeSession()
+
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _fake_open)
+
     p = tmp_path / "t.yaml"
     p.write_text(
         "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",
