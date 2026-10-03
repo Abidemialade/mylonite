@@ -18,8 +18,8 @@ counted. `--max-llm-calls` is a softer per-scan budget, described below.
 --enforce` — see [experimental.md](experimental.md)) · `2` config or usage error (incl. an
 empty scan) · `3` LLM-call budget or the hard request ceiling exceeded · `4` no model
 chosen, or the chosen provider unreachable · `5` test rejected
-(not kept) · `6` `gate`: the test generator returned nothing (internal collaborator
-failure) · `7` `gate`: the validator returned nothing (internal collaborator failure) · `8`
+(not kept), or `generate` refused an input whose validation did not keep it · `6`
+`gate`: the test generator returned nothing (internal collaborator failure) · `7` `gate`: the validator returned nothing (internal collaborator failure) · `8`
 `gate`: the git/gh step failed (your findings and validation report are still in `--out`).
 
 Budget exhaustion always exits `3`, whichever layer of the run observes it first — and it
@@ -227,11 +227,23 @@ ignored when you pass `scan_path` directly); `--out PATH`;
 `--target-file PATH` (custom targets — co-locates the YAML so the live test re-drives
 your app; usually not needed, since this auto-resolves `target.yaml` from the scan
 directory `scan_path` points at — pass it only when that file isn't there);
-`--prove-control` (emit a control-efficacy test).
+`--prove-control` (emit a control-efficacy test); `--unvalidated` (see below).
 
 ```bash
 mylonite generate --latest --out .mylonite/generated/my-finding
 ```
+
+A test written from a scan is a candidate until `validate` keeps it, so its first
+line reads `# mylonite: unvalidated` and a short UNVALIDATED header follows. The
+command prints an UNVALIDATED line with the `validate` command to run. When
+`validate` returns **KEPT** it removes the header; a **STABLE, NOT PROVEN** or
+**REJECTED** verdict leaves it in place.
+
+`generate` reads the `validation_report.json` next to the input exploit, if there
+is one (`validate` and `gate` write it). If that report is KEPT, the test is
+written without the header. If it is REJECTED, STABLE, NOT PROVEN or unreadable,
+`generate` writes nothing and exits `5`. Pass `--unvalidated` to write the test
+anyway, with the header.
 
 ## `validate` — prove the test
 
