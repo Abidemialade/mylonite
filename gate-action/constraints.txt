@@ -1,0 +1,11 @@
+# Pins the scaffolded gate workflow's install to an exact, verified
+# LiteLLM release, rather than whatever PyPI serves `pip install` that day --
+# LiteLLM had a real supply-chain compromise (24 Mar 2026, 1.82.7/1.82.8).
+#
+# This is an EXACT pin, not a hash lock. `pip install -c constraints.txt
+# --require-hashes` needs a hash for every package in the resolved tree
+# (not just this one), which in turn needs a network resolve to collect --
+# unavailable where this file was written. Raise the pin alongside
+# pyproject.toml's own litellm floor; never past its <2.0 ceiling without
+# re-verifying against the new range first.
+litellm==1.88.1

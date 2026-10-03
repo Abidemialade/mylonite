@@ -38,7 +38,7 @@ def test_write_workflows_creates_both_with_runs_on(tmp_path):
         text = p.read_text(encoding="utf-8")
         assert "__RUNS_ON__" not in text  # token substituted
         assert "__MYLONITE_MODEL__" not in text  # ditto for the model token
-        if p.suffix != ".yml":  # the vendored P2 constraints file isn't a workflow
+        if p.suffix != ".yml":  # the vendored constraints file isn't a workflow
             continue
         doc = yaml.safe_load(text)
         job = next(iter(doc["jobs"].values()))
@@ -433,8 +433,8 @@ def test_target_secrets_are_checked_non_empty_before_the_gate_runs(tmp_path, nam
 
 
 # ---------------------------------------------------------------------------
-# T3/DoD2: the credential env var is read from the gate run's own resolved
-# provider, never hardcoded to Anthropic's.
+# The credential env var is read from the gate run's own resolved provider,
+# never hardcoded to Anthropic's.
 # ---------------------------------------------------------------------------
 
 
@@ -478,7 +478,7 @@ def test_write_workflows_refuses_a_multi_key_provider(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# GT8: SHA-pinned actions, concurrency, timeout-minutes.
+# SHA-pinned actions, concurrency, timeout-minutes.
 # ---------------------------------------------------------------------------
 
 
@@ -509,7 +509,7 @@ def test_emitted_workflows_set_concurrency_and_timeout(tmp_path, name, job):
 
 
 # ---------------------------------------------------------------------------
-# TK-3 carry: explicit MYLONITE_REDRIVE_ATTEMPTS per job.
+# Explicit MYLONITE_REDRIVE_ATTEMPTS per job.
 # ---------------------------------------------------------------------------
 
 
@@ -522,6 +522,19 @@ def test_gate_workflow_sets_one_redrive_attempt(tmp_path):
     assert doc["jobs"]["gate"]["env"]["MYLONITE_REDRIVE_ATTEMPTS"] == "1"
 
 
+@pytest.mark.parametrize(
+    ("name", "job"), [("mylonite-gate.yml", "gate"), ("mylonite-discovery.yml", "discover")]
+)
+def test_emitted_workflows_pass_through_optional_llm_headers(tmp_path, name, job):
+    """MYLONITE_LLM_HEADERS is an optional repository secret, mapped through
+    env: only -- never interpolated into a run: script."""
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
+    doc = yaml.safe_load(next(p for p in written if p.name == name).read_text(encoding="utf-8"))
+    assert doc["jobs"][job]["env"]["MYLONITE_LLM_HEADERS"] == "${{ secrets.MYLONITE_LLM_HEADERS }}"
+
+
 def test_discovery_workflow_sets_three_redrive_attempts(tmp_path):
     written = write_workflows(
         tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
@@ -532,8 +545,7 @@ def test_discovery_workflow_sets_three_redrive_attempts(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# P3/P5: Node/uv setup emitted only when the target's launch command needs
-# it.
+# Node/uv setup emitted only when the target's launch command needs it.
 # ---------------------------------------------------------------------------
 
 

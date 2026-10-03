@@ -16,21 +16,19 @@ _TEMPLATES = ("mylonite-gate.yml", "mylonite-discovery.yml")
 
 #: Launch commands that need a runtime setup step before the target can be
 #: spawned — a hosted runner has neither Node nor uv preinstalled the way it
-#: has Python (T3's sibling findings P3/P5: a target launched with
-#: npx/uvx/node/uv otherwise fails to launch in CI with no clearer message
-#: than "command not found").
+#: has Python, so a target launched with npx/uvx/node/uv otherwise fails to
+#: launch in CI with no clearer message than "command not found".
 _NODE_COMMANDS = frozenset({"npx", "node"})
 _UV_COMMANDS = frozenset({"uvx", "uv"})
 
 
 def _llm_key_env_var(model: str) -> str:
     """The credential env var name for ``model``'s provider — read from the
-    approved-provider registry rather than always assuming one provider
-    (T3): the scaffolded workflow used to map the gate secret to a single
-    hardcoded provider's key variable unconditionally, so a different
-    provider's user had their gate job fail in CI with no useful message,
-    and a finding made with a local model re-drove it on a runner that has
-    none.
+    approved-provider registry rather than always assuming one provider: the
+    scaffolded workflow used to map the gate secret to a single hardcoded
+    provider's key variable unconditionally, so a different provider's user
+    had their gate job fail in CI with no useful message, and a finding made
+    with a local model re-drove it on a runner that has none.
 
     Raises :class:`GatePrError` when the model's provider is local
     (:attr:`~mylonite.providers.registry.ProviderInfo.local`, e.g. Ollama/
@@ -70,9 +68,9 @@ def _runtime_setup_step(command: str | None) -> str:
     """A step that installs the runtime ``command`` needs, inserted before
     the step that installs/runs mylonite — empty (nothing emitted) when the
     target launches with ``python`` or its command is unknown, since the
-    Python ``actions/setup-python`` already set up is enough (P3/P5): a
-    target launched via `npx`/`node` or `uvx`/`uv` otherwise has nothing on
-    the runner to launch it with.
+    Python ``actions/setup-python`` already set up is enough: a target
+    launched via `npx`/`node` or `uvx`/`uv` otherwise has nothing on the
+    runner to launch it with.
     """
     if command in _NODE_COMMANDS:
         lines = [
@@ -214,9 +212,9 @@ def write_workflows(
       the gate, that fails the job naming each target secret that is empty
       (see :func:`_target_secrets_check_step`); removed when there are none.
     * ``__LLM_KEY_ENV__`` -> the credential env var for ``model``'s provider
-      (T3; see :func:`_llm_key_env_var`) — never hardcoded to Anthropic's.
+      (see :func:`_llm_key_env_var`) — never hardcoded to Anthropic's.
     * ``__RUNTIME_SETUP_STEP__`` -> a Node/uv setup step when
-      ``target_command`` needs one (P3/P5; see :func:`_runtime_setup_step`);
+      ``target_command`` needs one (see :func:`_runtime_setup_step`);
       removed when the target launches with Python or ``target_command`` is
       unknown (``None`` — a reference/bundled target, or a caller that
       doesn't have it).
@@ -259,7 +257,7 @@ def write_workflows(
         out = dest / name
         out.write_text(text, encoding="utf-8")
         written.append(out)
-    # P2: a pinned, exact-version constraints file both templates' install
+    # A pinned, exact-version constraints file both templates' install
     # steps apply (`pip install ... -c mylonite-constraints.txt`) — vendored
     # verbatim (no tokens) so a LiteLLM compromise like 24 Mar 2026's doesn't
     # reach a scaffolded CI run just because PyPI resolved a newer release
