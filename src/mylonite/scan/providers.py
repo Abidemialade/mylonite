@@ -413,6 +413,16 @@ LOCAL_MODEL_HINT = (
 _DRY_RUN_HINT = "Or preview what would run, with no LLM calls: add --dry-run."
 
 
+#: Credential warnings already printed in this run; reset with the rest of
+#: the per-run state by :func:`mylonite.scan.llm_headers.reset_llm_headers`.
+_emitted_warnings: set[str] = set()
+
+
+def reset_emitted_warnings() -> None:
+    """Forget which credential warnings were printed (a new run)."""
+    _emitted_warnings.clear()
+
+
 def require_llm_configured_or_exit(
     *models: str,
     provider: str | None = None,
@@ -455,7 +465,10 @@ def require_llm_configured_or_exit(
         except LLMNotConfiguredError as exc:
             echo_err(f"{exc}\n{LOCAL_MODEL_HINT}" + (f"\n{_DRY_RUN_HINT}" if dry_run_flag else ""))
             raise typer.Exit(code=EXIT_CONFIG) from exc
-        if warning:
+        if warning and warning not in _emitted_warnings:
+            # scan's seed_arm branch runs this check early, then again for
+            # every role: each warning still prints once per run.
+            _emitted_warnings.add(warning)
             echo_err(warning)
     preflight_model_or_exit(*models, api_base=api_base)
     # Last, once the key is present and the model routes: one tiny live call

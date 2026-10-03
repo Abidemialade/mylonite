@@ -429,9 +429,10 @@ error: --model anthropic/claude-haiku-4-5: Authentication failed (HTTP 401: the 
 invalid or expired) -- set a valid key in ANTHROPIC_API_KEY for provider 'anthropic'.
 ```
 
-A key that needs a header the run did not send (an unscoped key without its workspace
-id) reads `The provider needs the anthropic-workspace-id header with this key (HTTP 400)`
-and names `--llm-header` and `MYLONITE_LLM_HEADERS`. See the
+A key that needs a header the run did not send (for example, an unscoped key without its
+workspace id) reads `The provider needs the <header> header with this key (HTTP 400)`,
+naming the header the provider's error names (or "a required request header" when it
+names none), and points at `--llm-header` and `MYLONITE_LLM_HEADERS`. See the
 [CLI reference](cli-reference.md) for both.
 
 ### When the provider rate-limits or drops the run

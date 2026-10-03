@@ -107,7 +107,7 @@ from mylonite.scan.assembly import (
     no_usable_modules_message,
     select_attack_modules,
 )
-from mylonite.scan.llm_headers import configured_llm_headers
+from mylonite.scan.llm_headers import LLM_HEADERS_ENV, configured_llm_headers
 from mylonite.scan.preflight import (
     DEFAULT_ITERATION_TIMEOUT_S as _DEFAULT_ITERATION_TIMEOUT_S,  # validate --iteration-timeout
 )
@@ -316,7 +316,8 @@ def _load_env_file(path: Path) -> None:
     from mylonite.scan.providers import looks_like_provider_env_var
 
     def _recognised(key: str) -> bool:
-        return looks_like_provider_env_var(key) or key in _mylonite_env_var_names()
+        names = _mylonite_env_var_names() | {LLM_HEADERS_ENV}  # headers: by exact name
+        return looks_like_provider_env_var(key) or key in names
 
     if not path.exists():
         echo_err(f"env file {path} not found.")

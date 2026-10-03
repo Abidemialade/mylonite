@@ -8,8 +8,10 @@ for the same name, compared case-insensitively.
 
 Header values are treated as secrets. They go into the provider call
 (``LLMPolicy.extra_headers``) and nowhere else: each one is registered with
-:mod:`mylonite._redaction`, so ``redact()`` masks it in every log line and
-console message, and no error here ever echoes one back.
+:mod:`mylonite._redaction`, so ``redact()`` masks it in console messages,
+in log records from any logger, and in persisted error details, and no
+parse error here ever echoes any part of an entry. Values shorter than four
+characters are not registered (masking them would shred ordinary text).
 
 The configured set is process-wide, like the request ceiling: the root CLI
 callback configures it once per invocation.
@@ -42,14 +44,22 @@ class InvalidLLMHeaderError(ValueError):
 
 
 def _parse_entry(entry: str, *, where: str) -> tuple[str, str]:
+    """Split one ``NAME=VALUE`` entry. Errors name only ``where`` and the
+    expected form: a malformed entry may be a secret in another shape (a
+    curl-style ``Name: value``), so no part of it is ever echoed."""
     name, sep, value = entry.partition("=")
     name, value = name.strip(), value.strip()
     if not sep or not name or not value:
-        raise InvalidLLMHeaderError(f"{where}: expected NAME=VALUE with a non-empty name and value")
+        raise InvalidLLMHeaderError(
+            f"{where}: malformed -- expected NAME=VALUE with a non-empty name and value"
+        )
     if not _HEADER_NAME.match(name):
-        raise InvalidLLMHeaderError(f"{where}: {name!r} is not a valid HTTP header name")
+        raise InvalidLLMHeaderError(
+            f"{where}: malformed -- the text before '=' is not a valid HTTP header name "
+            "(use NAME=VALUE, not 'Name: value')"
+        )
     if "\r" in value or "\n" in value:
-        raise InvalidLLMHeaderError(f"{where}: header {name!r} has a line break in its value")
+        raise InvalidLLMHeaderError(f"{where}: malformed -- the value has a line break")
     return name, value
 
 
@@ -100,5 +110,7 @@ def reset_llm_headers() -> None:
     _configured = ()
     clear_secret_values()
     from mylonite.scan.auth_preflight import reset_auth_preflight
+    from mylonite.scan.providers import reset_emitted_warnings
 
     reset_auth_preflight()
+    reset_emitted_warnings()

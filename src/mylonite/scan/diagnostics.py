@@ -11,11 +11,13 @@ for non-LiteLLM exceptions or future type renames.
 
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass
 from typing import Literal
 
-from mylonite.scan.providers import env_vars_for, provider_info_for
+from mylonite._redaction import mask_secret_values
+from mylonite.scan.providers import env_vars_for
 
 DiagnosisCategory = Literal[
     "tls",
@@ -42,7 +44,9 @@ class Diagnosis:
 
 
 def _detail(exc: BaseException) -> str:
-    return f"{type(exc).__name__}: {exc}"
+    """``Type: message``, with registered secret values (``--llm-header``
+    values) masked: the detail reaches exception messages and reports."""
+    return mask_secret_values(f"{type(exc).__name__}: {exc}")
 
 
 def _isinstance_litellm(exc: BaseException, *names: str) -> bool:
@@ -65,18 +69,52 @@ def _isinstance_litellm(exc: BaseException, *names: str) -> bool:
 #: Text that says the key itself was missing, rather than refused.
 _MISSING_KEY_TOKENS = ("no api key", "api key is required", "header is required")
 
+#: A status code written into an error's text ("Error code: 400", "HTTP 401",
+#: "status 400"), for exceptions that carry no ``status_code`` attribute.
+_LABELLED_STATUS_RE = re.compile(r"\b(?:error code|status(?: code)?|http)\W{0,3}(\d{3})\b")
+#: Last resort: a bare 400 or 401 standing alone as a word, so a request id or
+#: a token count that merely contains the digits doesn't count.
+_BARE_STATUS_RE = re.compile(r"(?<![\w.-])(40[01])(?![\w.-])")
 
-def _auth_remedy(provider: str | None, env_var_override: str | None, low: str = "") -> str:
+
+def _status_code(exc: BaseException, low: str) -> int | None:
+    """The HTTP status of a provider failure, or ``None`` when unknown.
+
+    LiteLLM's exceptions carry ``status_code``; that wins. Otherwise the typed
+    class implies it, then a labelled code in the text, then a bare 400/401.
+    """
+    code = getattr(exc, "status_code", None)
+    if isinstance(code, int):
+        return code
+    if _isinstance_litellm(exc, "AuthenticationError"):
+        return 401
+    if _isinstance_litellm(exc, "BadRequestError"):
+        return 400
+    labelled = _LABELLED_STATUS_RE.search(low)
+    if labelled:
+        return int(labelled.group(1))
+    bare = _BARE_STATUS_RE.search(low)
+    return int(bare.group(1)) if bare else None
+
+
+def _auth_remedy(
+    provider: str | None, env_var_override: str | None, low: str = "", status: int | None = None
+) -> str:
     """The remedy for a refused or missing key, naming the key variable.
 
-    A refused key (HTTP 401) reads "invalid or expired"; a key the request
-    never carried reads "no API key". Neither ever points at
-    ``--llm-header``: that is the remedy for a missing extra header, see
-    :func:`_header_remedy`.
+    A key the request never carried reads "no API key"; a refused key reads
+    "invalid or expired", with "HTTP 401" only when the status really was 401.
+    Neither ever points at ``--llm-header``: that is the remedy for a missing
+    extra header, see :func:`_header_remedy`.
     """
     env_vars = env_vars_for(provider, env_var_override)
     missing = any(t in low for t in _MISSING_KEY_TOKENS) or ("missing" in low and "key" in low)
-    cause = "no API key was sent" if missing else "HTTP 401: the key is invalid or expired"
+    if missing:
+        cause = "no API key was sent"
+    elif status == 401:
+        cause = "HTTP 401: the key is invalid or expired"
+    else:
+        cause = "the provider refused the key: invalid or expired"
     if env_vars:
         suffix = f" for provider {provider!r}" if provider else ""
         return (
@@ -93,39 +131,61 @@ def _auth_remedy(provider: str | None, env_var_override: str | None, low: str = 
 #: Names of the key itself: a "header required" error naming one of these is a
 #: missing key, not a missing extra header.
 _KEY_HEADER_TOKENS = ("x-api-key", "api key", "api-key", "api_key", "authorization")
+_NEEDED_TOKENS = ("required", "missing", "must be provided", "must specify")
+#: A hyphenated header name written next to the word "header", either side:
+#: "anthropic-version header is required", "missing header: x-route-id".
+_NAMED_HEADER_RE = re.compile(
+    r"\b([a-z][a-z0-9]*(?:-[a-z0-9]+)+)['\"`]?\s+header\b"
+    r"|\bheader\W{1,3}([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b"
+)
 
 
-def _looks_header_required(exc: BaseException, low: str) -> bool:
+def _known_header_names() -> tuple[str, ...]:
+    from mylonite.providers.registry import PROVIDERS
+
+    return tuple(name for info in PROVIDERS.values() for name in info.extra_headers)
+
+
+def _named_header(low: str) -> str | None:
+    """The header the error text names: a registry header first, else a
+    hyphenated name written beside the word "header", else ``None``."""
+    for name in _known_header_names():
+        if name in low:
+            return name
+    match = _NAMED_HEADER_RE.search(low)
+    if match:
+        return match.group(1) or match.group(2)
+    return None
+
+
+def _looks_header_required(status: int | None, low: str) -> bool:
     """True for a 400 saying the request lacks a required extra header.
 
-    The common case is an unscoped key used without its workspace header. Only
-    a rejected request (a LiteLLM ``BadRequestError`` or a "400" in the text)
-    qualifies, never a 401, and never one that names the key itself.
+    The common case is an unscoped key used without its workspace header. It
+    needs all of: status 400; "required"/"missing"/...; and a real header
+    signal (the word "header", or a registry header name). A 400 that only
+    mentions a workspace (a spend limit, a billing tier) does not qualify,
+    and neither does one naming the key itself.
     """
-    if _isinstance_litellm(exc, "AuthenticationError") or "401" in low:
+    if status != 400:
         return False
-    if not (_isinstance_litellm(exc, "BadRequestError") or "400" in low):
+    if not any(t in low for t in _NEEDED_TOKENS):
         return False
-    needed = any(t in low for t in ("required", "missing", "must be provided", "must specify"))
-    if not needed:
-        return False
-    if "workspace" in low:
+    if any(name in low for name in _known_header_names()):
         return True
     return "header" in low and not any(t in low for t in _KEY_HEADER_TOKENS)
 
 
-def _header_remedy(provider: str | None) -> str:
-    """The remedy for a missing extra header, naming ``--llm-header`` and the
-    env var, plus the provider's own header name when the registry knows it."""
+def _header_remedy(low: str) -> str:
+    """The remedy for a missing extra header: ``--llm-header`` and the env var,
+    naming the header the error itself names (never a guessed default)."""
     from mylonite.scan.llm_headers import LLM_HEADERS_ENV
 
-    info = provider_info_for(provider)
-    names = info.extra_headers if info is not None else ()
-    header = names[0] if names else "NAME"
-    what = f"the {names[0]} header" if names else "an extra request header"
+    name = _named_header(low)
+    what = f"the {name} header" if name else "a required request header"
     return (
         f"The provider needs {what} with this key (HTTP 400) -- pass "
-        f"--llm-header {header}=<value> or set {LLM_HEADERS_ENV}."
+        f"--llm-header {name or 'NAME'}=<value> or set {LLM_HEADERS_ENV}."
     )
 
 
@@ -199,12 +259,13 @@ def classify_provider_error(
     #    BadRequestError branch below would file it as "check --model". Filed
     #    under "auth": like a bad key, it is a credential setup problem that
     #    no retry fixes.
-    if _looks_header_required(exc, low):
-        return Diagnosis("auth", detail, _header_remedy(provider))
+    status = _status_code(exc, low)
+    if _looks_header_required(status, low):
+        return Diagnosis("auth", detail, _header_remedy(low))
 
     # 3. LiteLLM typed exceptions (most reliable cross-provider signal).
     if _isinstance_litellm(exc, "AuthenticationError"):
-        return Diagnosis("auth", detail, _auth_remedy(provider, env_var_override, low))
+        return Diagnosis("auth", detail, _auth_remedy(provider, env_var_override, low, status))
     if _isinstance_litellm(exc, "RateLimitError"):
         return Diagnosis("rate_limit", detail, _RATE_REMEDY)
     if _isinstance_litellm(exc, "Timeout", "APIConnectionError", "ServiceUnavailableError"):
@@ -227,7 +288,7 @@ def classify_provider_error(
     # 4. Substring fallback for non-LiteLLM exceptions (raw ssl/httpx, stubs) or
     #    a future LiteLLM type rename.
     if any(t in low for t in _AUTH_TOKENS) or ("missing" in low and "key" in low):
-        return Diagnosis("auth", detail, _auth_remedy(provider, env_var_override, low))
+        return Diagnosis("auth", detail, _auth_remedy(provider, env_var_override, low, status))
     if any(t in low for t in _RATE_TOKENS):
         return Diagnosis("rate_limit", detail, _RATE_REMEDY)
     if any(t in low for t in _NETWORK_TOKENS):

@@ -448,11 +448,60 @@ def install_log_redaction(enabled: bool = True, logger_name: str = "mylonite") -
     if not enabled:
         for flt in existing:
             target.removeFilter(flt)
+        _REDACTED_TREES.discard(logger_name)
         return
 
+    # A logger-level filter only sees records logged on that exact logger, not
+    # ones propagating up from ``mylonite.scan._llm`` and the rest of the
+    # tree. The record factory below covers the whole tree.
+    _REDACTED_TREES.add(logger_name)
+    _install_redacting_record_factory()
     if existing:
         return
     target.addFilter(SecretRedactingFilter())
+
+
+#: Logger trees (a name and every ``name.*`` child) whose records are fully
+#: redacted at creation. Every other record still has registered secret
+#: values masked, so a header value can't leak through a library's logger
+#: (LiteLLM's own, say) either.
+_REDACTED_TREES: set[str] = set()
+
+
+def _in_redacted_tree(name: str) -> bool:
+    return any(name == tree or name.startswith(tree + ".") for tree in _REDACTED_TREES)
+
+
+def _redact_record(record: logging.LogRecord) -> None:
+    try:
+        message = record.getMessage()
+    except Exception:  # same rule as SecretRedactingFilter: never kill a line
+        record.args = ()
+        return
+    if _in_redacted_tree(record.name):
+        redacted = redact(message)
+    elif _SECRET_VALUES:
+        redacted = mask_secret_values(message)
+    else:
+        return
+    record.msg = redacted
+    record.args = ()
+
+
+def _install_redacting_record_factory() -> None:
+    """Wrap the global log-record factory once, so every record is redacted
+    when it is created, whichever logger in the tree made it."""
+    previous = logging.getLogRecordFactory()
+    if getattr(previous, "_mylonite_redacting", False):
+        return
+
+    def factory(*args: object, **kwargs: object) -> logging.LogRecord:
+        record = previous(*args, **kwargs)
+        _redact_record(record)
+        return record
+
+    factory._mylonite_redacting = True  # type: ignore[attr-defined]
+    logging.setLogRecordFactory(factory)
 
 
 def redact_exception(exc: BaseException) -> str:

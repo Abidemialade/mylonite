@@ -132,6 +132,12 @@ class LLMPolicy:
         # api_base can never reach a live LiteLLM call — this is the ONE
         # chokepoint every policy, from every source, passes through.
         validate_api_base(self.api_base)
+        # Header values are secrets however the policy was built (the CLI
+        # registers them too; a library caller building one directly may not).
+        from mylonite._redaction import register_secret_value
+
+        for _name, value in self.extra_headers:
+            register_secret_value(value)
 
     def kwargs(self) -> dict[str, Any]:
         """The dict to spread into a ``litellm.completion``/``acompletion`` call."""

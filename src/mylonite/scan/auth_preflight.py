@@ -128,6 +128,10 @@ def auth_preflight_or_exit(*models: str, api_base: str | None = None) -> None:
     from mylonite.scan.diagnostics import classify_provider_error
     from mylonite.scan.providers import provider_from_model
 
+    # No policy is scoped yet when the CLI calls this, so ``active_policy()``
+    # is the default one; ``api_base`` and the headers are passed in or read
+    # from the run's configuration instead. A future policy field that changes
+    # routing (an api_version, a key) must be passed through here as well.
     policy = preflight_policy(active_policy(), api_base)
     for model in dict.fromkeys(m for m in models if m):
         if (model, api_base) in _proven or not _needs_key_check(model):

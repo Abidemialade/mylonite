@@ -95,9 +95,9 @@ override something. Pass only the one you mean to use if you want to avoid
 reading that warning.
 
 **A key that needs a header.** If your key needs a header on every request,
-such as the workspace id an unscoped Anthropic key needs (the "Extra headers"
-column above), pass it with the global `--llm-header NAME=VALUE` option or the
-`MYLONITE_LLM_HEADERS` variable. Mylonite never logs or saves the value. See
+for example the workspace id an unscoped Anthropic key needs (the "Extra
+headers" column above), pass it with the global `--llm-header NAME=VALUE`
+option or the `MYLONITE_LLM_HEADERS` variable (which `--env-file` also loads). Mylonite never logs or saves the value. See
 the [CLI reference](cli-reference.md) for details.
 
 ## Does this command need a key?
