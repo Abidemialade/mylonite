@@ -1,0 +1,129 @@
+# Record a kept reference example (and, optionally, the demo fixtures)
+# against a real model, then upload them as an artifact for review.
+#
+# Manual dispatch only: it spends tokens and needs the MYLONITE_LLM_KEY repo
+# secret. It never commits or pushes. Everything it records lands in the
+# runner's temp directory (the kept example) or the runner's own checkout (the
+# demo fixtures), and leaves only as the uploaded artifact; a maintainer
+# reviews that and commits what should ship.
+#
+# Spend is bounded twice: MYLONITE_MAX_LLM_REQUESTS caps the provider requests
+# each recording step may send (retries included), and the job times out.
+# Worst case is 2 x max_llm_calls requests when the demo fixtures are recorded
+# too, 1 x otherwise.
+name: record-reference-example
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Anthropic model to record against, e.g. claude-haiku-4-5-20251001 (required; there is no default)"
+        required: true
+      pattern_id:
+        description: "Reference-app seed to record"
+        default: "excessive-agency-send-email-direct-unconfirmed"
+      max_llm_calls:
+        description: "Provider request cap per recording step (1-400)"
+        default: "200"
+      metamorphic_strategies:
+        description: "Comma-separated deterministic rewordings to record"
+        default: "paraphrase"
+      record_demo_fixtures:
+        description: "Also re-record the demo's scan fixtures with the same model"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: record-reference-example
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_LLM_KEY }}
+    steps:
+      # Refuse rather than skip: this workflow exists only to spend the key,
+      # so a dispatch without one is a mistake to surface, not a quiet no-op.
+      - name: Refuse without a key
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::MYLONITE_LLM_KEY is not set; nothing can be recorded."
+            exit 1
+          fi
+
+      # Dispatch inputs arrive through env, never through `${{ }}` inside a
+      # run: script: they are free text, substituted before bash parses the
+      # line, in a job that holds a provider key.
+      - name: Check the inputs
+        env:
+          MODEL: ${{ inputs.model }}
+          PATTERN_ID: ${{ inputs.pattern_id }}
+          N: ${{ inputs.max_llm_calls }}
+          STRATEGIES: ${{ inputs.metamorphic_strategies }}
+        run: |
+          [[ "$MODEL" =~ ^[A-Za-z0-9._/:-]+$ ]] || { echo "::error::model has unexpected characters"; exit 1; }
+          [[ "$PATTERN_ID" =~ ^[a-z0-9-]+$ ]] || { echo "::error::pattern_id has unexpected characters"; exit 1; }
+          [[ "$STRATEGIES" =~ ^[a-z,-]+$ ]] || { echo "::error::metamorphic_strategies has unexpected characters"; exit 1; }
+          if ! [[ "$N" =~ ^[0-9]{1,3}$ ]] || [ "$N" -lt 1 ] || [ "$N" -gt 400 ]; then
+            echo "::error::max_llm_calls must be a whole number from 1 to 400"
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install (editable, with the reference app)
+        run: |
+          pip install -e ".[dev]"
+          pip install -e ./reference_targets/mcp_kitchen_sink
+
+      - name: Refuse a model the key cannot serve
+        env:
+          MODEL: ${{ inputs.model }}
+        run: |
+          provider="$(python -c 'import sys; from mylonite.scan.providers import provider_from_model as p; print(p(sys.argv[1]) or "")' "$MODEL")"
+          if [ "$provider" != "anthropic" ]; then
+            echo "::error::MYLONITE_LLM_KEY is an Anthropic key; '$MODEL' resolves to provider '${provider:-unknown}'."
+            exit 1
+          fi
+
+      - name: Record the kept example
+        env:
+          MODEL: ${{ inputs.model }}
+          PATTERN_ID: ${{ inputs.pattern_id }}
+          STRATEGIES: ${{ inputs.metamorphic_strategies }}
+          MYLONITE_MAX_LLM_REQUESTS: ${{ inputs.max_llm_calls }}
+        run: |
+          python scripts/record_reference_example.py \
+            --provider anthropic --model "$MODEL" \
+            --pattern-id "$PATTERN_ID" \
+            --metamorphic-strategies "$STRATEGIES" \
+            --example-dir "$RUNNER_TEMP/recorded/kept_example" --force
+
+      - name: Record the demo fixtures
+        if: inputs.record_demo_fixtures
+        env:
+          MODEL: ${{ inputs.model }}
+          MYLONITE_MAX_LLM_REQUESTS: ${{ inputs.max_llm_calls }}
+        run: |
+          python scripts/record_demo_fixtures.py --provider anthropic --model "$MODEL" --force
+          mkdir -p "$RUNNER_TEMP/recorded/demo_fixtures"
+          cp -r src/mylonite/demo/fixtures/. "$RUNNER_TEMP/recorded/demo_fixtures/"
+
+      - name: Upload the recordings
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: recorded-reference-example
+          path: ${{ runner.temp }}/recorded/**
+          if-no-files-found: warn

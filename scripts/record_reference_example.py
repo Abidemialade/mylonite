@@ -36,6 +36,31 @@ probes — is captured. ``record_fixtures_dir`` points at ``fixtures/``, which t
 validator fills with the single-seed guarded set the emitted test replays. One
 live pass produces both.
 
+A third set, ``red_fixtures/``
+------------------------------
+The guarded set proves the test passes when the safeguard holds. Showing the
+same test FAIL on the build without the safeguard needs the vulnerable twin's
+single-seed run recorded too, keyed exactly as the offline replay looks it up:
+``pattern_id_filter`` set, a fresh note-id counter, and the customiser and judge
+ON (``build_scan``'s default, the same wiring ``testkit`` and the validator use).
+The differential set cannot stand in for it: it is one flat directory for the
+whole loop, so it is not a guaranteed match for a standalone single-seed replay.
+After recording, the script replays ``red_fixtures/`` offline and refuses to
+finish unless every lookup hits and the exploit fires.
+
+Choosing the seed and the metamorphic strategies
+------------------------------------------------
+``--pattern-id`` records any kitchen-sink seed (default: the W2 seed below).
+``--metamorphic-strategies`` takes a comma-separated subset of the validator's
+deterministic transforms (default: ``paraphrase``); every strategy recorded
+costs a few more calls per twin.
+
+Bounding the spend
+------------------
+Set ``MYLONITE_MAX_LLM_REQUESTS`` to cap the provider requests this process may
+send, retries included. Past the cap no further request goes out, the run is
+not kept, and the script exits non-zero without writing a validation report.
+
 Why ``--iterations`` defaults to 1
 ----------------------------------
 Recording at more than one iteration is broken by construction, not merely
@@ -76,12 +101,18 @@ import sys
 from pathlib import Path
 
 from mylonite._replay import LiteLLMRecorder
+from mylonite.contracts import ExploitRecord
 from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
 from mylonite.plugins._reference.reference_validator import (
     DifferentialValidator,
     ReferenceVulnerableOracle,
+    _deterministic_strategies,
 )
+from mylonite.scan.engine import ScanEngine, ScanResult
+from mylonite.scan.llm_types import CompletionFn
+from mylonite.scan.seeds import SEED_CATALOGUE
 from mylonite.scan.wiring import build_scan, note_id_counter
+from mylonite.testkit import FIXTURE_FORMAT_VERSION
 
 #: Default provider/model: self-hosted, so the artefact can be reproduced with
 #: no account. Kept in step with the demo's default pair.
@@ -118,29 +149,133 @@ class RecordingFailed(RuntimeError):
     """Raised when the live pass did not produce a committable artefact."""
 
 
-async def _discover_exploit(*, provider: str, model: str, example_dir: Path) -> object:
-    """Run a LIVE vulnerable scan and return the pinned seed's exploit record."""
+#: Where the vulnerable twin's single-seed run is recorded, beside the guarded
+#: ``fixtures/`` set the emitted test replays.
+RED_FIXTURES_DIRNAME = "red_fixtures"
+
+
+def kitchen_sink_pattern_ids() -> list[str]:
+    """Every seed this script can record: the ones aimed at the reference app."""
+    return sorted(s.pattern_id for s in SEED_CATALOGUE if "kitchen-sink" in s.applicable_targets)
+
+
+async def _discover_exploit(
+    *, provider: str, model: str, example_dir: Path, pattern_id: str = EXAMPLE_PATTERN_ID
+) -> ExploitRecord:
+    """Run a LIVE vulnerable scan and return the chosen seed's exploit record."""
     engine = build_scan(
         "vulnerable",
         completion_fn=None,  # live litellm.acompletion
         note_id_factory=note_id_counter(),
         provider=provider,
         model=model,
-        pattern_id_filter=EXAMPLE_PATTERN_ID,
+        pattern_id_filter=pattern_id,
     )
     result = await engine.run()
-    exploit = next((e for e in result.exploits if e.pattern_id == EXAMPLE_PATTERN_ID), None)
+    exploit = next((e for e in result.exploits if e.pattern_id == pattern_id), None)
     if exploit is None:
         fired = sorted(e.pattern_id for e in result.exploits)
         outcomes = {a.pattern_id: a.outcome for a in result.report.attempts}
         raise RecordingFailed(
             f"the live vulnerable scan did not fire the pinned seed "
-            f"{EXAMPLE_PATTERN_ID!r}. Exploits: {fired or '<none>'}. Attempt "
+            f"{pattern_id!r}. Exploits: {fired or '<none>'}. Attempt "
             f"outcomes: {outcomes}. The seed is model-dependent — re-run, or "
             f"pick a planner that lands it, before committing anything."
         )
     print(f"[discover] exploit found for {exploit.pattern_id}")
     return exploit
+
+
+def _red_scan(
+    *, completion_fn: CompletionFn, provider: str, model: str, pattern_id: str
+) -> ScanEngine:
+    """The vulnerable twin's single-seed scan, wired as the offline replay wires it.
+
+    Same call shape as ``testkit._run_guarded_scan`` with the variant swapped:
+    ``pattern_id_filter`` set, a fresh note-id counter, and ``build_scan``'s
+    default ``llm_assist`` (customiser and judge on). Recording and replaying
+    through this one function keeps the two keyed alike.
+    """
+    return build_scan(
+        "vulnerable",
+        completion_fn=completion_fn,
+        note_id_factory=note_id_counter(),
+        provider=provider,
+        model=model,
+        pattern_id_filter=pattern_id,
+    )
+
+
+def _fired(result: ScanResult, pattern_id: str) -> bool:
+    return any(e.pattern_id == pattern_id for e in result.exploits) or any(
+        a.pattern_id == pattern_id and a.outcome == "finding" for a in result.report.attempts
+    )
+
+
+def _outcomes(result: ScanResult) -> dict[str, str]:
+    return {a.pattern_id: str(a.outcome) for a in result.report.attempts}
+
+
+async def record_red_set(*, provider: str, model: str, pattern_id: str, red_dir: Path) -> int:
+    """Record the vulnerable twin's single-seed run, then prove it replays.
+
+    Returns the number of fixture files written. Raises :class:`RecordingFailed`
+    unless the live run fired the exploit with a clean recorder and an offline
+    replay of the written set hits every lookup and fires it again.
+    """
+    red_dir.mkdir(parents=True, exist_ok=True)
+    recorder = LiteLLMRecorder(red_dir, mode="record")
+    result = await _red_scan(
+        completion_fn=recorder, provider=provider, model=model, pattern_id=pattern_id
+    ).run()
+    if recorder.last_error is not None or recorder.cache_misses:
+        raise RecordingFailed(
+            f"the vulnerable single-seed recording is incomplete "
+            f"(error: {recorder.last_error!r}, misses: {recorder.cache_misses})"
+        )
+    if not _fired(result, pattern_id):
+        raise RecordingFailed(
+            f"the vulnerable single-seed run did not fire {pattern_id!r} "
+            f"(outcomes: {_outcomes(result)}), so the recorded test has no failing "
+            "run to show. Re-run, or pick a model that lands the seed."
+        )
+    (red_dir / "_meta.json").write_text(
+        json.dumps(
+            {
+                "cache_key_version": recorder.key_version,
+                "format_version": FIXTURE_FORMAT_VERSION,
+                "provider": provider,
+                "model": model,
+                "pattern_id": pattern_id,
+                "variant": "vulnerable",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    await verify_red_set(provider=provider, model=model, pattern_id=pattern_id, red_dir=red_dir)
+    return len(list(red_dir.glob("*.json"))) - 1
+
+
+async def verify_red_set(*, provider: str, model: str, pattern_id: str, red_dir: Path) -> None:
+    """Replay ``red_dir`` offline; raise unless every lookup hits and it fires."""
+    replay = LiteLLMRecorder(red_dir, mode="replay")
+    result = await _red_scan(
+        completion_fn=replay, provider=provider, model=model, pattern_id=pattern_id
+    ).run()
+    if replay.last_error is not None or replay.cache_misses:
+        raise RecordingFailed(
+            f"the recorded vulnerable set does not replay offline "
+            f"(error: {replay.last_error!r}, misses: {replay.cache_misses})"
+        )
+    if not _fired(result, pattern_id):
+        raise RecordingFailed(
+            f"the recorded vulnerable set replays but does not fire {pattern_id!r} "
+            f"(outcomes: {_outcomes(result)})"
+        )
+    print(f"[red] offline replay of {red_dir} fires {pattern_id} with every lookup hit")
 
 
 def _redacted_report(
@@ -177,7 +312,14 @@ def _redacted_report(
 
 
 def _stamp_differential_meta(
-    fixtures_dir: Path, *, provider: str, model: str, iterations: int, recorder: LiteLLMRecorder
+    fixtures_dir: Path,
+    *,
+    provider: str,
+    model: str,
+    iterations: int,
+    recorder: LiteLLMRecorder,
+    pattern_id: str = EXAMPLE_PATTERN_ID,
+    metamorphic_strategies: list[str] | None = None,
 ) -> None:
     """Sidecar for the full-bank fixture set.
 
@@ -193,9 +335,13 @@ def _stamp_differential_meta(
                 "cache_key_version": recorder.key_version,
                 "provider": provider,
                 "model": model,
-                "pattern_id": EXAMPLE_PATTERN_ID,
+                "pattern_id": pattern_id,
                 "iterations": iterations,
-                "metamorphic_strategies": METAMORPHIC_STRATEGIES,
+                "metamorphic_strategies": (
+                    METAMORPHIC_STRATEGIES
+                    if metamorphic_strategies is None
+                    else metamorphic_strategies
+                ),
             },
             indent=2,
             sort_keys=True,
@@ -210,6 +356,9 @@ def _main(argv: list[str] | None = None) -> int:
     example_dir: Path = args.example_dir
     differential_dir = example_dir / "differential_fixtures"
     guarded_dir = example_dir / "fixtures"
+    red_dir = example_dir / RED_FIXTURES_DIRNAME
+    pattern_id: str = args.pattern_id
+    strategies: list[str] = args.metamorphic_strategies
 
     if example_dir.exists() and any(example_dir.iterdir()):
         if not args.force:
@@ -226,10 +375,16 @@ def _main(argv: list[str] | None = None) -> int:
 
     example_dir.mkdir(parents=True, exist_ok=True)
     print(f"Recording the reference example with {args.provider}/{args.model}")
+    print(f"Seed: {pattern_id}; metamorphic strategies: {', '.join(strategies)}")
     print(f"Example dir: {example_dir}")
 
     exploit = asyncio.run(
-        _discover_exploit(provider=args.provider, model=args.model, example_dir=example_dir)
+        _discover_exploit(
+            provider=args.provider,
+            model=args.model,
+            example_dir=example_dir,
+            pattern_id=pattern_id,
+        )
     )
     test = ReferencePytestGenerator().emit(exploit)
 
@@ -241,7 +396,7 @@ def _main(argv: list[str] | None = None) -> int:
         model=args.model,
         completion_fn=recorder,
         record_fixtures_dir=guarded_dir,
-        metamorphic_strategies=METAMORPHIC_STRATEGIES,
+        metamorphic_strategies=strategies,
     )
     report = validator.validate(
         test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
@@ -281,6 +436,13 @@ def _main(argv: list[str] | None = None) -> int:
         model=args.model,
         iterations=args.iterations,
         recorder=recorder,
+        pattern_id=pattern_id,
+        metamorphic_strategies=strategies,
+    )
+    red_count = asyncio.run(
+        record_red_set(
+            provider=args.provider, model=args.model, pattern_id=pattern_id, red_dir=red_dir
+        )
     )
     (example_dir / "validation_report.json").write_text(
         json.dumps(
@@ -297,16 +459,40 @@ def _main(argv: list[str] | None = None) -> int:
     guarded_count = len(list(guarded_dir.glob("*.json"))) - 1
     differential_count = len(list(differential_dir.glob("*.json"))) - 1
     print("\n=== Recording summary ===")
-    print(f"  pattern_id             {EXAMPLE_PATTERN_ID}")
+    print(f"  pattern_id             {pattern_id}")
     print(f"  kept                   {report.kept}")
     print(f"  guarded fixtures       {guarded_count}")
     print(f"  differential fixtures  {differential_count}")
+    print(f"  red fixtures           {red_count}")
     print(f"  example dir            {example_dir}")
     print(
         "\nReview the written exploit JSON and fixtures for anything that should "
         "not be committed before committing them."
     )
     return 0
+
+
+def _pattern_id(raw: str) -> str:
+    known = kitchen_sink_pattern_ids()
+    if raw not in known:
+        raise argparse.ArgumentTypeError(
+            f"{raw!r} is not a reference-app seed; choose one of: {', '.join(known)}"
+        )
+    return raw
+
+
+def _strategies(raw: str) -> list[str]:
+    chosen = [name.strip() for name in raw.split(",") if name.strip()]
+    if not chosen:
+        raise argparse.ArgumentTypeError("name at least one metamorphic strategy")
+    known = _deterministic_strategies()
+    unknown = [name for name in chosen if name not in known]
+    if unknown:
+        raise argparse.ArgumentTypeError(
+            f"unknown metamorphic strateg{'y' if len(unknown) == 1 else 'ies'} "
+            f"{', '.join(unknown)}; choose from: {', '.join(known)}"
+        )
+    return chosen
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -344,6 +530,25 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "differential iterations to record (default: 1). More than 1 is "
             "broken by construction in record mode — see the module docstring — "
             "so raise it only if you have changed how recording keys collide."
+        ),
+    )
+    parser.add_argument(
+        "--pattern-id",
+        default=EXAMPLE_PATTERN_ID,
+        type=_pattern_id,
+        help=(
+            f"the reference-app seed to record (default: {EXAMPLE_PATTERN_ID}). "
+            "Must be a seed aimed at the kitchen-sink reference app."
+        ),
+    )
+    parser.add_argument(
+        "--metamorphic-strategies",
+        default=",".join(METAMORPHIC_STRATEGIES),
+        type=_strategies,
+        help=(
+            "comma-separated deterministic rewordings the validator drives through "
+            f"both twins (default: {','.join(METAMORPHIC_STRATEGIES)}; choices: "
+            f"{','.join(_deterministic_strategies())})."
         ),
     )
     parser.add_argument(
