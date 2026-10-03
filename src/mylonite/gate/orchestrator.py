@@ -393,9 +393,9 @@ def _how_to_prove(report: ValidationReport) -> str:
         return "Gate cannot prove a finding on a black-box target."
     if not has_proof(report):
         return (
-            "To prove it, declare `control_env` (so Mylonite can switch your real "
-            "safeguard off and on) or an `effect_probe` in the target file, then "
-            "re-run `mylonite gate`."
+            "To prove it, let a guarded side run (declare `control_env` so Mylonite "
+            "can switch your real safeguard off and on, and drop `--fast`) or "
+            "declare an `effect_probe` in the target file, then re-run `mylonite gate`."
         )
     return "To prove it, re-run validation with the build leg on."
 
