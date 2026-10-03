@@ -681,6 +681,57 @@ def test_run_gate_processes_every_exploit_in_pattern_id_order(tmp_path):
     assert not (rejected_root / _fid("a-pattern") / "validation_report.json").exists()
 
 
+def test_run_gate_orders_the_pr_body_by_severity_not_pattern_id(tmp_path):
+    """SV1: with two kept findings, the gate PR lists the more severe one
+    first, even though generate/validate still ran in pattern_id order.
+    'a-low-severity' sorts first by pattern_id but is W1 (Medium); it must
+    not lead the PR body ahead of the W2 (High) finding."""
+    ex_low = _exploit("a-low-severity")
+    ex_low = ex_low.model_copy(
+        update={"compliance": ex_low.compliance.model_copy(update={"owasp_asi": ["ASI02"]})}
+    )
+    ex_high = _exploit("b-high-severity")  # default compliance -> ASI01 -> W2 (High)
+
+    def fake_scan():
+        return ScanOutcomeBundle(outcome=_found_outcome(2), exploits=[ex_low, ex_high])
+
+    def fake_generate(exploit):
+        return GeneratedTest(
+            framework="pytest",
+            filename=f"test_security_{exploit.pattern_id}.py",
+            source="# test\n",
+            exploit=exploit,
+        )
+
+    def fake_validate(generated, _finding_dir):
+        return _kept_report(generated.filename)
+
+    pr_calls = {}
+
+    def fake_open_pr(*, out_dir, findings, body, open_pr, **_):
+        pr_calls.update(findings=findings, body=body)
+        return "printed"
+
+    out_dir = tmp_path / ".mylonite" / "gate"
+    result = run_gate(
+        out_dir=out_dir,
+        scan_fn=fake_scan,
+        generate_fn=fake_generate,
+        validate_fn=fake_validate,
+        open_pr_fn=fake_open_pr,
+        open_pr=False,
+    )
+
+    assert result.kept_count == 2
+    body = pr_calls["body"]
+    assert body.index("`b-high-severity`") < body.index("`a-low-severity`")
+    # findings passed to open_pr_fn carry the same (severity) order.
+    assert [e.pattern_id for e, _ in pr_calls["findings"]] == [
+        "b-high-severity",
+        "a-low-severity",
+    ]
+
+
 def test_run_gate_a_single_kept_finding_stays_flat_no_subdir(tmp_path):
     """Exactly one finding overall (even if scan_fn's list had one item) keeps
     writing straight into out_dir — the historical, still-tested layout."""

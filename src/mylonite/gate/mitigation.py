@@ -90,6 +90,218 @@ def weakness_class_for(exploit: ExploitRecord) -> str:
     return "generic"
 
 
+#: One deterministic, plain-language sentence per weakness class: what an
+#: attacker gets, in words a non-specialist reads in one pass. Keyed on the
+#: class alone (not the finding) so the same class always reads the same way
+#: across every PR — a developer who has seen one W2 finding already knows
+#: what the next one means before reading the evidence.
+_IMPACT_BY_WEAKNESS: dict[str, str] = {
+    "W1": (
+        "A tool's own description can quietly direct your agent to take an action your "
+        "user never asked for and never sees requested."
+    ),
+    "W2": (
+        "Anyone who can place text your agent reads — a note, an email, a web page, a "
+        "retrieved document — can redirect it to act on their instructions instead of "
+        "your user's, including sending what it read to them."
+    ),
+    "W3": (
+        "An attacker can make your agent fetch or send data to a host of their choosing, "
+        "turning your agent into a channel out of your network."
+    ),
+    "W4": (
+        "An attacker, or ordinary text your agent reads, can make it take a real, "
+        "hard-to-reverse action — send an email, create a record, move money — with no "
+        "human ever approving it."
+    ),
+}
+_IMPACT_GENERIC = (
+    "This weakness lets an attacker change what your agent does without your user's "
+    "knowledge or approval."
+)
+
+
+def impact_sentence(weakness: str) -> str:
+    """One deterministic sentence on what an attacker gains from this class.
+
+    Class-level, not finding-level: it does not read the trace, so it never
+    needs degraded evidence or a confidence tier the way
+    :mod:`mylonite.gate.recommend` does. Every caller gets the same sentence
+    for the same class, by design.
+    """
+    return _IMPACT_BY_WEAKNESS.get(weakness, _IMPACT_GENERIC)
+
+
+#: Lower rank sorts first — a reviewer with several kept findings in one gate
+#: PR sees the one that matters most at the top.
+_SEVERITY_RANK: dict[str, int] = {"High": 0, "Medium": 1, "Low": 2}
+
+
+def severity_for_exploit(exploit: ExploitRecord) -> str:
+    """The exploit's severity, by the same rule the SARIF and JSON exports use.
+
+    Severity was computed for those two exports and nowhere else; the gate PR
+    body stated no severity at all, so a reviewer had to go read a machine
+    export to learn how bad a kept finding was.
+
+    ``mylonite.report.severity`` is imported here, not at module scope:
+    ``mylonite.report`` imports ``mylonite.report.bundle``, which imports
+    ``weakness_class_for`` from this module, so importing the severity rule
+    up front would be circular.
+    """
+    from mylonite.report.severity import severity_for
+
+    effect = str(getattr(exploit.response, "metadata", {}).get("effect_confirmed", "unprobed"))
+    return severity_for(weakness_class_for(exploit), effect)
+
+
+def severity_sort_kept(
+    kept: list[tuple[ExploitRecord, ValidationReport]], kept_dirs: list[Path]
+) -> tuple[list[tuple[ExploitRecord, ValidationReport]], list[Path]]:
+    """Order kept findings by severity (most severe first), tie-broken by
+    ``pattern_id`` for a reproducible order.
+
+    ``kept_dirs`` is reordered by the exact same permutation, so the PR body,
+    the per-finding layout table and the git-add list all agree on which
+    finding is "first" in a multi-finding gate PR.
+    """
+    if not kept:
+        return kept, kept_dirs
+    paired = sorted(
+        zip(kept, kept_dirs, strict=True),
+        key=lambda item: (
+            _SEVERITY_RANK.get(severity_for_exploit(item[0][0]), len(_SEVERITY_RANK)),
+            item[0][0].pattern_id,
+        ),
+    )
+    new_kept, new_dirs = zip(*paired, strict=True)
+    return list(new_kept), list(new_dirs)
+
+
+def _own_seed_pattern_id(report: ValidationReport) -> str | None:
+    """The bank seed this report's own test was generated for, if it can be
+    told from the committed test's file name.
+
+    Mirrors ``mylonite.report.render``'s ``_own_seed_id``: the generator
+    names the test ``test_security_<slug(pattern_id)>.py``, so the seed whose
+    slug matches ``report.test_filename`` is the one this test actually
+    drives. Every other row in ``mutation_matrix`` was never run by this
+    test — the differential attacks with the test's own seed only — so the
+    kill matrix below renders those rows as "not run", not as a miss.
+    """
+    from mylonite.plugins._reference.reference_pytest_generator import _slugify
+
+    filename = report.test_filename or ""
+    for seed in report.mutation_matrix:
+        if filename == f"test_security_{_slugify(seed.pattern_id)}.py":
+            return str(seed.pattern_id)
+    return None
+
+
+#: Shown once, directly under the kill matrix, so a reviewer who has not read
+#: the validation docs still knows a "not run" cell is not a missed catch.
+_KILL_MATRIX_LEGEND = (
+    "legend: ✓ = killed (fired on the vulnerable side, resisted on the guarded side) "
+    "· ✗ = ran but not killed · - = not run by this test"
+)
+
+
+def _kill_matrix_lines(report: ValidationReport) -> list[str]:
+    """The per-seed kill matrix row(s) plus its legend, for ``_evidence_lines``.
+
+    When the report's own seed can be told from the test file name, every
+    other bank seed is marked "not run" rather than given the same ``x`` a
+    seed that actually ran and failed to discriminate would get — the
+    differential drives one seed per test, so a whole-bank x/kill count was
+    never a true count of what this test checked.
+    """
+    matrix = report.mutation_matrix
+    if not matrix:
+        return []
+    killed = sum(1 for s in matrix if s.killed)
+    own = _own_seed_pattern_id(report)
+    if own is None:
+        joined = ", ".join(
+            f"{s.weakness}:{s.pattern_id} {'✓' if s.killed else '✗'}" for s in matrix
+        )
+        return [
+            f"- **kill matrix** ({killed}/{len(matrix)}): {joined}",
+            f"  - {_KILL_MATRIX_LEGEND}",
+        ]
+    not_run = sum(1 for s in matrix if s.pattern_id != own and not s.killed)
+    cells: list[str] = []
+    for s in matrix:
+        name = f"{s.weakness}:{s.pattern_id}"
+        if s.pattern_id == own:
+            cells.append(f"{name} {'✓' if s.killed else '✗'}")
+        elif s.killed:
+            cells.append(f"{name} ✓")
+        else:
+            cells.append(f"{name} -")
+    return [
+        f"- **kill matrix** (this test's own seed; {not_run}/{len(matrix)} not run): "
+        + ", ".join(cells),
+        f"  - {_KILL_MATRIX_LEGEND}",
+    ]
+
+
+def _runs_and_rates_line(report: ValidationReport) -> str:
+    """One plain sentence on the reproducibility evidence, for the reviewer
+    checklist — the same counts ``_evidence_lines`` states, repeated here so
+    the checklist is a self-contained reading, not a cross-reference."""
+    repro = report.reproducibility
+    if repro is None or not repro.iterations:
+        return "no reproducibility evidence was recorded for this run."
+    if repro.guard_resisted is not None:
+        return (
+            f"fired {repro.vuln_fired}/{repro.iterations} on the unguarded side, resisted "
+            f"{repro.guard_resisted}/{repro.iterations} on the guarded side."
+        )
+    return f"reproduced {repro.vuln_fired}/{repro.iterations} against the real target."
+
+
+def _proof_level_checklist_line(label: str, *, proven: bool, server_layer: bool) -> str:
+    """What the verdict actually showed, worded so "your safeguard stops it"
+    is only ever said when a real ``control_env`` was the guarded side."""
+    if not proven:
+        return f"{label} — not proven yet; do not rely on this gate as a fix."
+    if server_layer:
+        return (
+            f"{label} — your own control (declared via `control_env`) was shown to stop the attack."
+        )
+    return f"{label} — a canonical stand-in control stopped the attack; your own implementation is not yet proven."
+
+
+def _reviewer_checklist(
+    report: ValidationReport,
+    *,
+    proven: bool,
+    server_layer: bool,
+    model: str | None,
+    system_prompt: str | None,
+) -> list[str]:
+    """A short checklist (T5): what a reviewer should confirm before merging
+    this gate PR, not a claim Mylonite makes on their behalf."""
+    label = verdict_label(report)
+    prompt_line = (
+        "the system prompt supplied to this run — confirm it matches your agent's real prompt."
+        if system_prompt
+        else (
+            "Mylonite's generic default (no system prompt was supplied to this run) — "
+            "confirm it matches your agent's real prompt."
+        )
+    )
+    return [
+        "Before merging, confirm each of these for your own app:",
+        "",
+        f"- [ ] **Proof level:** {_proof_level_checklist_line(label, proven=proven, server_layer=server_layer)}",
+        f"- [ ] **Planner model:** `{model or 'not recorded'}` — confirm this is the model "
+        "(or one no weaker than it) your production agent actually runs.",
+        f"- [ ] **Prompt used:** {prompt_line}",
+        f"- [ ] **Runs and rates:** {_runs_and_rates_line(report)}",
+    ]
+
+
 def _guarded_is_server_layer(
     report: ValidationReport, guarded_is_server_layer: bool | None
 ) -> bool:
@@ -138,13 +350,10 @@ def _evidence_lines(report: ValidationReport) -> str:
             )
     if report.mutation_score is not None:
         rows.append(f"- **mutation score**: {report.mutation_score:.2f}")
-    if report.mutation_matrix:
-        killed = sum(1 for s in report.mutation_matrix if s.killed)
-        cells = ", ".join(
-            f"{s.weakness}:{s.pattern_id} {'✓' if s.killed else '✗'}"
-            for s in report.mutation_matrix
-        )
-        rows.append(f"- **kill matrix** ({killed}/{len(report.mutation_matrix)}): {cells}")
+    # The seed kill matrix: which of the bank's seeds this test actually
+    # discriminated, with the ones it never ran named as such (see
+    # _kill_matrix_lines) rather than lumped in with a genuine miss.
+    rows.extend(_kill_matrix_lines(report))
     rows.append(f"- **kept**: {report.kept}")
     return "\n".join(rows)
 
@@ -184,34 +393,41 @@ def build_pr_body(
     is a real, configurable, budget-counted/policy-kwarg'd LiteLLM call
     instead of the hardcoded literal this used to be.
 
-    ``guarded_is_server_layer`` (A3): a caller with direct access to
+    ``guarded_is_server_layer``: a caller with direct access to
     ``TwinPlan.guarded_is_server_layer`` may pass it explicitly; otherwise it
     is derived from ``report.notes``'s ``[guarded-twin=...]`` marker (see
-    :func:`_guarded_is_server_layer`). This used to be conflated with
-    ``is_control`` — every control-efficacy finding was captioned "(proxy)"
-    even when the differential toggled the target's REAL server-side control
-    (a declared ``control_env``), mislabelling the strongest possible result
-    as the weakest.
+    :func:`_guarded_is_server_layer`). Conflating this with ``is_control``
+    would caption every control-efficacy finding "(proxy)" even when the
+    differential toggled the target's REAL server-side control (a declared
+    ``control_env``), mislabelling the strongest possible result as the
+    weakest — so "your safeguard stops it" is said only when this is true.
 
-    ``target`` (PR2, Workstream D): an optional
-    ``mylonite.gate.recommend.TargetContext``. Typed ``Any`` here rather than
-    imported at module scope to avoid a needless import when a caller has none
-    to pass — ``recommend()`` handles ``target=None`` gracefully by design
-    (degraded evidence, lower confidence, never a crash).
+    ``target``: an optional ``mylonite.gate.recommend.TargetContext``. Typed
+    ``Any`` here rather than imported at module scope to avoid a needless
+    import when a caller has none to pass — ``recommend()`` handles
+    ``target=None`` gracefully by design (degraded evidence, lower
+    confidence, never a crash).
 
-    ``gate_dir`` (GT15): the directory this run actually wrote to (``gate``'s
+    ``gate_dir``: the directory this run actually wrote to (``gate``'s
     resolved ``--out``), so the "How this is gated" section names the real
     path instead of a hardcoded ``.mylonite/gate/`` that drifted from a
     non-default ``--out``. Defaults to that literal when omitted.
 
-    PR11 (deliberate compat event): the fix section always renders
-    :func:`mylonite.gate.recommend.render_markdown`'s target-specific,
-    evidence-anchored recommendation now, for every target including a
-    reference one — the fixed, illustrative ``gate/fixes/{wc}.md`` diff this
-    used to fall back to on ``target=None`` is retired. The class-level
-    ``mitigations/{wc}.md`` background prose (:func:`_snippet`, now
-    ``mylonite.mitigations.snippet``) stays — it is still true and still useful
-    context regardless of target.
+    The fix section always renders :func:`mylonite.gate.recommend.render_markdown`'s
+    target-specific, evidence-anchored recommendation, for every target
+    including a reference one. The class-level ``mitigations/{wc}.md``
+    background prose (:func:`_snippet`, now ``mylonite.mitigations.snippet``)
+    stays alongside it — it is still true and still useful context
+    regardless of target. Neither one is a patch Mylonite applied: the
+    heading says "suggested"/"recommended", never "fixed".
+
+    Every finding below is laid out in one order — **verdict, impact, fix,
+    proof** — so the facts a reviewer needs most (is this real, what does it
+    cost, how do I close it, what showed it) read top to bottom instead of
+    being scattered across the PR body by finding shape. A severity line and
+    a one-sentence, class-level impact statement sit right under the
+    verdict; a reviewer checklist and the "how this is gated" explanation
+    follow the proof, as supporting detail rather than the headline.
     """
     wc = weakness_class_for(exploit)
     is_reference = exploit.target_id.startswith("reference:")
@@ -222,9 +438,19 @@ def build_pr_body(
     # Only a KEPT verdict (a passing build and a passing differential or effect
     # leg) earns a claim. A STABLE, NOT PROVEN or REJECTED report gets its label
     # and the reason instead, the same rule SARIF and the JSON bundle follow.
+    # Shown once, uniformly, for every verdict — not only when unproven — so
+    # the PR body always opens on a verdict line, the first of the four.
     label = verdict_label(report)
     proven = label == KEPT
-    not_proven_line = f"**Verdict: {label}:** {verdict_reason(report)}"
+    verdict_line = f"**Verdict: {label}:** {verdict_reason(report)}"
+    severity = severity_for_exploit(exploit)
+    impact = impact_sentence(wc)
+
+    # ``claim``/``layer_caveat`` are set only for a PROVEN control-efficacy
+    # finding; they belong in the proof section below (what the differential
+    # actually showed), not in the opening verdict/impact block.
+    claim = ""
+    layer_caveat = ""
 
     if is_control and not proven:
         repro = report.reproducibility
@@ -235,18 +461,7 @@ def build_pr_body(
             )
         else:
             stat = f"Control **{control}** was tested for `{exploit.pattern_id}`."
-        head = [
-            "## Control efficacy not proven",
-            stat,
-            "",
-            not_proven_line,
-            "",
-            f"**Compliance:** {_compliance_line(exploit)}",
-            f"**Attack tier:** {exploit.payload.metadata.get('attack_tier', 'static')}",
-            "",
-            "**Validation evidence:**",
-            _evidence_lines(report),
-        ]
+        heading = "## Control efficacy not proven"
     elif is_control:
         repro = report.reproducibility
         if repro is not None and repro.iterations:
@@ -293,40 +508,27 @@ def build_pr_body(
                 "security - see below."
             )
         )
-        head = [
-            "## Control efficacy verified",
-            stat,
-            "",
-            claim,
-            "",
-            layer_caveat,
-            "",
-            f"**Compliance:** {_compliance_line(exploit)}",
-            f"**Attack tier:** {exploit.payload.metadata.get('attack_tier', 'static')}",
-            "",
-            "**Validation evidence:**",
-            _evidence_lines(report),
-        ]
+        heading = "## Control efficacy verified"
     else:
-        found = (
+        stat = (
             f"A validated weakness (`{exploit.pattern_id}`) against `{exploit.target_id}`."
             if proven
-            else f"A weakness (`{exploit.pattern_id}`) against `{exploit.target_id}`. "
-            + not_proven_line
+            else f"A weakness (`{exploit.pattern_id}`) against `{exploit.target_id}`."
         )
-        head = [
-            "## What Mylonite found",
-            found,
-            "",
-            f"**Compliance:** {_compliance_line(exploit)}",
-            f"**Attack tier:** {exploit.payload.metadata.get('attack_tier', 'static')}",
-            "",
-            "**Validation evidence:**",
-            _evidence_lines(report),
-        ]
+        heading = "## What Mylonite found"
 
     sections = [
-        *head,
+        heading,
+        verdict_line,
+        "",
+        f"**Severity:** {severity}",
+        "",
+        f"**Impact:** {impact}",
+        "",
+        stat,
+        "",
+        f"**Compliance:** {_compliance_line(exploit)}",
+        f"**Attack tier:** {exploit.payload.metadata.get('attack_tier', 'static')}",
         "",
         "## Suggested mitigation",
         "_Human-applied — Mylonite proves and gates the weakness; it does not patch your code._",
@@ -365,6 +567,15 @@ def build_pr_body(
                 "> **Unverified LLM suggestion** (not validated by the oracle — review before applying):",
                 "> " + extra.replace("\n", "\n> "),
             ]
+
+    # Proof: what the run actually measured, fourth and last of the four —
+    # the control-efficacy claim/caveat (only when proven) plus the full
+    # evidence trail, including the per-seed kill matrix and its legend.
+    sections += ["", "## Proof"]
+    if is_control and proven:
+        sections += [claim, "", layer_caveat, ""]
+    sections += ["**Validation evidence:**", _evidence_lines(report)]
+
     gate_dir_label = _gate_dir_label(gate_dir)
     if is_control and not proven:
         gating_desc = (
@@ -397,6 +608,15 @@ def build_pr_body(
             "a regression fails the check."
         )
     sections += ["", "## How this is gated", gating_desc]
+
+    checklist = _reviewer_checklist(
+        report,
+        proven=proven,
+        server_layer=server_layer,
+        model=model,
+        system_prompt=system_prompt,
+    )
+    sections += ["", "## Reviewer checklist", *checklist]
     return "\n".join(sections) + "\n"
 
 
