@@ -149,18 +149,45 @@ be built at all for this target+control pair.
 
 Discovery proved a *rate* — an attack that lands 40% of the time still proves
 real even though it loses most single re-drives. One clean re-drive in CI would
-prove little, so both live assertions re-drive up to several times and pass
-only when **every** attempt resisted:
+prove little, so both live assertions re-drive up to several times. They
+pass only when no attempt landed and at least one resisted:
 
 | What happens | Result |
 |---|---|
 | The attack lands on attempt *k* | `AssertionError` at once, naming attempt *k*; no further attempt runs |
 | Every attempt resists | Pass |
-| Attempt *k* is inconclusive (no verdict, no tool call, a hung target) | That attempt's `TestkitFixtureError` (or `TestkitRedriveAborted`) at once, with the tally so far; no further attempt runs, and it is never a pass |
+| Attempt *k* is inconclusive (the agent made no tool calls, no verdict was reached, the seed was skipped) | Not a resist. It uses up attempt *k* and the next attempt runs |
+| No attempt lands, at least one resists, the rest are inconclusive | Pass |
+| Every attempt is inconclusive | The last attempt's `TestkitFixtureError`, saying no attempt confirmed resistance; never a pass |
+| Attempt *k* is cut short by its call budget, time limit or the session's request ceiling | `TestkitRedriveAborted` at once, with the tally so far; no further attempt runs, since a hung target or a spent ceiling would only stop again |
+
+Inconclusive attempts count toward the number of attempts, so a test never
+re-drives more than that number of times per leg. A pass where some attempts
+were inconclusive emits `testkit.RedriveInconclusiveWarning` (a `UserWarning`)
+in the pytest warnings summary, for example *resistance confirmed on 1 of 3
+attempts; 2 inconclusive (the agent did not exercise the attack)*. A pass on
+every attempt emits nothing.
+
+Mylonite never changes your project's warning filters. If your pytest config
+turns warnings into errors (`filterwarnings = ["error"]`), a partial pass fails
+the test. To keep partial passes green while still listing the warning, add
+this entry after `"error"` in `[tool.pytest.ini_options]`:
+
+```toml
+filterwarnings = ["error", "default::mylonite.testkit.RedriveInconclusiveWarning"]
+```
+
+The second entry shows `RedriveInconclusiveWarning` in the warnings summary
+instead of failing the test, and every other warning is still an error. A
+`-W error` flag on the command line takes precedence over this config, so
+leave that flag out of the gate job if you add the entry. Under `pending_fix` an
+all-inconclusive run still fails the test; only a landing is an expected
+failure.
 
 `assert_control_holds` runs its guarded leg on every attempt but its raw leg
 only until the attack has landed on it once, so a pass costs one raw re-drive
-plus one guarded re-drive **per attempt**. Each re-drive is one seed — roughly
+plus one guarded re-drive **per attempt**. A raw attempt that is inconclusive
+has simply not landed yet, so the raw leg runs again on the next attempt. Each re-drive is one seed — roughly
 a customiser call, a few planner turns and a judge call — capped at 12 model
 calls and 180 seconds:
 
@@ -209,7 +236,7 @@ def test_target_resists_W2():
 | State | What happens |
 |---|---|
 | **Not fixed yet** | The check raises `AssertionError` (the attack still lands). The test reports as an expected failure (`xfail`) and the run stays green. `pytest -ra` lists it as `XFAIL ... pending fix: ...`. |
-| **Fixed** | The check passes — for a live check, every re-drive attempt resisted. Because the marker is strict, the test now **fails on purpose**, telling you to delete the `@testkit.pending_fix(...)` line. |
+| **Fixed** | The check passes — for a live check, no re-drive attempt landed and at least one resisted. Because the marker is strict, the test now **fails on purpose**, telling you to delete the `@testkit.pending_fix(...)` line. |
 | **Marker removed** | A regular gate: passes while the fix holds, fails if the attack works again. |
 
 Only `AssertionError` counts as "not fixed yet". Any other exception — a

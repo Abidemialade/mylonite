@@ -2,8 +2,10 @@
 
 ``assert_target_resists`` and ``assert_control_holds`` re-drive your own target
 up to N times (default 3). A landing on any attempt fails at once; an
-inconclusive attempt is never a resist and also stops the check (with an
-error, never a pass); a pass needs N clean resists. The re-drive itself is
+inconclusive attempt is never a resist, uses up one attempt and lets the next
+one run; a pass needs no landing and at least one resist, and an all-
+inconclusive run raises (never a pass). A re-drive cut short by its own bound
+still stops the check at once. The re-drive itself is
 stubbed here (``_run_target_scan``), so the real verdict logic
 (``_exploit_fired`` / ``_assert_from_result``) runs on fabricated scan results
 and no target or model is ever called.
@@ -14,6 +16,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import warnings
 from collections.abc import Iterable
 from pathlib import Path
 from types import SimpleNamespace
@@ -138,7 +141,10 @@ def test_default_is_three_attempts() -> None:
 def test_passes_only_after_three_clean_resists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    scripted = _resists(tmp_path, monkeypatch, ["resist", "resist", "resist"])
+    with warnings.catch_warnings():
+        # A pass on every attempt adds no new warning.
+        warnings.simplefilter("error", testkit.RedriveInconclusiveWarning)
+        scripted = _resists(tmp_path, monkeypatch, ["resist", "resist", "resist"])
     assert scripted.calls == 3
 
 
@@ -158,32 +164,79 @@ def test_a_landing_fails_at_once_and_stops(
     assert f"attempt {landing_attempt} of 3" in str(excinfo.value)
 
 
-def test_an_inconclusive_attempt_is_not_a_resist_and_stops_the_check(
+def test_an_inconclusive_attempt_is_not_a_resist_and_the_check_goes_on(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    scripted = _Scripted(["resist", "no_engagement", "resist"])
+    with pytest.warns(
+        testkit.RedriveInconclusiveWarning,
+        match=r"resistance confirmed on 2 of 3 attempts; 1 inconclusive "
+        r"\(the agent did not exercise the attack\)",
+    ):
+        scripted = _resists(tmp_path, monkeypatch, ["resist", "no_engagement", "resist"])
+    assert scripted.calls == 3
+
+
+def test_inconclusive_then_resist_passes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.warns(testkit.RedriveInconclusiveWarning, match="1 of 2 attempts; 1 inconclusive"):
+        scripted = _resists(tmp_path, monkeypatch, ["no_engagement", "resist"], attempts=2)
+    assert scripted.calls == 2
+
+
+def test_inconclusive_then_land_fails_on_the_landing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scripted = _Scripted(["no_engagement", "land", "resist"])
+    monkeypatch.setattr(testkit, "_run_target_scan", scripted)
+    with pytest.raises(AssertionError, match="attempt 2 of 3"):
+        testkit.assert_target_resists(
+            _exploit(), target_file=_target(tmp_path), model="stub-model", provider="stub"
+        )
+    assert scripted.calls == 2
+
+
+def test_all_inconclusive_attempts_raise_inconclusive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scripted = _Scripted(["no_engagement"] * 3)
     monkeypatch.setattr(testkit, "_run_target_scan", scripted)
     with pytest.raises(testkit.TestkitFixtureError) as excinfo:
         testkit.assert_target_resists(
             _exploit(), target_file=_target(tmp_path), model="stub-model", provider="stub"
         )
     assert not isinstance(excinfo.value, AssertionError)
-    # The check can no longer pass, so the third attempt is never spent.
-    assert scripted.calls == 2
+    # Inconclusive attempts count toward the cap: never more than N re-drives.
+    assert scripted.calls == 3
     msg = str(excinfo.value)
-    assert "attempt 2 of 3 was inconclusive after 1 resisted" in msg
+    assert "made no tool calls" in msg
+    assert "all 3 re-drive attempt(s) were inconclusive" in msg
 
 
-def test_an_inconclusive_first_attempt_errors_without_another_run(
+def test_one_attempt_that_is_inconclusive_raises_inconclusive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    scripted = _Scripted(["no_engagement", "land", "resist"])
+    scripted = _Scripted(["no_engagement"])
     monkeypatch.setattr(testkit, "_run_target_scan", scripted)
-    with pytest.raises(testkit.TestkitFixtureError, match="attempt 1 of 3 was inconclusive"):
+    with pytest.raises(testkit.TestkitFixtureError, match="all 1 re-drive attempt"):
+        testkit.assert_target_resists(
+            _exploit(),
+            target_file=_target(tmp_path),
+            model="stub-model",
+            provider="stub",
+            attempts=1,
+        )
+    assert scripted.calls == 1
+
+
+def test_an_aborted_attempt_after_an_inconclusive_one_still_stops(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    scripted = _Scripted(["no_engagement", "aborted", "resist"])
+    monkeypatch.setattr(testkit, "_run_target_scan", scripted)
+    with pytest.raises(testkit.TestkitRedriveAborted, match="0 resisted and 1 inconclusive"):
         testkit.assert_target_resists(
             _exploit(), target_file=_target(tmp_path), model="stub-model", provider="stub"
         )
-    assert scripted.calls == 1
+    assert scripted.calls == 2
 
 
 def test_an_aborted_attempt_keeps_its_own_error_type(
@@ -215,7 +268,7 @@ def test_a_request_ceiling_stop_is_raised_and_never_counted_as_a_resist(
         )
     msg = str(excinfo.value)
     assert "request ceiling of 9" in msg
-    assert "attempt 2 of 3 was inconclusive after 1 resisted" in msg
+    assert "attempt 2 of 3 was cut short after 1 resisted" in msg
     assert scripted.calls == 2
 
 
@@ -307,7 +360,9 @@ def test_control_passes_after_one_raw_landing_and_three_guarded_resists(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     legs = _Legs(raw=["land"], guarded=["resist"] * 3)
-    _control(tmp_path, monkeypatch, legs)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", testkit.RedriveInconclusiveWarning)
+        _control(tmp_path, monkeypatch, legs)
     # The raw leg only has to show the attack still works once.
     assert legs.order == ["raw", "guarded", "guarded", "guarded"]
 
@@ -344,24 +399,70 @@ def test_control_fails_when_raw_never_lands(
     assert legs.raw.calls == 3
 
 
-def test_control_inconclusive_guarded_attempt_never_passes(
+def test_control_inconclusive_guarded_attempt_is_not_a_resist_and_goes_on(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     legs = _Legs(raw=["land"], guarded=["resist", "no_engagement", "resist"])
-    with pytest.raises(testkit.TestkitFixtureError, match="attempt 2 of 3 was inconclusive"):
+    with pytest.warns(testkit.RedriveInconclusiveWarning, match="2 of 3 attempts; 1 inconclusive"):
+        _control(tmp_path, monkeypatch, legs)
+    assert legs.guarded.calls == 3
+
+
+def test_control_raw_inconclusive_then_raw_land_then_guarded_resist_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legs = _Legs(raw=["no_engagement", "land"], guarded=["no_engagement", "resist", "resist"])
+    with pytest.warns(testkit.RedriveInconclusiveWarning, match="2 of 3 attempts; 1 inconclusive"):
+        _control(tmp_path, monkeypatch, legs)
+    assert legs.order == ["raw", "guarded", "raw", "guarded", "guarded"]
+
+
+def test_control_guarded_inconclusive_then_land_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legs = _Legs(raw=["land"], guarded=["no_engagement", "land"])
+    with pytest.raises(AssertionError, match="attempt 2 of 3"):
         _control(tmp_path, monkeypatch, legs)
     assert legs.guarded.calls == 2
 
 
-def test_control_inconclusive_guarded_attempt_before_raw_lands_is_inconclusive(
+def test_control_all_guarded_attempts_inconclusive_raises_inconclusive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The guarded leg was inconclusive before the raw leg ever landed: no
-    evidence either way, so the check errors on that attempt and stops."""
-    legs = _Legs(raw=["resist"], guarded=["no_engagement"])
-    with pytest.raises(testkit.TestkitFixtureError, match="attempt 1 of 3 was inconclusive") as exc:
+    legs = _Legs(raw=["land"], guarded=["no_engagement"] * 3)
+    with pytest.raises(testkit.TestkitFixtureError, match="all 3 re-drive attempt") as exc:
         _control(tmp_path, monkeypatch, legs)
     assert not isinstance(exc.value, testkit.TestkitAttackNotReproduced)
+    assert legs.guarded.calls == 3
+
+
+def test_control_inconclusive_everywhere_is_inconclusive_not_a_pass(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Neither leg ever engaged: no evidence either way, so the check raises
+    inconclusive after spending exactly N attempts."""
+    legs = _Legs(raw=["no_engagement"] * 3, guarded=["no_engagement"] * 3)
+    with pytest.raises(testkit.TestkitFixtureError, match="inconclusive") as exc:
+        _control(tmp_path, monkeypatch, legs)
+    assert not isinstance(exc.value, testkit.TestkitAttackNotReproduced)
+    assert legs.raw.calls == 3
+    assert legs.guarded.calls == 3
+
+
+def test_control_one_attempt_guarded_inconclusive_raises_inconclusive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legs = _Legs(raw=["land"], guarded=["no_engagement"])
+    monkeypatch.setattr(testkit, "_run_target_scan", legs)
+    with pytest.raises(testkit.TestkitFixtureError, match="all 1 re-drive attempt"):
+        testkit.assert_control_holds(
+            _exploit(),
+            target_file=_target(tmp_path),
+            control="W2",
+            model="stub-model",
+            provider="stub",
+            attempts=1,
+        )
     assert legs.order == ["raw", "guarded"]
 
 
@@ -444,7 +545,7 @@ def test_gate():
 """
 
 
-def _pytest(tmp_path: Path) -> subprocess.CompletedProcess[str]:
+def _pytest(tmp_path: Path, extra: tuple[str, ...] = ()) -> subprocess.CompletedProcess[str]:
     env = {
         k: v
         for k, v in os.environ.items()
@@ -463,6 +564,7 @@ def _pytest(tmp_path: Path) -> subprocess.CompletedProcess[str]:
             "addopts=",
             "--rootdir",
             str(tmp_path),
+            *extra,
             str(tmp_path),
         ],
         cwd=tmp_path,
@@ -502,11 +604,20 @@ def test_pending_fix_says_remove_the_marker_only_after_every_attempt_resists(
     assert calls == 3
 
 
-def test_pending_fix_with_an_inconclusive_attempt_is_a_failure_not_xfail(tmp_path: Path) -> None:
-    proc, calls = _pending_run(tmp_path, "resist no_engagement resist")
+def test_pending_fix_with_only_inconclusive_attempts_is_a_failure_not_xfail(
+    tmp_path: Path,
+) -> None:
+    proc, calls = _pending_run(tmp_path, "no_engagement no_engagement no_engagement")
     assert proc.returncode == pytest.ExitCode.TESTS_FAILED, proc.stdout + proc.stderr
     assert "xfailed" not in proc.stdout
     assert "remove the `@testkit.pending_fix(...)` line" not in proc.stdout
+    assert calls == 3
+
+
+def test_pending_fix_inconclusive_then_land_is_still_pending(tmp_path: Path) -> None:
+    proc, calls = _pending_run(tmp_path, "no_engagement land resist")
+    assert proc.returncode == pytest.ExitCode.OK, proc.stdout + proc.stderr
+    assert "1 xfailed" in proc.stdout
     assert calls == 2
 
 
@@ -564,3 +675,54 @@ def test_pending_fix_control_test_whose_raw_leg_never_lands_fails_red(tmp_path: 
     assert proc.returncode == pytest.ExitCode.TESTS_FAILED, proc.stdout + proc.stderr
     assert "xfailed" not in proc.stdout
     assert "TestkitAttackNotReproduced" in proc.stdout
+
+
+_DOCUMENTED_FILTER = "default::mylonite.testkit.RedriveInconclusiveWarning"
+
+
+def _partial_pass_run(
+    tmp_path: Path, filterwarnings: list[str], extra: tuple[str, ...] = ()
+) -> subprocess.CompletedProcess[str]:
+    """A consumer project whose gate test passes with one inconclusive attempt."""
+    (tmp_path / "conftest.py").write_text(_CONFTEST, encoding="utf-8")
+    (tmp_path / "test_gate.py").write_text(
+        _TEST.replace(
+            '@testkit.pending_fix("the attack still worked when this test was committed")\n', ""
+        ),
+        encoding="utf-8",
+    )
+    entries = ", ".join(f'"{f}"' for f in filterwarnings)
+    (tmp_path / "pyproject.toml").write_text(
+        f"[tool.pytest.ini_options]\nfilterwarnings = [{entries}]\n", encoding="utf-8"
+    )
+    (tmp_path / "exploit.json").write_text(_exploit().model_dump_json(), encoding="utf-8")
+    _target(tmp_path)
+    (tmp_path / "OUTCOMES").write_text("no_engagement resist resist", encoding="utf-8")
+    return _pytest(tmp_path, extra)
+
+
+def test_partial_pass_fails_under_minus_w_error(tmp_path: Path) -> None:
+    """Mylonite never overrides a project's choice to fail on warnings."""
+    proc = _partial_pass_run(tmp_path, [], ("-W", "error"))
+    assert proc.returncode == pytest.ExitCode.TESTS_FAILED, proc.stdout + proc.stderr
+    assert "RedriveInconclusiveWarning" in proc.stdout
+
+
+def test_partial_pass_fails_under_filterwarnings_error(tmp_path: Path) -> None:
+    proc = _partial_pass_run(tmp_path, ["error"])
+    assert proc.returncode == pytest.ExitCode.TESTS_FAILED, proc.stdout + proc.stderr
+    assert "RedriveInconclusiveWarning" in proc.stdout
+
+
+def test_documented_filter_keeps_a_partial_pass_green(tmp_path: Path) -> None:
+    """The exact line docs/testkit.md tells a project to add."""
+    proc = _partial_pass_run(tmp_path, ["error", _DOCUMENTED_FILTER])
+    assert proc.returncode == pytest.ExitCode.OK, proc.stdout + proc.stderr
+    assert "1 passed" in proc.stdout
+    assert "resistance confirmed on 2 of 3 attempts; 1 inconclusive" in proc.stdout
+
+
+def test_documented_filter_on_the_command_line_overrides_minus_w_error(tmp_path: Path) -> None:
+    proc = _partial_pass_run(tmp_path, [], ("-W", "error", "-W", _DOCUMENTED_FILTER))
+    assert proc.returncode == pytest.ExitCode.OK, proc.stdout + proc.stderr
+    assert "1 passed" in proc.stdout
