@@ -3092,6 +3092,7 @@ def gate(
                 validation_cost_hint=validation_cost_note(
                     is_reference=is_reference, iterations=iterations
                 ),
+                workflows=workflows,
             )
     except BudgetExceededError as exc:
         # One decision, one exit code. Raised inside the validator this used to

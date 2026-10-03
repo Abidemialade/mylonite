@@ -118,6 +118,7 @@ def _run(
     *,
     open_pr_fn: Any = None,
     outcome: ScanOutcome | None = None,
+    workflows: bool = False,
 ) -> Any:
     def validate(test: GeneratedTest, _finding_dir: Path) -> ValidationReport:
         return reports[test.exploit.pattern_id]
@@ -129,6 +130,7 @@ def _run(
         validate_fn=validate,
         open_pr_fn=open_pr_fn if open_pr_fn is not None else _Recorder(),
         open_pr=False,
+        workflows=workflows,
     )
 
 
@@ -159,6 +161,18 @@ def test_a_single_unproven_finding_is_a_candidate_and_exits_10(tmp_path: Path, c
     assert "control_env" in out
 
 
+def test_workflows_with_only_a_candidate_says_plainly_that_none_were_written(
+    tmp_path: Path, capsys
+) -> None:
+    result = _run(
+        tmp_path / "gate", [_exploit(UNPROVEN)], {UNPROVEN: _report(proven=False)}, workflows=True
+    )
+
+    assert result.exit_code == EXIT_GATE_CANDIDATES
+    out = capsys.readouterr().out
+    assert "no CI workflow file was written" in out
+
+
 def test_a_proven_finding_is_kept_and_exits_9(tmp_path: Path) -> None:
     out_dir = tmp_path / "gate"
     pr = _Recorder()
@@ -184,6 +198,61 @@ def test_a_clean_scan_still_exits_0(tmp_path: Path) -> None:
     )
     result = _run(tmp_path / "gate", [], {}, outcome=clean)
     assert result.exit_code == EXIT_SUCCESS
+
+
+def test_workflows_on_a_clean_scan_says_plainly_that_none_were_written(
+    tmp_path: Path, capsys
+) -> None:
+    """`--workflows` only ever wires in a KEPT finding's test. A clean scan
+    keeps nothing, so no workflow file is written -- this must say so, not
+    exit as quietly as a plain `gate` with no findings at all."""
+    clean = ScanOutcome(
+        coverage=Coverage.EXERCISED,
+        abort=None,
+        exercised=3,
+        not_tested=0,
+        findings=0,
+        fallbacks=0,
+        exit_code=0,
+        operator_message=None,
+    )
+    result = _run(tmp_path / "gate", [], {}, outcome=clean, workflows=True)
+
+    assert result.exit_code == EXIT_SUCCESS
+    out = capsys.readouterr().out
+    assert "no CI workflow file was written" in out
+
+
+def test_workflows_with_only_a_rejected_finding_says_plainly_that_none_were_written(
+    tmp_path: Path, capsys
+) -> None:
+    result = _run(
+        tmp_path / "gate",
+        [_exploit(UNPROVEN)],
+        {UNPROVEN: _rejected_report()},
+        workflows=True,
+    )
+
+    assert result.exit_code == EXIT_NOT_KEPT
+    out = capsys.readouterr().out
+    assert "no CI workflow file was written" in out
+
+
+def test_workflows_without_the_flag_says_nothing_extra_about_workflows(
+    tmp_path: Path, capsys
+) -> None:
+    """Without `--workflows`, the operator never asked for one, so the extra
+    note would just be noise."""
+    result = _run(
+        tmp_path / "gate",
+        [_exploit(UNPROVEN)],
+        {UNPROVEN: _rejected_report()},
+        workflows=False,
+    )
+
+    assert result.exit_code == EXIT_NOT_KEPT
+    out = capsys.readouterr().out
+    assert "no CI workflow file was written" not in out
 
 
 def test_kept_and_candidate_commit_only_the_kept_finding(tmp_path: Path, monkeypatch) -> None:
