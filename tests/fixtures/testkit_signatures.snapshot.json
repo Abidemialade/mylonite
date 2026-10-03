@@ -1,4 +1,10 @@
 {
+  "RedriveInconclusiveWarning": {
+    "bases": [
+      "builtins.UserWarning"
+    ],
+    "kind": "exception"
+  },
   "TestkitAttackNotReproduced": {
     "bases": [
       "mylonite.testkit.TestkitFixtureError"

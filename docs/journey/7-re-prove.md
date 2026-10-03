@@ -44,9 +44,11 @@ around:
    shipping anything — exit `0` is expected here too, which is why a bare
    exit-code check alone can't tell "pending, as committed" apart from
    "actually fixed" (read the printed text either way).
-2. **After the fix.** The attack is stopped on every re-drive attempt (3 by
-   default — `MYLONITE_REDRIVE_ATTEMPTS=1` makes this a cheaper,
-   single-attempt check), so the check now **fails on purpose** — a real
+2. **After the fix.** The attack lands on no re-drive attempt and is
+   stopped on at least one (3 attempts by default —
+   `MYLONITE_REDRIVE_ATTEMPTS=1` makes this a cheaper, single-attempt
+   check; an attempt where the agent made no tool calls counts as neither,
+   and if every attempt is like that the test errors instead), so the check now **fails on purpose** — a real
    `pytest` failure, exit `1` — printing: *The attack did not land on any
    re-drive attempt this run. If your fix has landed, remove the
    `@testkit.pending_fix(...)` line above this test.* This is the exit code

@@ -177,12 +177,19 @@ states:
 1. **Not fixed yet.** The attack still lands, so the test is an expected
    failure (`xfail`) and the check stays green. `pytest -ra` lists it as
    `XFAIL ... pending fix: ...`.
-2. **Fixed.** The attack stops on every re-drive attempt (3 by default), the
-   test passes, and the check fails on purpose with: *The attack did not land
+2. **Fixed.** No re-drive attempt lands and resistance is confirmed on at
+   least one of them (3 attempts by default), so the test passes and the
+   check fails on purpose with: *The attack did not land
    on any re-drive attempt this run. If your fix has landed, remove the
    `@testkit.pending_fix(...)` line above this test.* An attack that lands
    rarely can still resist three attempts, so if you haven't shipped a fix,
-   re-run the check first.
+   re-run the check first. If some attempts were inconclusive (the agent
+   made no tool calls), the summary also shows a `RedriveInconclusiveWarning`
+   saying on how many attempts resistance was confirmed; treat that pass as
+   thinner and re-run before removing the marker. Under
+   `filterwarnings = ["error"]` that warning fails the test; see
+   [Re-drive attempts](testkit.md#re-drive-attempts-and-what-they-cost) for the
+   one-line filter that keeps it a warning.
 3. **Marker removed.** The test is a regular gate. It passes while the fix
    holds and fails the check if the attack works again.
 
@@ -672,8 +679,10 @@ own app always re-drives the real target.
 ### What a live gate costs
 
 A live gate test re-drives your app up to 3 times. It fails on the first attempt the
-attack lands on, errors at the first inconclusive one, and passes only when every attempt
-resisted, so a passing check is the expensive case:
+attack lands on. An inconclusive attempt (the agent made no tool calls, say) uses up one
+attempt and the next one runs. The test passes when no attempt landed and at least one
+resisted, and errors if every attempt was inconclusive, so a passing check is the expensive
+case:
 
 | Test | Attack lands on attempt 1 | Every attempt resists |
 |---|---|---|

@@ -66,6 +66,7 @@ import asyncio
 import concurrent.futures
 import json
 import os
+import warnings
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any, TypeVar, cast
@@ -130,7 +131,8 @@ TESTKIT_REDRIVE_TIMEOUT_S = 180.0
 #: resists a single run more often than not. The live checks therefore re-drive
 #: up to this many times, stop at the first landing (one landing is a
 #: regression, and nothing more needs to be spent to know it), and pass only
-#: after every attempt resisted. Each attempt is bounded by
+#: when no attempt landed and at least one resisted. An inconclusive attempt
+#: is never a resist; it uses up one attempt. Each attempt is bounded by
 #: ``TESTKIT_REDRIVE_MAX_LLM_CALLS`` and ``TESTKIT_REDRIVE_TIMEOUT_S`` on its own.
 DEFAULT_REDRIVE_ATTEMPTS = 3
 
@@ -207,6 +209,17 @@ class TestkitConfigError(ValueError):
     sibling ``scan_report.json`` next to ``target_file`` (back-fill for an
     exploit committed before T12) -> this error. A missing execution context
     must be a LOUD failure, never a silent wrong-model run.
+    """
+
+
+class RedriveInconclusiveWarning(UserWarning):
+    """A live check passed, but some of its re-drive attempts were inconclusive.
+
+    Emitted by :func:`assert_target_resists` and :func:`assert_control_holds`
+    when no attempt landed, at least one resisted and the rest were
+    inconclusive. Mylonite does not filter it: a project that turns warnings
+    into errors gets a failure, and can keep such passes green with
+    ``filterwarnings = ["default::mylonite.testkit.RedriveInconclusiveWarning"]``.
     """
 
 
@@ -524,44 +537,61 @@ def _resolve_attempts(attempts: int | None) -> int:
 
 
 class _AttemptTally:
-    """Counts a LIVE check's re-drive attempts and stops at the first one that
-    decides the check.
+    """Counts a LIVE check's re-drive attempts and decides the check.
 
     :meth:`record` reads one attempt's result through :func:`_assert_from_result`:
 
     * the attack landed: raise ``AssertionError`` now, naming the attempt
       (early stop, nothing more is spent);
-    * the attempt was inconclusive (any :class:`TestkitFixtureError`, including
-      :class:`TestkitRedriveAborted`): raise that error's own type now, with
-      the tally so far. The check can no longer pass, and running more
-      attempts would only spend time on a target that may be hung;
+    * the re-drive was cut short by its own bound
+      (:class:`TestkitRedriveAborted`): raise it now, with the tally so far. A
+      hung target or a tripped request ceiling would only abort again, so
+      another attempt would spend time and prove nothing;
+    * any other inconclusive result (:class:`TestkitFixtureError`, for example
+      the agent made no tool calls or the judge reached no verdict): keep it
+      and move on. It is never counted as a resist, but it uses up one of the
+      attempts, so the cost stays bounded by the attempt count;
     * the attempt resisted: count it.
 
-    The check passes only when the loop finishes, that is when every attempt
-    resisted.
+    When the loop finishes, :meth:`finish` passes the check only if at least
+    one attempt resisted, and warns (:class:`RedriveInconclusiveWarning`) when
+    some attempts were inconclusive. If none resisted, it raises the last
+    inconclusive error with the tally, so inconclusive attempts can never add
+    up to a pass.
     """
 
     def __init__(self, attempts: int) -> None:
         self.attempts = attempts
         self.resisted = 0
+        self.inconclusive = 0
+        self._last_inconclusive: TestkitFixtureError | None = None
+
+    @staticmethod
+    def _append(exc: TestkitFixtureError, note: str) -> None:
+        # Add to the same exception's message rather than building a new one:
+        # that keeps its type and traceback and assumes nothing about a
+        # subclass's constructor.
+        first = f"{exc.args[0]} {note}" if exc.args else note
+        exc.args = (first, *exc.args[1:])
 
     def record(
         self, attempt: int, result: ScanResult, exploit: ExploitRecord, **wording: Any
     ) -> None:
         try:
             _assert_from_result(result, exploit, **wording)
-        except TestkitFixtureError as exc:
-            # Re-raise the same exception with the tally added to its message,
-            # rather than building a new one: that keeps its type and traceback
-            # and assumes nothing about a subclass's constructor.
-            tally = (
-                f"(re-drive attempt {attempt} of {self.attempts} was inconclusive "
-                f"after {self.resisted} resisted; the check stops at the first "
-                "inconclusive attempt, since every attempt must resist for it to pass.)"
+        except TestkitRedriveAborted as exc:
+            self._append(
+                exc,
+                f"(re-drive attempt {attempt} of {self.attempts} was cut short after "
+                f"{self.resisted} resisted and {self.inconclusive} inconclusive; the "
+                "check stops here, since another attempt on a target or provider that "
+                "ran out of room would only stop again.)",
             )
-            first = f"{exc.args[0]} {tally}" if exc.args else tally
-            exc.args = (first, *exc.args[1:])
             raise
+        except TestkitFixtureError as exc:
+            self.inconclusive += 1
+            self._last_inconclusive = exc
+            return
         except AssertionError as exc:
             raise AssertionError(
                 f"{exc} The attack landed on re-drive attempt {attempt} of "
@@ -569,6 +599,35 @@ class _AttemptTally:
                 "stopped there."
             ) from exc
         self.resisted += 1
+
+    def finish(self) -> None:
+        """Pass if at least one attempt resisted; else raise the last
+        inconclusive error, so an unexercised attack never passes.
+
+        A pass with some inconclusive attempts warns, so a thinner pass than
+        the attempt count suggests is visible in the pytest summary.
+        """
+        if self.resisted:
+            if self.inconclusive:
+                warnings.warn(
+                    RedriveInconclusiveWarning(
+                        f"resistance confirmed on {self.resisted} of {self.attempts} "
+                        f"attempts; {self.inconclusive} inconclusive (the agent did "
+                        "not exercise the attack)"
+                    ),
+                    # finish() <- assert_* <- the test function that called it.
+                    stacklevel=3,
+                )
+            return
+        exc = self._last_inconclusive or TestkitFixtureError(
+            "inconclusive: no re-drive attempt reached a verdict."
+        )
+        self._append(
+            exc,
+            f"(all {self.attempts} re-drive attempt(s) were inconclusive, so none "
+            "confirmed resistance; an inconclusive attempt is never counted as a resist.)",
+        )
+        raise exc
 
 
 _T = TypeVar("_T")
@@ -936,19 +995,24 @@ def assert_target_resists(
         How many times to re-drive the target. ``None`` (the default) reads
         :data:`REDRIVE_ATTEMPTS_ENV`, else :data:`DEFAULT_REDRIVE_ATTEMPTS` (3).
         The first attempt on which the attack lands raises ``AssertionError``
-        and no further attempt runs. The check passes only when every attempt
-        resisted. An inconclusive attempt is not a resist: the first one raises
-        its :class:`TestkitFixtureError` (or :class:`TestkitRedriveAborted`)
-        with the tally so far and no further attempt runs, so inconclusive runs
-        can never add up to a pass. The target's
-        effect probe is calibrated once, before the first attempt.
+        and no further attempt runs. An inconclusive attempt (for example the
+        agent made no tool calls, or no verdict was reached) is not a resist
+        and does not end the check: it uses up one attempt and the next one
+        runs. The check passes when no attempt landed and at least one
+        resisted. If every attempt was inconclusive, the last one's
+        :class:`TestkitFixtureError` is raised, so inconclusive runs can never
+        add up to a pass. A re-drive cut short by its own bound
+        (:class:`TestkitRedriveAborted`) still stops the check at once. The
+        target's effect probe is calibrated once, before the first attempt.
 
     Raises
     ------
     AssertionError:
         The attack landed on one of the attempts.
     TestkitFixtureError:
-        An attempt was inconclusive before any attempt landed.
+        Every attempt was inconclusive, so none confirmed resistance.
+    TestkitRedriveAborted:
+        An attempt was cut short by its call budget or time limit.
     TestkitConfigError:
         ``attempts`` or :data:`REDRIVE_ATTEMPTS_ENV` is not a whole number of at
         least 1, or the model/provider cannot be resolved.
@@ -1024,6 +1088,7 @@ def assert_target_resists(
                 completion_fn=_completion_fn,
             )
             tally.record(attempt, result, exploit, **wording)
+        tally.finish()
     finally:
         target_registry.clear_runtime_targets()
 
@@ -1057,10 +1122,12 @@ def assert_control_holds(
 
     ``attempts`` resolves as in :func:`assert_target_resists` (keyword, then
     :data:`REDRIVE_ATTEMPTS_ENV`, then 3). The guarded leg runs on every
-    attempt and the check stops at the first attempt it lands on or is
-    inconclusive on. The raw leg
-    runs only until the attack has landed on it once. A pass therefore costs
-    one raw re-drive plus one guarded re-drive per attempt.
+    attempt and the check stops at the first attempt it lands on. A guarded
+    attempt that is inconclusive uses up that attempt and the next one runs;
+    the guarded leg passes when no attempt landed and at least one resisted.
+    The raw leg runs only until the attack has landed on it once; an
+    inconclusive raw attempt simply has not landed yet. A pass therefore
+    costs at most one raw re-drive plus one guarded re-drive per attempt.
 
     Raises
     ------
@@ -1071,8 +1138,9 @@ def assert_control_holds(
         could not show the control matters. Not an ``AssertionError``, so
         :func:`pending_fix` never turns it into an expected failure.
     TestkitFixtureError:
-        A guarded attempt was inconclusive (only skip/error outcomes); the
-        check stops there.
+        Every guarded attempt was inconclusive (only skip/error outcomes), so
+        the control's resistance was never confirmed. A guarded attempt cut
+        short by its bound raises :class:`TestkitRedriveAborted` at once.
     ValueError:
         ``control`` names a weakness class with no implemented boundary control,
         or ``plan_twins`` found no differential to build at all for this
@@ -1219,6 +1287,7 @@ def assert_control_holds(
                 input_frame=plan.guarded.input_frame,
             )
             tally.record(attempt, guarded, exploit, **wording)
+        tally.finish()
     finally:
         target_registry.clear_runtime_targets()
 
@@ -1249,9 +1318,9 @@ def pending_fix(reason: str) -> Callable[[TestFunction], TestFunction]:
        works). A live check raises on the first re-drive attempt the attack
        lands on, so no more is spent. The test is reported as an expected
        failure (``xfail``) and the run stays green.
-    2. **Fixed.** The check passes, which for a live check means every
-       re-drive attempt resisted (3 by default, see
-       :data:`DEFAULT_REDRIVE_ATTEMPTS`). Because the marker is strict, the
+    2. **Fixed.** The check passes, which for a live check means no
+       re-drive attempt landed and at least one resisted (3 attempts by
+       default, see :data:`DEFAULT_REDRIVE_ATTEMPTS`). Because the marker is strict, the
        test FAILS and its message tells you to delete the
        ``@testkit.pending_fix`` line if your fix has landed (an attack that
        lands rarely can still resist every attempt, so the message says so).
@@ -1323,6 +1392,7 @@ def pending_fix(reason: str) -> Callable[[TestFunction], TestFunction]:
 
 
 __all__ = [
+    "RedriveInconclusiveWarning",
     "TestkitAttackNotReproduced",
     "TestkitConfigError",
     "TestkitFixtureError",

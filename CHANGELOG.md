@@ -87,6 +87,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A live gate test no longer ends on one inconclusive re-drive attempt.**
+  This changes how `testkit.assert_target_resists` and
+  `testkit.assert_control_holds` count attempts. Before, an attempt where
+  the agent made no tool calls, or no verdict was reached, raised
+  `TestkitFixtureError` at once, even with attempts left; on a CI run with a
+  small model one such attempt failed the whole test. Now that attempt uses
+  up one of the N attempts and the next one runs. A landing still fails at
+  once. The test passes when no attempt landed and at least one resisted.
+  If every attempt was inconclusive it raises the same inconclusive error
+  as before, so an attack that was never exercised still never passes, and
+  `pending_fix` still never turns it into an expected failure. A re-drive
+  cut short by its own call budget, time limit or the session's request
+  ceiling (`TestkitRedriveAborted`) still stops the test at once. The cost
+  stays capped at N re-drives per leg. A pass where some attempts were
+  inconclusive emits the new `testkit.RedriveInconclusiveWarning`, naming on
+  how many attempts resistance was confirmed. Mylonite does not filter it,
+  so under `filterwarnings = ["error"]` a partial pass fails; add
+  `"default::mylonite.testkit.RedriveInconclusiveWarning"` after `"error"`
+  to keep it a warning. No existing signature
+  changed; the testkit signature snapshot gains the new warning class. See
+  [Re-drive attempts and what they cost](docs/testkit.md#re-drive-attempts-and-what-they-cost).
+
 - **A `confirm_only` probe that sees the attack change its record now
   raises the finding to `effect-confirmed` (#324).** Before, its reading was
   ignored and the call stayed a `dispatched` finding. The raise happens only
