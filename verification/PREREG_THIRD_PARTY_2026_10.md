@@ -439,3 +439,19 @@ against this budget.
   and `TRENDS.md`, with the model, run count, commit/pin, cost (`cost.json`) and proof
   level. A product bug found along the way becomes a GitHub issue; this prereg does
   not get edited after the fact to match what was found.
+
+## Amendments during the counted runs
+
+Recorded before the affected cells were re-run; neither changes a pass rule.
+
+- **2026-10-03, Anthropic credential (infrastructure).** The first three counted Anthropic
+  dispatches (targets 1-3, run 1) stopped at the key check before any target launched:
+  the CI secret held an expired key (HTTP 401). No request was billed and no outcome was
+  produced. This is a named infrastructure failure under "No extra runs"; the key was
+  rotated and those cells were re-dispatched on the same commit.
+- **2026-10-03, target 3 harness flag (configuration).** Target 3 declares W2 with no
+  `seed_arm` (its only W2 route is a tool argument, see "3. `simple-streamablehttp`").
+  `scan` refuses that combination unless `--allow-no-seed-arm` is passed, so the first
+  counted dispatch stopped before any request, with no outcome. The workflow now passes
+  `--allow-no-seed-arm` for target 3 only, which makes W2 read NOT TESTED as this prereg
+  already expects. The cell was re-run after this change.

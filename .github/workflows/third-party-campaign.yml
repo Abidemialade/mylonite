@@ -388,10 +388,15 @@ jobs:
           TPV_SCAN_CEILING: ${{ steps.inputs.outputs.scan_ceiling }}
           TPV_VALIDATE_CEILING: ${{ steps.inputs.outputs.validate_ceiling }}
         run: |
+          EXTRA_SCAN_FLAGS=""
           case "$TPV_TARGET" in
             tpv-server-memory)      TARGET_FILE=memory.yaml;         FULL_JOURNEY=true ;;
             tpv-mcp-redis)          TARGET_FILE=redis.yaml;          FULL_JOURNEY=true ;;
-            tpv-streamablehttp)     TARGET_FILE=streamablehttp.yaml; FULL_JOURNEY=true ;;
+            # Its only W2 route is a tool argument, not a store-and-recall
+            # pair, so there is no seed_arm; the prereg expects W2 to read
+            # NOT TESTED here rather than the scan refusing to start.
+            tpv-streamablehttp)     TARGET_FILE=streamablehttp.yaml; FULL_JOURNEY=true
+                                    EXTRA_SCAN_FLAGS="--allow-no-seed-arm" ;;
             tpv-server-everything)  TARGET_FILE=everything.yaml;     FULL_JOURNEY=false ;;
             tpv-go-memory)          TARGET_FILE=go_memory.yaml;      FULL_JOURNEY=false ;;
             tpv-agents-sdk-ollama)  TARGET_FILE=agents_rest.yaml;    FULL_JOURNEY=false ;;
@@ -421,7 +426,7 @@ jobs:
           MYLONITE_MAX_LLM_REQUESTS="$TPV_SCAN_CEILING" "$MYLONITE" scan \
             --target-file "verification/third_party/$TARGET_FILE" \
             --authorize "$TPV_TARGET" --model "$TPV_MODEL" --max-llm-calls 60 \
-            --output-dir out 2>&1 | tee run.log scan.log
+            --output-dir out $EXTRA_SCAN_FLAGS 2>&1 | tee run.log scan.log
           scan_rc=${PIPESTATUS[0]}
           set -e
           echo "scan exited $scan_rc" >> run.log
