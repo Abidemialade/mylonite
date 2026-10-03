@@ -12,10 +12,12 @@ order to read them in, start to finish, on your own machine.
   model, no manual install if you have [uv](https://docs.astral.sh/uv/).
 - **A git repository**, once you reach [Commit the gate](6-commit-the-gate.md):
   `gate --open-pr` and `gate --workflows` both resolve your repo root with
-  `git rev-parse --show-toplevel` and need a clean working tree. You don't
-  need this for steps 1-5 — `scan`, `generate` and `validate` write only
-  under `.mylonite/`, inside or outside a repository. Stated here, not only
-  under the `--open-pr` flag, because step 6 is reachable from a fresh
+  `git rev-parse --show-toplevel`. Only `--open-pr` additionally refuses a
+  dirty working tree — it switches branch and commits; `--workflows` alone
+  just writes `.github/workflows/*` files and doesn't check. You don't need
+  a repository at all for steps 1-5 — `scan`, `generate` and `validate`
+  write only under `.mylonite/`, inside or outside one. Stated here, not
+  only under the `--open-pr` flag, because step 6 is reachable from a fresh
   checkout with no commits yet.
 - **An MCP server you can run locally** (stdio), for steps 3 onward. No
   server yet? [Try it](1-try.md) uses the bundled one instead, so you can

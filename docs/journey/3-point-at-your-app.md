@@ -23,14 +23,10 @@ reference](../target-file.md) for every field it fills in and
 [Test your own app](../test-your-app.md) for the end-to-end walkthrough this
 page summarises.
 
-## What the 10-minute bar counts, and what it doesn't
-
-The stated first-proof target ([journey overview](index.md#the-bar-this-is-measured-against))
-starts the clock here, not at step 1. It covers this scaffold step plus
-[Find](4-find.md) against a server that's already running and reachable —
-it does not count time spent getting your own server to start at all (a
-database to seed, credentials to obtain, a slow cold boot). If your server
-needs that kind of setup, do it before timing yourself against the bar.
+The [first-proof bar](index.md#the-bar-this-is-measured-against) starts
+counting here, against a server that's already running — not against the
+time it takes your own server to start (a database to seed, a slow cold
+boot).
 
 ## Next
 

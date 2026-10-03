@@ -12,8 +12,9 @@ checks against and would drift from it if copied here by hand.
 Pick one of two paths:
 
 - **A hosted provider.** Anthropic is the one this journey is measured
-  against (`claude-haiku-4-5-20251001`); OpenAI, Gemini, Azure, Bedrock and a
-  few others are supported — see the table for each one's key variable.
+  against (`claude-haiku-4-5-20251001`); OpenAI, Gemini, Azure, Bedrock,
+  Vertex AI and a LiteLLM proxy are also supported — see the table for each
+  one's key variable.
 
   ```bash
   export MYLONITE_MODEL=anthropic/claude-haiku-4-5-20251001

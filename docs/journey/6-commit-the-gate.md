@@ -4,7 +4,8 @@
 generate, validate — and, opt-in, opens the pull request. This is the step
 that needs [a git repository](index.md#before-you-start): `--open-pr` and
 `--workflows` both resolve your repo root with `git rev-parse
---show-toplevel` and refuse a dirty working tree.
+--show-toplevel`. Only `--open-pr` refuses a dirty working tree —
+`--workflows` alone writes its CI files without that check.
 
 ```bash
 mylonite gate --target-file app.yaml --authorize my-app
