@@ -15,4 +15,4 @@ Live-in-CI runs against real third-party systems, scored against a pre-registere
 
 | Version | Date | Targets KEPT (bar met) | Product defects (open issues) | Spend |
 | --- | --- | --- | --- | --- |
-| 0.12.0 | 2026-10-03 | `tpv-mcp-redis`, `tpv-server-memory` | 2 (2 open) | anthropic $0.91, ollama $0.00, openai $0.08 |
+| 0.12.0 | 2026-10-03 | `mcp-redis`, `server-memory` | 2 (0 open) | anthropic $0.91, ollama $0.00, openai $0.08 |
