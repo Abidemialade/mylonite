@@ -843,3 +843,41 @@ def test_redact_target_yaml_keeps_max_tokens_in_request_url() -> None:
     url = "https://h/chat?max_tokens=512&tokenizer=gpt2&page_token=abc"
     out = redact_target_yaml(f"family: app\nrequest:\n  url: {url}\n")
     assert yaml.safe_load(out)["request"]["url"] == url
+
+
+# --- child loggers ----------------------------------------------------------
+
+
+def test_redaction_covers_records_from_child_loggers(caplog: pytest.LogCaptureFixture) -> None:
+    """A logger-level filter only sees records logged on that exact logger;
+    every module logs through ``getLogger(__name__)``, so the redaction must
+    reach ``mylonite.scan._llm`` and the rest of the tree too."""
+    from mylonite._redaction import clear_secret_values, register_secret_value
+
+    install_log_redaction(enabled=True)
+    register_secret_value("wrkspc-child-logger-sentinel")
+    try:
+        with caplog.at_level(logging.WARNING):
+            child = logging.getLogger("mylonite.scan._llm")
+            child.warning("header %s rejected", "wrkspc-child-logger-sentinel")
+            child.warning("key in use: %s", FAKE_ANTHROPIC)
+    finally:
+        clear_secret_values()
+    assert "wrkspc-child-logger-sentinel" not in caplog.text
+    assert FAKE_ANTHROPIC not in caplog.text
+    assert REDACTION_PLACEHOLDER in caplog.text
+
+
+def test_a_registered_value_is_masked_in_a_library_logger_too(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    from mylonite._redaction import clear_secret_values, register_secret_value
+
+    install_log_redaction(enabled=True)
+    register_secret_value("wrkspc-library-sentinel")
+    try:
+        with caplog.at_level(logging.DEBUG):
+            logging.getLogger("LiteLLM").debug("headers: %s", "wrkspc-library-sentinel")
+    finally:
+        clear_secret_values()
+    assert "wrkspc-library-sentinel" not in caplog.text

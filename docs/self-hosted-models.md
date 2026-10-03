@@ -72,10 +72,10 @@ static `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` pair, a named
 is sufficient; Mylonite doesn't demand the static pair specifically just
 because it's the row's canonical/first-listed one.
 
-A row can also name extra headers some of its keys need (today, Anthropic's
-`anthropic-workspace-id`). Mylonite never sends one by itself; the name is
-what the "header required" error line tells you to pass with
-`--llm-header`. Before any target work, every live command checks the key
+A row can also name extra headers some of its keys need (today, for
+example, Anthropic's `anthropic-workspace-id`). Mylonite never sends one by
+itself; the error line for a missing header names whichever header the
+provider's own error names, so you know what to pass with `--llm-header`. Before any target work, every live command checks the key
 with one tiny request per remote role model; Ollama and vLLM rows are
 skipped, since they have no key to check.
 

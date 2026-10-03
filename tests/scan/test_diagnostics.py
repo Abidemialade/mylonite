@@ -133,3 +133,68 @@ def test_an_unrelated_400_stays_a_bad_request() -> None:
         _litellm_error("400", "model: unknown-model not found"), provider="anthropic"
     )
     assert diag.category == "bad_request"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        # A spend or billing limit mentions the workspace but no header.
+        "workspace has reached its spend limit; a higher usage tier is required",
+        # An unknown model.
+        "model: not-a-model is not a valid model id; a supported model is required",
+        # Too much input.
+        "prompt is too long: 250000 tokens > 200000 maximum; a shorter input is required",
+    ],
+    ids=["spend-limit", "bad-model", "context-length"],
+)
+def test_a_400_without_a_header_signal_is_not_header_required(message: str) -> None:
+    diag = classify_provider_error(_litellm_error("400", message), provider="anthropic")
+    assert diag.category == "bad_request"
+    assert "--llm-header" not in diag.remedy
+
+
+def test_a_400_naming_another_header_names_that_header_not_the_workspace_one() -> None:
+    diag = classify_provider_error(
+        _litellm_error("400", "anthropic-version header is required"), provider="anthropic"
+    )
+    assert diag.category == "auth"
+    assert "anthropic-version" in diag.remedy
+    assert "anthropic-workspace-id" not in diag.remedy
+
+
+def test_a_400_naming_no_header_gives_the_generic_option() -> None:
+    diag = classify_provider_error(
+        _litellm_error("400", "a required request header is missing"), provider="anthropic"
+    )
+    assert diag.category == "auth"
+    assert "--llm-header NAME=<value>" in diag.remedy
+
+
+def test_the_status_comes_from_the_exception_not_from_digits_in_the_text() -> None:
+    """A 400 whose request id contains '401' is still a 400."""
+    diag = classify_provider_error(
+        _litellm_error("400", f"{_HEADER_REQUIRED_400} (request id req_401abc, 401 ms)"),
+        provider="anthropic",
+    )
+    assert diag.category == "auth"
+    assert "--llm-header" in diag.remedy
+
+
+def test_a_401_from_plain_text_without_a_status_does_not_claim_http_401() -> None:
+    diag = classify_provider_error(
+        RuntimeError("authentication rejected: key revoked"), provider="anthropic"
+    )
+    assert diag.category == "auth"
+    assert "HTTP 401" not in diag.remedy
+    assert "invalid or expired" in diag.remedy
+
+
+def test_the_detail_masks_a_registered_header_value() -> None:
+    from mylonite._redaction import clear_secret_values, register_secret_value
+
+    register_secret_value("wrkspc-detail-sentinel")
+    try:
+        diag = classify_provider_error(RuntimeError("echoed wrkspc-detail-sentinel back"))
+    finally:
+        clear_secret_values()
+    assert "wrkspc-detail-sentinel" not in diag.detail

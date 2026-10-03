@@ -17,23 +17,29 @@ counted. `--max-llm-calls` is a softer per-scan budget, described below.
 **Extra LLM headers.** Some keys need a header on every request beyond the key itself:
 an unscoped Anthropic key needs its workspace id, and some gateways route on a header.
 Pass `--llm-header NAME=VALUE` before the command (repeat it for more than one), or set
-`MYLONITE_LLM_HEADERS` to comma-separated `NAME=VALUE` pairs; the flag wins over the
-variable for the same name. For example:
+`MYLONITE_LLM_HEADERS` to comma-separated `NAME=VALUE` pairs (a value can't contain a
+comma there; use the flag for one that does); the flag wins over the variable for the
+same name. `--env-file` loads `MYLONITE_LLM_HEADERS` too, so the header can sit next to
+the key. Use the header name your provider's error names; for example:
 
 ```bash
 mylonite --llm-header anthropic-workspace-id=<your-workspace-id> scan reference:vulnerable
 ```
 
 Header values are treated as secrets. They go to the provider and nowhere else: the
-console, logs, artefacts, fixtures and replay cache keys never carry them. A malformed
-entry exits `2` without echoing its value.
+console, Mylonite's logs, artefacts, fixtures and replay cache keys never carry them.
+Values shorter than 4 characters are not masked. A malformed entry exits `2`, and the
+error names only the entry's position, never any part of it. LiteLLM's own debug
+logging (`LITELLM_LOG=DEBUG`) prints request headers; leave it off when a header carries
+a secret.
 
 **Key check before the target starts.** `scan`, `validate`, `gate` and `ablate` send one
 tiny request per distinct role model (a few tokens, no retries, counted against
 `--max-llm-requests`) before they launch or touch the target. If the provider refuses
 the key, the run stops with one line and exit `4`: an invalid or expired key (HTTP 401)
 names the key variable, and a key that needs an extra header (HTTP 400, for example a
-missing workspace id) names `--llm-header` and `MYLONITE_LLM_HEADERS`. Local providers
+missing workspace id) names `--llm-header`, `MYLONITE_LLM_HEADERS` and the header the
+provider's error names. Local providers
 (Ollama, vLLM) are skipped. A timeout or rate limit on this request does not stop the
 run; the later reachability check reports those. A key that is not set at all still
 exits `2` before any request.

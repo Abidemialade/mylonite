@@ -51,6 +51,30 @@ def test_cli_wins_over_env_for_the_same_name_case_insensitively() -> None:
     assert headers == (("x-y", "1"), ("Anthropic-Workspace-Id", "cli"))
 
 
+@pytest.mark.parametrize("source", ["flag", "env"])
+@pytest.mark.parametrize(
+    "entry",
+    [
+        f"x-ws: {_SENTINEL}=pad",
+        f"anthropic-workspace-id: {_SENTINEL}",
+        f"Authorization: Bearer {_SENTINEL}==",
+    ],
+)
+def test_a_curl_style_entry_never_echoes_any_part_of_itself(entry: str, source: str) -> None:
+    """A 'Name: value' entry (the curl habit) is malformed; whatever sits
+    before the first '=' may be the secret, so the error names the entry's
+    position and the expected form, nothing from the entry itself."""
+    with pytest.raises(InvalidLLMHeaderError) as info:
+        if source == "flag":
+            parse_llm_headers([entry], None)
+        else:
+            parse_llm_headers(None, entry)
+    message = str(info.value)
+    assert _SENTINEL not in message
+    assert entry.split(":")[0] not in message
+    assert "NAME=VALUE" in message
+
+
 @pytest.mark.parametrize(
     "entry",
     [
@@ -68,6 +92,7 @@ def test_malformed_entry_is_refused_without_echoing_the_value(entry: str) -> Non
     value = entry.partition("=")[2]
     if value:
         assert value not in str(info.value)
+    assert "NAME=VALUE" in str(info.value) or "line break" in str(info.value)
 
 
 def test_configure_reads_env_and_registers_values_for_redaction(
@@ -109,3 +134,10 @@ def test_header_values_never_enter_the_replay_cache_key() -> None:
     )
     assert plain == _stable_key_v2("m", messages, **LLMPolicy().kwargs())
     assert with_headers == plain
+
+
+def test_a_policy_built_directly_registers_its_header_values() -> None:
+    """A library caller that builds LLMPolicy itself, without the CLI, still
+    gets its header values masked."""
+    LLMPolicy(extra_headers=(("x-gateway-token", _SENTINEL),))
+    assert _SENTINEL not in redact(f"echo {_SENTINEL}")

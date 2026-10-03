@@ -43,11 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   role model first (a few tokens, no retries, counted against
   `--max-llm-requests`). An invalid or expired key (HTTP 401) exits `4` with a
   line naming the key variable; a key that needs an extra header (HTTP 400,
-  such as a missing workspace id) exits `4` with a line naming `--llm-header`
-  and `MYLONITE_LLM_HEADERS`. Neither launches the target or prints a
-  traceback. Ollama and vLLM models are not checked. The provider registry's
-  Anthropic row now names `anthropic-workspace-id`, so the provider table in
-  `docs/choose-a-model.md` changed.
+  such as a missing workspace id) exits `4` with a line naming `--llm-header`,
+  `MYLONITE_LLM_HEADERS` and the header the provider's error names. Neither
+  launches the target or prints a traceback. Ollama and vLLM models are not
+  checked. The provider registry's Anthropic row now names, for example,
+  `anthropic-workspace-id`, so the provider table in `docs/choose-a-model.md`
+  changed.
+- **Log redaction now covers every Mylonite module's log lines.** It used to
+  apply only to records logged on the top-level `mylonite` logger, not to the
+  module loggers beneath it. Registered secret values (the `--llm-header`
+  values) are also masked in records from any other library's logger.
 
 - **`validate --iteration-timeout` now bounds the reference differential too.**
   It used to reach only the provider check and custom targets, so a slow
@@ -161,10 +166,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Send extra headers on every LLM request.** The global
   `--llm-header NAME=VALUE` option (repeatable) and the `MYLONITE_LLM_HEADERS`
   variable (comma-separated pairs) add headers such as the workspace id an
-  unscoped Anthropic key needs, so those keys now work. Values are treated as
-  secrets: they reach the provider and never the console, logs, artefacts,
-  fixtures or replay cache keys. The new option changes the command-tree
-  snapshot.
+  unscoped Anthropic key needs, so those keys now work. `--env-file` loads
+  the variable too. Values are treated as secrets: they reach the provider
+  and never the console, logs, artefacts, fixtures or replay cache keys, and
+  a malformed entry's error never echoes any part of it. The new option
+  changes the command-tree snapshot.
 
 - **`scan --scaffold` writes a file that runs as written.** A `seed_arm` the
   scan would wire on its own is now written live, tagged `# auto-detected`,
