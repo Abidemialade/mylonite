@@ -560,7 +560,7 @@ them.
 | 2 | config or usage error (incl. an empty scan — never reads as a clean pass) |
 | 3 | LLM-call budget exceeded |
 | 4 | provider unreachable |
-| 5 | the generated test was rejected (not kept) |
+| 5 | the generated test was rejected (not kept), or `generate` refused an input whose validation did not keep it |
 | 6 | `gate`: the test generator returned nothing |
 | 7 | `gate`: the validator returned nothing |
 | 8 | `gate`: the git/gh step failed (findings and report still written to `--out`) |

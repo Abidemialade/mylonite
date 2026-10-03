@@ -237,13 +237,16 @@ A test written from a scan is a candidate until `validate` keeps it, so its firs
 line reads `# mylonite: unvalidated` and a short UNVALIDATED header follows. The
 command prints an UNVALIDATED line with the `validate` command to run. When
 `validate` returns **KEPT** it removes the header; a **STABLE, NOT PROVEN** or
-**REJECTED** verdict leaves it in place.
+**REJECTED** verdict adds it back, also to a test that was kept before or written
+without one. The header always matches the latest verdict.
 
 `generate` reads the `validation_report.json` next to the input exploit, if there
-is one (`validate` and `gate` write it). If that report is KEPT, the test is
-written without the header. If it is REJECTED, STABLE, NOT PROVEN or unreadable,
-`generate` writes nothing and exits `5`. Pass `--unvalidated` to write the test
-anyway, with the header.
+is one (`validate` and `gate` write it). If it is REJECTED, STABLE, NOT PROVEN or
+unreadable, `generate` writes nothing and exits `5`. Pass `--unvalidated` to write
+the test anyway, with the header. If it is KEPT, the test goes without the header
+only when that report proved this exact test: the folder holds one exploit, the
+exploit is no newer than the report, `--prove-control` is off, and the test the
+report names matches the one about to be written. Otherwise the test is stamped.
 
 ## `validate` — prove the test
 
