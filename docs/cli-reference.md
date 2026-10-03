@@ -261,6 +261,14 @@ exit code 2 and the same `export` line. The scan-directory copy, `generate`'s co
 `gate`'s copy print the same note. See
 [Secrets stay out of the file](target-file.md#secrets-stay-out-of-the-file).
 
+When a scan finds something, the summary table is followed by one block per finding,
+most severe first: a `Severity` line, a one-sentence `Impact` line naming what an
+attacker gets from that weakness class, and a suggested fix — the same facts the
+[gate PR body](ci-gating.md) opens with, reused rather than re-derived, so the fix is
+never exclusive to a committed test or a validated directory. It is always introduced
+as a suggestion; `scan` proves and gates a weakness, it does not patch your code. The
+`Next: mylonite generate …` hint follows the last block.
+
 ## `generate` — emit the regression test
 
 Emit a pytest regression test from a confirmed exploit. Offline and deterministic — no
@@ -337,10 +345,14 @@ The report's notes record the models the test was proved against
 To re-prove a committed test after a model change, see
 [Re-validate on a new model](model-upgrade.md).
 
-A kept test exits `0`. If its verdict reads **STABLE, NOT PROVEN** (no differential or
+A kept test exits `0`. A plain **KEPT** verdict is followed by the same severity,
+impact and suggested-fix block `scan` shows under a finding, before the "Next: commit"
+line — so the fix is shown here too, not only in the gate PR body. If its verdict
+reads **STABLE, NOT PROVEN** (no differential or
 effect proof, see [what the numbers mean](validation.md#what-the-numbers-mean)),
 `validate` says the committed test would gate reproduction only, and points you at a
-guarded side or an `effect_probe`.
+guarded side or an `effect_probe` — without the severity/impact/fix block, since
+nothing was proven yet.
 
 A run that cannot reach a verdict stops with one line and no traceback. It exits `3`
 (`MYL-ABT-001`) when the LLM call budget runs out mid-run, and `2` (`MYL-ABT-006`)

@@ -1454,9 +1454,21 @@ def scan(
             write_redacted_target(scan_dir / "target.yaml", custom_target_yaml)
         echo(redact(render_summary(result)))
         echo(f"Artefacts: {scan_dir}")
+        # A3/SV1: severity, impact and the suggested fix under every FOUND,
+        # most severe first — the same facts (reused, not re-derived) the
+        # gate PR body opens with — so the fix is never exclusive to a
+        # validated directory or an export.
+        if result.exploits:
+            from mylonite.gate.mitigation import finding_block, sort_exploits_by_severity
+
+            echo("")
+            for exploit in sort_exploits_by_severity(result.exploits):
+                echo(redact(f"Finding: {exploit.pattern_id}"))
+                for line in finding_block(exploit):
+                    echo(redact(line))
+                echo("")
         # "Next:" hint — point at the very next command so the flow is self-guiding.
         if result.report.findings_count > 0:
-            echo("")
             echo(f"Next: mylonite generate {scan_dir}")
     else:
         # Dry-run: render summary without writing files.
@@ -2371,7 +2383,10 @@ def validate(
         from mylonite._verdict import next_step_after_keep
 
         echo("")
-        echo(next_step_after_keep(report))
+        # A3/SV1: the severity/impact/suggested-fix block under a plain KEPT
+        # verdict (generated.exploit carries the finding both the reference
+        # and custom-target branches above already built).
+        echo(next_step_after_keep(report, generated.exploit))
         raise typer.Exit(code=EXIT_SUCCESS)
     raise typer.Exit(code=EXIT_NOT_KEPT)
 
