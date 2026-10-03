@@ -359,6 +359,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of dropping out of the class summary. A scan whose only gap is
   `MYL-NT-018` exits `2`. Both codes are listed in
   `docs/reason-codes.md` (reason-code snapshot updated).
+- **Known limitations now says when a resisted result measures the planner
+  model, not your app.** A new section in `docs/limitations.md` covers the
+  two cases where a planner that declines still reads resisted: indirect W1
+  and W2 attacks, and the bundled direct W3 and W4 probes. Generated W3 and
+  W4 probes already read NOT TESTED in that case.
 - **A `transport: rest` target that declares an `effect_probe` now stops with
   one clear message instead of being ignored.** Every command that loads the
   file, `check` included, exits `2` before it connects or calls a model, and
