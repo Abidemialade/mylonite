@@ -271,8 +271,8 @@ note: secrets in headers and env were kept out of app.yaml. It reads them from t
 ```
 
 `args` has no key name to mask a value by, so a credential passed through `--arg`
-instead (`--api-key=sk-...`, a URL with `?access_token=...`) is still written in plain
-text — but now warns, naming the position and withholding the value:
+instead (an `api-key=sk-...`-shaped flag, a URL with `?access_token=...`) is still
+written in plain text — but now warns, naming the position and withholding the value:
 `args[0] looks like it carries a credential (value withheld). Move it to env: ...`. See
 [A credential in args is written in plain text](target-file.md#a-credential-in-args-is-written-in-plain-text-and-now-warns).
 
