@@ -148,6 +148,77 @@ def test_open_pr_fn_threads_the_targets_command_into_the_workflows(
     assert "setup-node" in gate_workflow
 
 
+def test_open_pr_fn_threads_a_quoted_command_into_the_workflows(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """A quoted `command: "npx"` is YAML-unquoted by load_target_file
+    before it ever reaches write_workflows -- no stray quote characters to
+    strip at this layer."""
+    monkeypatch.chdir(tmp_path)
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text('family: demo\ncommand: "npx"\nargs: []\n', encoding="utf-8")
+    pr_mod_fake = _FakePrMod()
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest",
+        workflows=True,
+        target_file=target_file,
+        pr_mod=pr_mod_fake,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    out_dir.mkdir(parents=True)
+
+    open_pr_fn(
+        out_dir=out_dir,
+        findings=[(_exploit("p1"), SimpleNamespace(test_filename="test_p1.py"))],
+        body="## What Mylonite found\n",
+        open_pr=False,
+    )
+
+    gate_workflow = (tmp_path / ".github" / "workflows" / "mylonite-gate.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "setup-node" in gate_workflow
+
+
+@pytest.mark.parametrize("transport", ["sse", "http"])
+def test_open_pr_fn_does_not_crash_for_a_remote_target_with_no_command(
+    tmp_path: Path, monkeypatch: Any, transport: str
+) -> None:
+    """An sse/http target declares no `command:` line at all
+    (TargetFile.command defaults to ""). write_workflows/open_pr_fn must
+    not raise, and the scaffolded workflow gets no Node/uv setup step."""
+    monkeypatch.chdir(tmp_path)
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text(
+        f"family: demo\ntransport: {transport}\nurl: https://example.invalid/mcp\n",
+        encoding="utf-8",
+    )
+    pr_mod_fake = _FakePrMod()
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest",
+        workflows=True,
+        target_file=target_file,
+        pr_mod=pr_mod_fake,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    out_dir.mkdir(parents=True)
+
+    open_pr_fn(
+        out_dir=out_dir,
+        findings=[(_exploit("p1"), SimpleNamespace(test_filename="test_p1.py"))],
+        body="## What Mylonite found\n",
+        open_pr=False,
+    )
+
+    gate_workflow = (tmp_path / ".github" / "workflows" / "mylonite-gate.yml").read_text(
+        encoding="utf-8"
+    )
+    assert "setup-node" not in gate_workflow
+    assert "pip install uv" not in gate_workflow
+
+
 def test_open_pr_fn_no_target_file_no_secrets_notice(tmp_path: Path, monkeypatch: Any) -> None:
     monkeypatch.chdir(tmp_path)
     pr_mod = _FakePrMod()

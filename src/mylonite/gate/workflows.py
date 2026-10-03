@@ -64,6 +64,29 @@ def _llm_key_env_var(model: str) -> str:
     return key_vars[0]
 
 
+def _llm_extra_env_lines(model: str) -> str:
+    """Repository-**variable** env lines for every credential-adjacent
+    variable ``model``'s provider needs BEYOND its bare key — Azure's
+    endpoint + API version, read from the registry's
+    :attr:`~mylonite.providers.registry.ProviderInfo.extra_env`: a
+    provider can pass :func:`_llm_key_env_var`'s "exactly one key variable"
+    check and still need more than the key to actually route a call, and
+    silently dropping those left Azure scaffolding a workflow that could
+    never pass (the missing endpoint fails every re-drive). Emitted as
+    repository ``vars.*`` rather than secrets — an endpoint URL or an API
+    version string isn't secret-shaped. Empty for every provider with no
+    ``extra_env`` (every one but Azure/Vertex today; Vertex is refused
+    earlier by :func:`_llm_key_env_var` for having no bare key at all).
+    """
+    from mylonite.scan.providers import provider_from_model
+
+    provider = provider_from_model(model)
+    info = PROVIDERS.get(provider) if provider else None
+    if info is None or not info.extra_env:
+        return ""
+    return "\n".join(f"          {var}: ${{{{ vars.{var} }}}}" for var in info.extra_env)
+
+
 def _runtime_setup_step(command: str | None) -> str:
     """A step that installs the runtime ``command`` needs, inserted before
     the step that installs/runs mylonite — empty (nothing emitted) when the
@@ -71,7 +94,13 @@ def _runtime_setup_step(command: str | None) -> str:
     Python ``actions/setup-python`` already set up is enough: a target
     launched via `npx`/`node` or `uvx`/`uv` otherwise has nothing on the
     runner to launch it with.
+
+    ``command`` is reduced to its basename first: ``load_target_file(
+    ...).command`` can be an absolute path (``/usr/bin/npx``), which a bare
+    ``in _NODE_COMMANDS`` membership test would miss.
     """
+    if command:
+        command = Path(command).name
     if command in _NODE_COMMANDS:
         lines = [
             "      - name: Set up Node (the target launches with npx/node)",
@@ -82,29 +111,21 @@ def _runtime_setup_step(command: str | None) -> str:
     elif command in _UV_COMMANDS:
         lines = [
             "      - name: Install uv (the target launches with uvx/uv)",
-            "        run: pip install uv",
+            "        run: pip install uv -c .github/workflows/mylonite-constraints.txt",
         ]
     else:
         return ""
     return "\n".join(lines)
 
 
-def _target_secrets_env_block(target_env_vars: Sequence[str]) -> str:
-    """The gate job's own ``env:`` block (it has none today): one entry per
-    ``${MYLONITE_TARGET_...}`` variable the redacted target file references,
-    mapped to the repository secret of the same name. Empty when the target
-    declares no secrets, so the token line collapses to a blank line."""
-    if not target_env_vars:
-        return ""
-    lines = ["        env:"]
-    lines.extend(f"          {var}: ${{{{ secrets.{var} }}}}" for var in target_env_vars)
-    return "\n".join(lines)
-
-
 def _target_secrets_env_lines(target_env_vars: Sequence[str]) -> str:
-    """Same idea as :func:`_target_secrets_env_block`, for the discovery
-    workflow's step — which already declares its own ``env:`` (for
-    ``MYLONITE_AUTHORIZE``), so only the extra entries are needed here."""
+    """One extra ``env:`` entry per ``${MYLONITE_TARGET_...}`` variable the
+    redacted target file references, mapped to the repository secret of
+    the same name — appended inside the step's OWN existing ``env:`` block
+    (both templates now scope the LLM credential/model vars to the one
+    step that makes a live call, so that step always has an ``env:`` key
+    of its own by the time this is rendered; a bare ``return ""`` for no
+    secrets just removes the comment line, never a stray empty mapping)."""
     return "\n".join(f"          {var}: ${{{{ secrets.{var} }}}}" for var in target_env_vars)
 
 
@@ -199,20 +220,26 @@ def write_workflows(
       literal fallback keeps it working out of the box) while a repository
       variable lets an operator change models later without editing the
       file.
-    * ``__TARGET_SECRETS_ENV__`` / ``__TARGET_SECRETS_ENV_LINES__`` ->
-      (#185) an ``env:`` entry per ``${MYLONITE_TARGET_...}`` placeholder in
-      the redacted ``target.yaml`` this run co-writes, mapped to
-      ``${{ secrets.<NAME> }}``, so the workflow's own ``load_target_file``
-      call doesn't fail on an undefined variable in CI. Pass the variable
-      names read back from the written target file via
-      :func:`mylonite._redaction.target_env_refs`; empty (the default) for a
-      target with no secrets, or a reference/bundled target with none to
-      write at all.
+    * ``__TARGET_SECRETS_ENV_LINES__`` -> (#185) an ``env:`` entry per
+      ``${MYLONITE_TARGET_...}`` placeholder in the redacted ``target.yaml``
+      this run co-writes, mapped to ``${{ secrets.<NAME> }}``, appended
+      inside the step's own existing ``env:`` block (both templates scope
+      the LLM credential/model vars to the one step that makes a live
+      call, so that step always has an ``env:`` key already) so the
+      workflow's own ``load_target_file`` call doesn't fail on an
+      undefined variable in CI. Pass the variable names read back from the
+      written target file via :func:`mylonite._redaction.target_env_refs`;
+      empty (the default) for a target with no secrets, or a reference/
+      bundled target with none to write at all.
     * ``__TARGET_SECRETS_CHECK_STEP__`` -> a step, before the one that runs
       the gate, that fails the job naming each target secret that is empty
       (see :func:`_target_secrets_check_step`); removed when there are none.
     * ``__LLM_KEY_ENV__`` -> the credential env var for ``model``'s provider
       (see :func:`_llm_key_env_var`) — never hardcoded to Anthropic's.
+    * ``__LLM_EXTRA_ENV__`` -> one repository-variable line per extra
+      credential-adjacent var ``model``'s provider needs beyond its bare
+      key (Azure's endpoint + API version; see :func:`_llm_extra_env_lines`);
+      empty for a provider with none.
     * ``__RUNTIME_SETUP_STEP__`` -> a Node/uv setup step when
       ``target_command`` needs one (see :func:`_runtime_setup_step`);
       removed when the target launches with Python or ``target_command`` is
@@ -230,8 +257,8 @@ def write_workflows(
         "__LLM_KEY_ENV__": _llm_key_env_var(model),
     }
     # The templates spell these as full-line YAML comments
-    # (``#__TARGET_SECRETS_ENV__``) so the RAW, unsubstituted template stays
-    # valid YAML on its own (see test_workflows.py's
+    # (``#__TARGET_SECRETS_ENV_LINES__``) so the RAW, unsubstituted template
+    # stays valid YAML on its own (see test_workflows.py's
     # test_templates_are_valid_yaml_and_ship_as_package_data) — a bare
     # unindented token broke the surrounding block's indentation. Handled
     # separately from ``inline_tokens`` (rather than one flat dict) because an
@@ -239,10 +266,10 @@ def write_workflows(
     # substring replace would leave a blank line behind, which is a real
     # byte-for-byte regression against the pre-existing (no-secrets) render.
     line_tokens = {
-        "#__TARGET_SECRETS_ENV__": _target_secrets_env_block(target_env_vars),
         "#__TARGET_SECRETS_ENV_LINES__": _target_secrets_env_lines(target_env_vars),
         "#__TARGET_SECRETS_CHECK_STEP__": _target_secrets_check_step(target_env_vars),
         "#__RUNTIME_SETUP_STEP__": _runtime_setup_step(target_command),
+        "#__LLM_EXTRA_ENV__": _llm_extra_env_lines(model),
     }
     dest = repo_root / ".github" / "workflows"
     dest.mkdir(parents=True, exist_ok=True)
