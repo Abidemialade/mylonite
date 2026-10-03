@@ -340,6 +340,56 @@ def test_load_target_file_silent_with_no_relative_sqlite_path(
     assert "relative SQLite path" not in capsys.readouterr().err
 
 
+# --- #210/#183: a credential-shaped `args` entry warns, never prints it -----
+
+
+def test_load_target_file_warns_on_credential_shaped_arg(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`args` has no key name to mask a value by (unlike `env`/`headers`), so
+    a credential handed to the server as a literal launch argument
+    (`--api-key=sk-live-...`) survives in every copy Mylonite writes. Warn,
+    naming the position, and withhold the value."""
+    fake_key = "sk-live-abcdefghijklmnopqrstuvwxyz"  # pragma: allowlist secret
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        f"family: acme\ncommand: python\nargs: ['--api-key={fake_key}']\n",
+        encoding="utf-8",
+    )
+    load_target_file(p)
+    err = capsys.readouterr().err
+    assert "credential" in err
+    assert "args[0]" in err
+    assert fake_key not in err
+    assert "env" in err  # points at the fix
+
+
+def test_load_target_file_warns_on_bare_opaque_token_arg(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake_token = "ghp_abcdefghijklmnopqrstuvwxyz1234567890"  # pragma: allowlist secret
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        f"family: acme\ncommand: python\nargs: ['server.py', '{fake_token}']\n",
+        encoding="utf-8",
+    )
+    load_target_file(p)
+    err = capsys.readouterr().err
+    assert "args[1]" in err
+    assert fake_token not in err
+
+
+def test_load_target_file_silent_with_no_credential_shaped_arg(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: [server.py, --port, '8080']\n", encoding="utf-8"
+    )
+    load_target_file(p)
+    assert "carries a credential" not in capsys.readouterr().err
+
+
 # --- R7: natural-language payload-placement warnings ------------------------
 
 

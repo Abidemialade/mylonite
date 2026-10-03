@@ -603,6 +603,13 @@ def _scaffold_target_file(
     # either `env` or `args`.
     for warning in relative_sqlite_path_warnings(tf):
         echo_err(f"warning: {warning}")
+    # #210/#183: warn (do not block, never print the value) on a credential-
+    # shaped `--arg`/`args` entry -- `env`/`headers` are masked before the
+    # scaffold is written; `args` has no key name to mask by.
+    from mylonite.plugins._mcp.target_file import credential_arg_warnings
+
+    for warning in credential_arg_warnings(tf):
+        echo_err(f"warning: {warning}")
 
     # #187: write `system_prompt_file` re-based onto the SCAFFOLDED file's own
     # directory, not the (possibly different) directory `--scaffold` ran from
