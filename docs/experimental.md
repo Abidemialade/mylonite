@@ -29,6 +29,10 @@ controls (real writes proving a declared `effect_probe` can see a change before 
 scan ever trusts its "no change"), run `scan`/`gate`/`validate` with `--authorize`
 against the same `--target-file` — see [Calibration](target-file.md#calibration).
 
+`check` loads the target file before it connects, so a file the loader refuses stops
+`check` with exit `2` and the loader's message. One example: a `transport: rest` target
+that declares an `effect_probe`.
+
 ```bash
 MYLONITE_EXPERIMENTAL=1 mylonite check reference:vulnerable   # zero-key, no target file needed
 MYLONITE_EXPERIMENTAL=1 mylonite check --target-file app.yaml

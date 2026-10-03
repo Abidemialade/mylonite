@@ -703,3 +703,48 @@ def test_needs_seed_arm_autowire() -> None:
         )
         is False  # already declared
     )
+
+
+def _rest_with_probe_yaml() -> str:
+    return (
+        "family: my-agent\n"
+        "transport: rest\n"
+        "weakness_classes: [W2]\n"
+        "request:\n"
+        "  url: https://agent.example/chat\n"
+        '  body: \'{"prompt": "{prompt}"}\'\n'
+        "effect_probe:\n"
+        "  verify_tool: list_outbox\n"
+        "  expect_marker: '{exfil_email}'\n"
+    )
+
+
+def test_target_file_rejects_an_effect_probe_on_a_rest_transport() -> None:
+    """A rest target only returns the agent's reply, so nothing can run a verify
+    tool against its state. The field used to be dropped without a word; it is
+    now refused with one message that says why and what to do instead."""
+    from mylonite.plugins._mcp.target_registry import EffectProbeSpec
+
+    with pytest.raises(ValueError, match="effect_probe is not supported on a rest target") as info:
+        _tf(
+            transport="rest",
+            command="",
+            request=RequestSpec(url="https://agent.example/chat", body='{"prompt": "{prompt}"}'),
+            effect_probe=EffectProbeSpec(verify_tool="list_outbox"),
+        )
+    message = str(info.value)
+    assert "Remove the effect_probe block" in message
+    assert "MCP server" in message
+
+
+def test_load_target_file_rejects_an_effect_probe_on_a_rest_transport(tmp_path: Path) -> None:
+    target = tmp_path / "agent.yaml"
+    target.write_text(_rest_with_probe_yaml(), encoding="utf-8")
+    with pytest.raises(ValueError, match="effect_probe is not supported on a rest target"):
+        load_target_file(target)
+
+
+def test_a_rest_target_without_an_effect_probe_still_loads(tmp_path: Path) -> None:
+    target = tmp_path / "agent.yaml"
+    target.write_text(_rest_with_probe_yaml().split("effect_probe:")[0], encoding="utf-8")
+    assert load_target_file(target).effect_probe is None

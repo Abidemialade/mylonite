@@ -16,8 +16,10 @@ agent obey it or treat it as untrusted data?
 It does **not** test tool-description poisoning (`W1`) or effect-based egress /
 consequential-action findings (`W3`/`W4`) — those need a tool surface or a
 side-effect probe a black box can't provide. If your agent exposes tools, prefer
-the [MCP transports](test-your-app.md); if it can report a side effect over HTTP,
-declare an `effect_probe`.
+the [MCP transports](test-your-app.md): an `effect_probe` that confirms a side effect
+works there. A `rest` target file that declares an `effect_probe` is refused on load
+with exit `2`, before any model call, because Mylonite has no way to read the app's
+state over a plain HTTP reply.
 
 ## Scaffold it in one command
 
