@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -242,7 +243,7 @@ def _direct_request_acompletion() -> Any:
                     ),
                 ),
             )
-        elif "fetch" in user_text and "attacker.example.com" in user_text:
+        elif "fetch" in user_text and re.search(r"attacker\.example\.com", user_text):
             call = SimpleNamespace(
                 id="c1",
                 function=SimpleNamespace(
