@@ -57,7 +57,11 @@ def _gate_paths(repo: Path) -> GatePaths:
 # ---------------------------------------------------------------------------
 
 
-def test_failed_run_keeps_a_branch_that_already_existed(tmp_path: Path) -> None:
+def test_rerun_over_an_existing_branch_reports_already_proposed(tmp_path: Path) -> None:
+    """A re-run that re-finds the same gated pattern hits the same
+    deterministic branch name. That's not a PR-flow failure: it's this
+    run's own earlier output, already proposed, so `gate` reports it and
+    exits cleanly instead of failing on exit 8."""
     repo = _init_repo(tmp_path / "repo")
     # A previous run's branch, carrying a commit that exists nowhere else.
     _git(repo, "checkout", "-b", "mylonite/gate-x")
@@ -67,17 +71,18 @@ def test_failed_run_keeps_a_branch_that_already_existed(tmp_path: Path) -> None:
     unpushed_sha = _git(repo, "rev-parse", "HEAD")
     _git(repo, "checkout", "main")
 
-    with pytest.raises(GatePrError, match="already exists"):
-        open_or_print_pr(
-            _gate_paths(repo),
-            branch="mylonite/gate-x",
-            pr_title="t",
-            pr_body="x",
-            open_pr=True,
-            base="main",
-        )
+    result = open_or_print_pr(
+        _gate_paths(repo),
+        branch="mylonite/gate-x",
+        pr_title="t",
+        pr_body="x",
+        open_pr=True,
+        base="main",
+    )
 
-    # The branch and its commit survive the failed run.
+    assert result.opened is False
+    assert result.already_proposed is True
+    # Neither the pre-existing branch nor its commit are touched.
     assert _git(repo, "rev-parse", "mylonite/gate-x") == unpushed_sha
     assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
 

