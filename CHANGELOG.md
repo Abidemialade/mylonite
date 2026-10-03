@@ -71,6 +71,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Windows, manylinux, musllinux); an earlier 1.93.x ships only a
   manylinux wheel and a Rust sdist, so pip would have to compile it from
   source everywhere else.
+### Added
+
+- **A journey of docs, one page per launch step.** `docs/journey/` walks try
+  the demo, choose a model, point at your app, find, prove, commit the gate
+  and re-prove, each as its own short page linking out to the full reference
+  pages rather than repeating them. The git prerequisite for `gate
+  --open-pr`/`--workflows` is now stated up front, in the journey's own
+  prerequisites, not only under the `--open-pr` flag. The self-hosted
+  model-size floor (a 3B-class local model, not a hosted one) is now part of
+  the "choose a model" step, framed as a smoke run rather than a trusted
+  result. The "re-prove" step names the one local command
+  (`pytest .mylonite/gate/`) that shows a committed finding fired before the
+  fix and resisted after it, pointing at the existing `testkit.pending_fix`
+  docs for the mechanism. A "first proof in under 10 minutes" bar is stated
+  as a measured target, not a promise.
+- **A claims register, `docs/claims.md`.** Every factual or numeric claim in
+  `README.md` now carries an inline `<!-- claim:ID -->` marker with a row in
+  the register naming its evidence (a file, test or result path).
+  `scripts/check_claims_register.py` (`pytest tests/test_claims_register.py`)
+  fails when a marker has no row, or a row no longer matches any marker.
+- **A fenced-command check against the CLI golden.**
+  `scripts/check_fenced_commands.py` (`pytest tests/test_fenced_commands.py`)
+  parses every ` ```bash `/` ```console ` `mylonite ...` example in
+  `README.md` and `docs/*.md` and checks each subcommand and `--flag`
+  against `tests/cli_golden/goldens/command_tree.json`. The six launch-set
+  commands (`demo`, `scan`, `generate`, `validate`, `gate`, `report`) carry
+  no allowlist entries; `tests/fixtures/fenced_commands_allowlist.json`
+  starts empty.
 
 ### Changed
 
