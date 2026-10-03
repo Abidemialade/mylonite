@@ -134,6 +134,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source everywhere else.
 ### Added
 
+- **`scan`, `validate` and `gate` estimate the LLM spend before any call is
+  sent.** One plain line — a call-count range built from the seed count after
+  filters, `--iterations`, the twin count and the metamorphic re-drive count
+  — plus the hard ceiling (`--max-llm-requests`/`MYLONITE_MAX_LLM_REQUESTS`)
+  when one is set. `gate`'s line covers the scan phase and names the
+  per-finding validation cost separately, since that depends on how many
+  findings the scan keeps. No provider carries a price yet, so the line
+  always says cost is unknown rather than guessing one; `--dry-run` makes no
+  call and skips it. See [Sizing --max-llm-calls](docs/ci-gating.md).
 - **A journey of docs, one page per launch step.** `docs/journey/` walks try
   the demo, choose a model, point at your app, find, prove, commit the gate
   and re-prove, each as its own short page linking out to the full reference

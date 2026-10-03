@@ -215,6 +215,13 @@ including one shaped like `provider/model` with an unknown provider, e.g.
 `not-a-real/model` — exits 2 with one message naming the value and `--model`, instead
 of a live call failing (and repeating) once per seed.
 
+Before any live call, `scan` prints one line estimating how many LLM calls the
+run will make, from the seed count after filters — a range, since a seed can
+need anywhere from a couple of calls to several. It also names the hard
+ceiling (`--max-llm-requests`/`MYLONITE_MAX_LLM_REQUESTS`) when one is set, and
+says cost is unknown rather than guessing a price (no provider carries one
+yet). `--dry-run` makes no call and skips this line.
+
 **Scaffold mode** — `--scaffold PATH` (with `--command`) introspects an MCP server
 (one launch, **no LLM call, no attack**, so no `--authorize` needed) and writes a
 `target.yaml` that runs as written: the `weakness_classes` the introspected surface can
@@ -332,6 +339,12 @@ stuck or slow run is cut off cleanly, is reported as reaching no verdict, never
 counts as the guard resisting, and never hangs the job. The robustness re-drives
 and the fixture recording have their own call budget instead).
 
+Before any live call, `validate` also prints one line estimating how many LLM
+calls the run will make — from `--iterations`, the twin count, and (on the
+reference target) the metamorphic re-drive count — plus the hard ceiling
+(`--max-llm-requests`/`MYLONITE_MAX_LLM_REQUESTS`) when one is set. It never
+prices the run: no provider carries a price yet.
+
 Before any live run, `validate` prints a banner naming the model it resolved
 (`--model`/`mylonite.yaml`/`MYLONITE_MODEL`) and checks that model — and the planner,
 customiser and judge models when they differ — is reachable with one tiny completion
@@ -442,6 +455,14 @@ data-framing differential to measure whether that input defence is load-bearing;
 opt-in, otherwise a `rest` target is validated by stability + effect + consensus;
 `gate` lists a `rest` finding as a candidate and never commits it);
 `--randomize-exfil/--no-randomize-exfil` (defaults ON for a live custom target).
+
+Before the scan phase starts, `gate` prints one line estimating how many LLM
+calls the scan will make (from the seed count after filters), plus about how
+many more each finding kept and validated adds — the validation count depends
+on how many findings the scan keeps, so it is a per-finding note, not a false
+total. It also names the hard ceiling (`--max-llm-requests`/
+`MYLONITE_MAX_LLM_REQUESTS`) when one is set; see
+[Sizing --max-llm-calls](ci-gating.md) for the full formula.
 
 `gate` ends with a `gate llm:` line: the LLM calls made across every stage (by role), the
 tokens the provider reported, and the wall-clock time.

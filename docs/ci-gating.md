@@ -65,6 +65,13 @@ minutes and API spend rather than seconds.
     never reads as a pass. Size it from a run's `llm:` lines plus headroom for
     retries.
 
+    **`scan`, `validate` and `gate` each print one line estimating this before
+    any call is sent** — a call-count range built from this same formula (seed
+    count after filters, `--iterations`, twins, metamorphic re-drives), plus
+    the ceiling above when one is set. It never prices the run: no provider
+    carries a price yet, so the line says cost is unknown rather than
+    guessing one. A `--dry-run` scan makes no call and skips the line.
+
 ```bash
 # against the bundled reference agent
 mylonite gate reference:vulnerable

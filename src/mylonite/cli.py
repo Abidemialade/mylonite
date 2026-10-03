@@ -1410,6 +1410,20 @@ def scan(
         module_load_failures=module_load_failures,
     )
 
+    # One plain line estimating the LLM spend BEFORE it happens --
+    # a dry run makes none, so it's exempt (and this never duplicates the
+    # seed-enumeration dry-run output, which carries no call estimate at all).
+    if not dry_run:
+        from mylonite.commands.cost_estimate import scan_estimate_line
+
+        echo_err(
+            scan_estimate_line(
+                report_target_id,
+                weakness_classes=weakness_class,
+                declared_classes=refusal_tf.weakness_classes if refusal_tf is not None else None,
+            )
+        )
+
     from mylonite.scan._llm import llm_scope
     from mylonite.scan.seeds import weakness_class_scope
 
@@ -1877,6 +1891,19 @@ def _validate_custom(
             "control_env in your target.yaml (see docs/concepts.md).\n"
             f"{bar}"
         )
+
+    # One plain line estimating the LLM spend BEFORE it happens.
+    from mylonite.commands.cost_estimate import validate_estimate_line
+
+    echo_err(
+        validate_estimate_line(
+            is_reference=False,
+            iterations=iterations,
+            twins=2 if guarded_factory is not None else 1,
+            fast=fast,
+        )
+    )
+
     validator = DifferentialValidator(
         iterations=iterations,
         provider=provider,
@@ -2262,6 +2289,12 @@ def validate(
         from mylonite.plugins._reference.reference_validator import workload_message
 
         echo_err(workload_message(iterations, model=effective_model, fast=fast))
+        # One plain line estimating the LLM spend BEFORE it happens.
+        from mylonite.commands.cost_estimate import validate_estimate_line
+
+        echo_err(
+            validate_estimate_line(is_reference=True, iterations=iterations, twins=2, fast=fast)
+        )
         # T14/H3: cheap, no-network credential-presence pre-flight before the
         # real live _provider_preflight call just below (no authorize gate on
         # this branch -- the bundled reference twins are safe-by-construction).
@@ -3012,10 +3045,26 @@ def gate(
             framework=tf.framework if tf is not None else None,
         )
 
+    from mylonite.commands.cost_estimate import gate_estimate_line
     from mylonite.commands.validate_errors import target_launch_line
     from mylonite.plugins._reference.reference_validator import TargetLaunchError
     from mylonite.scan._llm import BudgetExceededError, LLMRequestCeilingError, usage_tally
     from mylonite.scan.artefacts import spend_summary
+
+    # One plain line estimating the LLM spend BEFORE it happens --
+    # the scan-phase part is exact-ish (seed count after filters); the
+    # validation part is unknown until the scan decides how many findings it
+    # kept, so this names the per-finding cost instead of a false total.
+    gate_target_id = f"mcp:{tf.family}" if tf is not None else (target or "mcp:custom")
+    echo_err(
+        gate_estimate_line(
+            gate_target_id,
+            declared_classes=tf.weakness_classes if tf is not None else None,
+            is_reference=is_reference,
+            iterations=iterations,
+            fast=fast,
+        )
+    )
 
     spend_started = time.monotonic()
     try:
