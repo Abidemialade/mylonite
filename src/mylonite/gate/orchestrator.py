@@ -18,9 +18,18 @@ from typing import Any
 from mylonite import reason_codes
 from mylonite._cli_io import echo
 from mylonite._redaction import redact_value
+from mylonite._verdict import (
+    STABLE_NOT_PROVEN,
+    has_proof,
+    is_black_box_keep,
+    verdict_label,
+    verdict_reason,
+)
 from mylonite.contracts import ExploitRecord, GeneratedTest, ValidationReport
 from mylonite.exit_codes import (
     EXIT_CONFIG,
+    EXIT_GATE_CANDIDATES,
+    EXIT_GATE_KEPT,
     EXIT_GENERATE_FAILED,
     EXIT_NOT_KEPT,
     EXIT_SUCCESS,
@@ -46,6 +55,9 @@ class GateResult:
     #: never reached a per-finding verdict at all, e.g. an aborted scan).
     kept_count: int = 0
     rejected_count: int = 0
+    #: How many findings reproduced but were not proven (STABLE, NOT PROVEN).
+    #: They are reported as candidates and never written as gate tests.
+    candidate_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -58,10 +70,14 @@ class _FindingOutcome:
     ``EXIT_NOT_KEPT`` the moment a real differential verdict — kept or not —
     was reached for any finding) survive going from one exploit to N without
     re-deriving it from string matching.
+
+    ``"candidate"`` is a finding the validator kept but did not prove
+    (STABLE, NOT PROVEN): it is reported, never committed, never counted as
+    kept.
     """
 
     exploit: ExploitRecord
-    stage: str  # "kept" | "rejected" | "generate_failed" | "validate_failed"
+    stage: str  # "kept" | "candidate" | "rejected" | "generate_failed" | "validate_failed"
     report: ValidationReport | None = None
     #: For "rejected": the first failed validation stage + its (redacted,
     #: capped) detail — what actually goes in the PR body's rejected-findings
@@ -325,8 +341,9 @@ def _rejected_evidence_dir(out_dir: Path, finding_id: str) -> Path:
 def _finish_unkept(
     this_out: Path, out_dir: Path, finding_id: str, message: str, written: list[Path]
 ) -> None:
-    """Echo the per-finding verdict, then relocate the files this REJECTED or
-    validate-failed finding wrote into :func:`_rejected_evidence_dir`.
+    """Echo the per-finding verdict, then relocate the files this REJECTED,
+    candidate or validate-failed finding wrote into
+    :func:`_rejected_evidence_dir`.
     Evidence stays on disk there for local debugging; it is simply outside
     anywhere a commit — automatic or printed for the operator to run by
     hand — ever looks.
@@ -368,6 +385,48 @@ def _finish_unkept(
         f"Mylonite gate: {finding_id}: evidence kept at {rejected_dir} for local debugging "
         "(not committed)."
     )
+
+
+def _how_to_prove(report: ValidationReport) -> str:
+    """One sentence on what would turn this candidate into a kept finding."""
+    if is_black_box_keep(report):
+        return "Gate cannot prove a finding on a black-box target."
+    if not has_proof(report):
+        return (
+            "To prove it, declare `control_env` (so Mylonite can switch your real "
+            "safeguard off and on) or an `effect_probe` in the target file, then "
+            "re-run `mylonite gate`."
+        )
+    return "To prove it, re-run validation with the build leg on."
+
+
+def candidate_reason(report: ValidationReport) -> str:
+    """Why a finding is only a candidate, and how to get it proven."""
+    return f"{verdict_reason(report)} {_how_to_prove(report)}"
+
+
+def candidate_line(exploit: ExploitRecord, report: ValidationReport) -> str:
+    """The console line for one candidate. One line, plain ASCII apart from
+    the pattern id, so it prints on any console."""
+    return (
+        f"Mylonite gate: {exploit.pattern_id}: {STABLE_NOT_PROVEN} - a candidate "
+        f"only, not written as a gate test: {candidate_reason(report)}"
+    )
+
+
+def _candidates_section(candidates: list[tuple[ExploitRecord, str]]) -> str:
+    """The PR-body section that lists findings `gate` would not commit."""
+    rows = [
+        "",
+        "",
+        "## Candidates (not proven, not committed)",
+        "",
+        "_Each of these reproduced, but nothing proved a safeguard stops it, so "
+        "`gate` did not write or commit a test for it._",
+        "",
+    ]
+    rows.extend(f"- `{exploit.pattern_id}`: {reason}" for exploit, reason in candidates)
+    return "\n".join(rows) + "\n"
 
 
 def _for_generation(exploit: ExploitRecord, finding_id: str) -> ExploitRecord:
@@ -467,6 +526,18 @@ def _process_one_finding(
         _finish_unkept(this_out, out_dir, finding_id, message, written)
         return _FindingOutcome(
             exploit=exploit, stage="rejected", report=report, reason=_rejection_reason(report)
+        )
+
+    if verdict_label(report) == STABLE_NOT_PROVEN:
+        # Never keep unproven: the test reproduced but nothing proved a
+        # safeguard stops the attack. Move its files out of the gate dir, the
+        # way a rejected finding's are, so no commit can pick them up, and
+        # keep the validation report with that evidence (never in the gate
+        # dir, where it could overwrite an earlier kept run's report).
+        _finish_unkept(this_out, out_dir, finding_id, candidate_line(exploit, report), written)
+        _write_validation_report(_rejected_evidence_dir(out_dir, finding_id), report)
+        return _FindingOutcome(
+            exploit=exploit, stage="candidate", report=report, reason=candidate_reason(report)
         )
 
     # Persist the oracle verdict BEFORE any git contact. The generated test and
@@ -641,9 +712,15 @@ def run_gate(
         for outcome, finding_id in zip(outcomes, finding_ids, strict=True)
         if outcome.stage == "kept"
     ]
-    rejected = [(o.exploit, o.reason) for o in outcomes if o.stage != "kept"]
+    candidates = [(o.exploit, o.reason) for o in outcomes if o.stage == "candidate"]
+    rejected = [(o.exploit, o.reason) for o in outcomes if o.stage not in ("kept", "candidate")]
 
-    if multi:
+    if multi and candidates:
+        echo(
+            f"{len(kept)} kept, {len(candidates)} not proven (candidates, not committed), "
+            f"{len(rejected)} rejected"
+        )
+    elif multi:
         echo(f"{len(kept)} kept, {len(rejected)} rejected")
     # Files are named by short id; say which pattern each one gates.
     for (exploit, report), kept_dir in zip(kept, kept_dirs, strict=True):
@@ -666,6 +743,20 @@ def run_gate(
             echo(bundle.outcome.operator_message)
         return result
 
+    if not kept and candidates:
+        echo(
+            f"Mylonite gate: no proven finding to gate - {len(candidates)} candidate(s), "
+            "nothing written as a gate test, no PR opened."
+        )
+        return _finish(
+            GateResult(
+                exit_code=EXIT_GATE_CANDIDATES,
+                opened_pr=False,
+                kept=False,
+                rejected_count=len(rejected),
+                candidate_count=len(candidates),
+            )
+        )
     if not kept:
         stages = {o.stage for o in outcomes}
         if stages <= {"generate_failed"}:
@@ -713,6 +804,8 @@ def run_gate(
         gate_dir=out_dir,
     )
     body += _coverage_note(bundle.outcome)
+    if candidates:
+        body += _candidates_section(candidates)
     if multi:
         body += _layout_table(out_dir, kept, kept_dirs)
     pr = open_pr_fn(out_dir=out_dir, findings=kept, kept_dirs=kept_dirs, body=body, open_pr=open_pr)
@@ -720,11 +813,12 @@ def run_gate(
     branch = getattr(pr, "branch", None)
     return _finish(
         GateResult(
-            exit_code=EXIT_SUCCESS,
+            exit_code=EXIT_GATE_KEPT,
             opened_pr=opened,
             branch=branch,
             kept=True,
             kept_count=len(kept),
             rejected_count=len(rejected),
+            candidate_count=len(candidates),
         )
     )

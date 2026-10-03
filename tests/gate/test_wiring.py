@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from tests.gate._proven import proven_legs
 
 from mylonite.gate import pr as pr_mod
 from mylonite.gate.wiring import _gate_branch, make_open_pr_fn, resolve_gate_out_dir
@@ -321,7 +322,7 @@ def test_multi_finding_kept_dirs_each_get_a_redacted_target_yaml(tmp_path, monke
         _real_exploit("indirect-injection-note-body-direct"),
         _real_exploit("indirect-injection-note-body-roleplay"),
     ]
-    kept_report = ValidationReport(test_filename="x.py", kept=True)
+    kept_report = ValidationReport(test_filename="x.py", kept=True, outcomes=proven_legs())
 
     open_pr_fn = make_open_pr_fn(
         runs_on="ubuntu-latest",
@@ -416,7 +417,7 @@ def test_multi_finding_live_run_resolves_the_per_finding_target_yaml(tmp_path, m
         _real_exploit("indirect-injection-note-body-direct", metadata=metadata),
         _real_exploit("indirect-injection-note-body-roleplay", metadata=metadata),
     ]
-    kept_report = ValidationReport(test_filename="x.py", kept=True)
+    kept_report = ValidationReport(test_filename="x.py", kept=True, outcomes=proven_legs())
 
     open_pr_fn = make_open_pr_fn(
         runs_on="ubuntu-latest",

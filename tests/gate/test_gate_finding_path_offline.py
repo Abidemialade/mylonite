@@ -49,6 +49,7 @@ from typing import Any
 import pytest
 
 from mylonite._replay import LiteLLMRecorder
+from mylonite.exit_codes import EXIT_GATE_KEPT
 from mylonite.gate.orchestrator import ScanOutcomeBundle, run_gate
 from mylonite.plugins._reference.reference_pytest_generator import ReferencePytestGenerator
 from mylonite.plugins._reference.reference_validator import (
@@ -168,7 +169,7 @@ def test_the_gate_keeps_the_test_and_exits_zero(gate_run: tuple[Any, Path, _Reco
     result, _, open_pr_fn = gate_run
 
     assert result.kept is True, "the differential did not keep the generated test"
-    assert result.exit_code == 0, f"gate exited {result.exit_code}"
+    assert result.exit_code == EXIT_GATE_KEPT, f"gate exited {result.exit_code}"
     assert result.opened_pr is False
     assert [c["open_pr"] for c in open_pr_fn.calls] == [False], (
         "the gate must forward open_pr=False to the git step, exactly once"
