@@ -198,3 +198,16 @@ def test_the_detail_masks_a_registered_header_value() -> None:
     finally:
         clear_secret_values()
     assert "wrkspc-detail-sentinel" not in diag.detail
+
+
+def test_a_bare_400_at_the_end_of_a_sentence_still_counts() -> None:
+    diag = classify_provider_error(
+        RuntimeError("missing required header x-route-id: returned 400.")
+    )
+    assert diag.category == "auth"
+    assert "x-route-id" in diag.remedy
+
+
+def test_a_version_number_is_not_a_status() -> None:
+    diag = classify_provider_error(RuntimeError("missing required header in api 400.5"))
+    assert diag.category != "auth"

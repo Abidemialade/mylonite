@@ -51,8 +51,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changed.
 - **Log redaction now covers every Mylonite module's log lines.** It used to
   apply only to records logged on the top-level `mylonite` logger, not to the
-  module loggers beneath it. Registered secret values (the `--llm-header`
-  values) are also masked in records from any other library's logger.
+  module loggers beneath it. The CLI now also filters the module loggers, the
+  handlers that print them (the root logger's and Python's fallback stderr
+  handler) and LiteLLM's `LiteLLM` and `litellm` loggers. The filter masks the
+  message, the exception traceback, stack info and string `extra=` fields.
+  On LiteLLM's loggers and other libraries' records reaching those handlers,
+  only the `--llm-header` values are masked, and a record with nothing to
+  mask is left as it was. Not covered: a handler the host application adds
+  after Mylonite starts, when it receives a record from a module logger
+  created after that point. Turning redaction off removes every filter.
 
 - **`validate --iteration-timeout` now bounds the reference differential too.**
   It used to reach only the provider check and custom targets, so a slow

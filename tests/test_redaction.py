@@ -12,6 +12,7 @@ These are offline and deterministic. They prove that:
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -268,6 +269,19 @@ def test_filter_never_drops_record() -> None:
 
 
 # --- install_log_redaction --------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _uninstall_redaction_after_each_test() -> Iterator[None]:
+    """Every test here that installs redaction (for any logger tree) leaves
+    no filter behind on shared loggers or handlers."""
+    from mylonite._redaction import _INSTALLED
+
+    yield
+    for tree in list(_INSTALLED):
+        install_log_redaction(enabled=False, logger_name=tree)
+
+
 def test_install_idempotent() -> None:
     name = "mylonite_test_install_idempotent"
     target = logging.getLogger(name)
@@ -845,39 +859,121 @@ def test_redact_target_yaml_keeps_max_tokens_in_request_url() -> None:
     assert yaml.safe_load(out)["request"]["url"] == url
 
 
-# --- child loggers ----------------------------------------------------------
+# --- logger tree, handlers and library loggers ------------------------------
+
+_TREE_SENTINEL = "wrkspc-tree-sentinel-30c7"
 
 
-def test_redaction_covers_records_from_child_loggers(caplog: pytest.LogCaptureFixture) -> None:
+@pytest.fixture
+def tree_redaction(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """Install the redaction (caplog's handler is on the root logger by now,
+    so it gets a filter like any configured handler) with one registered
+    value, and remove both afterwards so nothing leaks into later tests."""
+    from mylonite._redaction import clear_secret_values, register_secret_value
+
+    install_log_redaction(enabled=True)
+    register_secret_value(_TREE_SENTINEL)
+    try:
+        yield caplog
+    finally:
+        clear_secret_values()
+        install_log_redaction(enabled=False)
+
+
+def test_redaction_covers_records_from_child_loggers(
+    tree_redaction: pytest.LogCaptureFixture,
+) -> None:
     """A logger-level filter only sees records logged on that exact logger;
     every module logs through ``getLogger(__name__)``, so the redaction must
     reach ``mylonite.scan._llm`` and the rest of the tree too."""
-    from mylonite._redaction import clear_secret_values, register_secret_value
+    with tree_redaction.at_level(logging.WARNING):
+        child = logging.getLogger("mylonite.scan._llm")
+        child.warning("header %s rejected", _TREE_SENTINEL)
+        child.warning("key in use: %s", FAKE_ANTHROPIC)
+    assert _TREE_SENTINEL not in tree_redaction.text
+    assert FAKE_ANTHROPIC not in tree_redaction.text
+    assert REDACTION_PLACEHOLDER in tree_redaction.text
 
-    install_log_redaction(enabled=True)
-    register_secret_value("wrkspc-child-logger-sentinel")
-    try:
-        with caplog.at_level(logging.WARNING):
-            child = logging.getLogger("mylonite.scan._llm")
-            child.warning("header %s rejected", "wrkspc-child-logger-sentinel")
-            child.warning("key in use: %s", FAKE_ANTHROPIC)
-    finally:
-        clear_secret_values()
-    assert "wrkspc-child-logger-sentinel" not in caplog.text
-    assert FAKE_ANTHROPIC not in caplog.text
-    assert REDACTION_PLACEHOLDER in caplog.text
+
+def test_a_child_logger_created_after_install_is_covered_by_the_handler_filter(
+    tree_redaction: pytest.LogCaptureFixture,
+) -> None:
+    with tree_redaction.at_level(logging.WARNING):
+        logging.getLogger("mylonite.created.after.install").warning("%s", _TREE_SENTINEL)
+    assert _TREE_SENTINEL not in tree_redaction.text
 
 
 def test_a_registered_value_is_masked_in_a_library_logger_too(
-    caplog: pytest.LogCaptureFixture,
+    tree_redaction: pytest.LogCaptureFixture,
 ) -> None:
-    from mylonite._redaction import clear_secret_values, register_secret_value
+    with tree_redaction.at_level(logging.DEBUG):
+        logging.getLogger("LiteLLM").debug("headers: %s", _TREE_SENTINEL)
+    assert _TREE_SENTINEL not in tree_redaction.text
 
+
+def test_exception_tracebacks_are_masked(tree_redaction: pytest.LogCaptureFixture) -> None:
+    with tree_redaction.at_level(logging.ERROR):
+        try:
+            raise RuntimeError(f"provider echoed {_TREE_SENTINEL}")
+        except RuntimeError:
+            logging.getLogger("mylonite.scan._llm").exception("call failed")
+    assert "call failed" in tree_redaction.text
+    assert "RuntimeError" in tree_redaction.text
+    assert _TREE_SENTINEL not in tree_redaction.text
+    for record in tree_redaction.records:
+        assert record.exc_info is None or _TREE_SENTINEL not in str(record.exc_info[1])
+
+
+def test_extra_fields_are_masked(tree_redaction: pytest.LogCaptureFixture) -> None:
+    with tree_redaction.at_level(logging.WARNING):
+        logging.getLogger("mylonite.scan._llm").warning(
+            "rejected", extra={"header_value": _TREE_SENTINEL}
+        )
+    (record,) = [r for r in tree_redaction.records if r.getMessage() == "rejected"]
+    assert record.header_value != _TREE_SENTINEL  # type: ignore[attr-defined]
+
+
+def test_another_librarys_record_is_left_alone_when_nothing_matches(
+    tree_redaction: pytest.LogCaptureFixture,
+) -> None:
+    """Masking registered values in a third-party record must not flatten
+    its template and args when there was nothing to mask."""
+    with tree_redaction.at_level(logging.WARNING):
+        logging.getLogger("LiteLLM").warning("retry %d of %d", 1, 3)
+    (record,) = [r for r in tree_redaction.records if r.name == "LiteLLM"]
+    assert record.msg == "retry %d of %d"
+    assert record.args == (1, 3)
+
+
+def test_make_log_record_does_not_crash_with_redaction_installed(
+    tree_redaction: pytest.LogCaptureFixture,
+) -> None:
+    """logging.makeLogRecord() (socket and queue receivers use it) builds a
+    record with name=None first; the filter must cope."""
+    record = logging.makeLogRecord({"msg": f"hello {_TREE_SENTINEL}"})
+    record.name = None  # type: ignore[assignment]
+    handler_filters = [
+        f
+        for f in (logging.lastResort.filters if logging.lastResort is not None else [])
+        if isinstance(f, SecretRedactingFilter)
+    ]
+    assert handler_filters
+    for flt in handler_filters:
+        assert flt.filter(record) is True
+    assert _TREE_SENTINEL not in record.getMessage()
+
+
+def test_disabling_removes_every_filter_it_installed() -> None:
     install_log_redaction(enabled=True)
-    register_secret_value("wrkspc-library-sentinel")
-    try:
-        with caplog.at_level(logging.DEBUG):
-            logging.getLogger("LiteLLM").debug("headers: %s", "wrkspc-library-sentinel")
-    finally:
-        clear_secret_values()
-    assert "wrkspc-library-sentinel" not in caplog.text
+    install_log_redaction(enabled=False)
+    targets: list[logging.Filterer] = [
+        logging.getLogger("mylonite"),
+        logging.getLogger("mylonite.scan._llm"),
+        logging.getLogger("LiteLLM"),
+        logging.getLogger("litellm"),
+        *logging.getLogger().handlers,
+    ]
+    if logging.lastResort is not None:
+        targets.append(logging.lastResort)
+    for target in targets:
+        assert not any(isinstance(f, SecretRedactingFilter) for f in target.filters), target

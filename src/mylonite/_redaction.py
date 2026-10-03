@@ -408,16 +408,46 @@ def _mask_all_strings(value: object) -> object:
     return _walk_strings(value, lambda _s: REDACTION_PLACEHOLDER)
 
 
-class SecretRedactingFilter(logging.Filter):
-    """Logging filter that redacts secret-shaped tokens from each record.
+#: Attributes every ``LogRecord`` has. Anything else on a record came from
+#: ``extra=`` and is masked too.
+_STANDARD_RECORD_ATTRS: Final = frozenset(
+    logging.LogRecord("", 0, "", 0, "", (), None).__dict__
+) | {"message", "asctime"}
 
-    Renders the record's final message (applying any ``%`` args), runs
-    :func:`redact`, and rewrites ``record.msg`` to the redacted text while
-    clearing ``record.args`` so the redacted string is what handlers emit. Never
-    drops a record.
+
+class SecretRedactingFilter(logging.Filter):
+    """Logging filter that redacts secrets from each record. Never drops one.
+
+    With ``tree=None`` (the filter on the ``mylonite`` logger itself) every
+    record gets the full :func:`redact`. With ``tree="mylonite"`` (the filter
+    on a handler, or on LiteLLM's loggers, which see other libraries' records
+    too) a record from that logger tree gets the full :func:`redact`, and any
+    other record has only the registered secret values masked
+    (:func:`register_secret_value`), and is left untouched when nothing
+    matched.
+
+    Covers the rendered message (``msg`` with its ``%`` args), the exception
+    traceback text (``exc_info``, rendered and masked into ``exc_text``; the
+    exception object itself is dropped from the record only when its text
+    held a secret), ``stack_info``, and string ``extra=`` attributes.
     """
 
+    def __init__(self, tree: str | None = None) -> None:
+        super().__init__()
+        self.tree = tree
+
+    def _masker(self, record: logging.LogRecord) -> Callable[[str], str] | None:
+        if self.tree is None:
+            return redact
+        name = record.name or ""  # makeLogRecord() builds records with name=None
+        if name == self.tree or name.startswith(self.tree + "."):
+            return redact
+        return mask_secret_values if _SECRET_VALUES else None
+
     def filter(self, record: logging.LogRecord) -> bool:
+        mask = self._masker(record)
+        if mask is None:
+            return True
         try:
             message = record.getMessage()
         except Exception:  # never let message formatting kill a log line
@@ -429,79 +459,97 @@ class SecretRedactingFilter(logging.Filter):
             # straight to stderr, leaking the raw arg verbatim (DCR-0008).
             record.args = ()
             return True
-        record.msg = redact(message)
-        record.args = ()
+        masked = mask(message)
+        if masked != message or self.tree is None:
+            record.msg = masked
+            record.args = ()
+        self._mask_exception(record, mask)
+        if isinstance(record.stack_info, str):
+            record.stack_info = mask(record.stack_info)
+        for key, value in list(record.__dict__.items()):
+            if key not in _STANDARD_RECORD_ATTRS and isinstance(value, str):
+                masked_value = mask(value)
+                if masked_value != value:
+                    setattr(record, key, masked_value)
         return True
+
+    @staticmethod
+    def _mask_exception(record: logging.LogRecord, mask: Callable[[str], str]) -> None:
+        if record.exc_info and not record.exc_text:
+            try:
+                record.exc_text = logging.Formatter().formatException(record.exc_info)
+            except Exception:  # a broken exception must not kill the line
+                return
+        if record.exc_text:
+            masked = mask(record.exc_text)
+            if masked != record.exc_text:
+                # Formatters print exc_text when it is set; dropping exc_info
+                # stops a handler that renders the exception object itself
+                # from printing the unmasked original.
+                record.exc_text = masked
+                record.exc_info = None
+
+
+#: Every (logger-or-handler, filter) pair :func:`install_log_redaction`
+#: added, per logger tree, so turning redaction off removes exactly those.
+_INSTALLED: dict[str, list[tuple[logging.Filterer, SecretRedactingFilter]]] = {}
+
+#: LiteLLM logs through these loggers by name. Its debug output can carry
+#: request headers, so a registered header value is masked there too.
+_LIBRARY_LOGGERS: Final = ("LiteLLM", "litellm")
+
+
+def _redaction_targets(logger_name: str) -> list[tuple[logging.Filterer, str | None]]:
+    """Where a filter goes: the tree's own logger (full redaction), every
+    child logger that already exists, the handlers that will print the
+    tree's records (the root logger's, plus Python's last-resort stderr
+    handler used when none is configured), and LiteLLM's loggers."""
+    targets: list[tuple[logging.Filterer, str | None]] = [(logging.getLogger(logger_name), None)]
+    prefix = logger_name + "."
+    for name, child in list(logging.Logger.manager.loggerDict.items()):
+        if name.startswith(prefix) and isinstance(child, logging.Logger):
+            targets.append((child, None))
+    handlers = list(logging.getLogger().handlers)
+    if logging.lastResort is not None:
+        handlers.append(logging.lastResort)
+    targets.extend((handler, logger_name) for handler in handlers)
+    targets.extend((logging.getLogger(name), logger_name) for name in _LIBRARY_LOGGERS)
+    return targets
 
 
 def install_log_redaction(enabled: bool = True, logger_name: str = "mylonite") -> None:
-    """Install (or skip) the redacting filter on the ``mylonite`` logger tree.
+    """Install (or remove) the redacting filters for the ``mylonite`` logger tree.
 
-    Idempotent: at most one :class:`SecretRedactingFilter` is ever attached to the
-    named logger. When ``enabled`` is false this installs nothing and removes an
-    existing filter if present, so the flag is honoured for library users who
-    toggle it off.
+    A filter on a logger only sees records logged on that exact logger, so
+    one filter on ``mylonite`` would miss every module logger beneath it.
+    This adds a :class:`SecretRedactingFilter` to the targets listed in
+    :func:`_redaction_targets`. Nothing process-wide is replaced: no record
+    factory, no new handler.
+
+    Idempotent: a target never gets a second filter for the same tree. When
+    ``enabled`` is false, every filter this function added for the tree is
+    removed, so the flag is honoured for library users who toggle it off.
+
+    Limit: a handler added after this call (by the host application) and a
+    module logger created after it are not filtered; their records are
+    masked at source by the call sites that log exception text.
     """
-    target = logging.getLogger(logger_name)
-    existing = [f for f in target.filters if isinstance(f, SecretRedactingFilter)]
-
+    installed = _INSTALLED.setdefault(logger_name, [])
     if not enabled:
-        for flt in existing:
+        for target, flt in installed:
             target.removeFilter(flt)
-        _REDACTED_TREES.discard(logger_name)
+        installed.clear()
+        own = logging.getLogger(logger_name)
+        for leftover in list(own.filters):
+            if isinstance(leftover, SecretRedactingFilter):
+                own.removeFilter(leftover)
         return
-
-    # A logger-level filter only sees records logged on that exact logger, not
-    # ones propagating up from ``mylonite.scan._llm`` and the rest of the
-    # tree. The record factory below covers the whole tree.
-    _REDACTED_TREES.add(logger_name)
-    _install_redacting_record_factory()
-    if existing:
-        return
-    target.addFilter(SecretRedactingFilter())
-
-
-#: Logger trees (a name and every ``name.*`` child) whose records are fully
-#: redacted at creation. Every other record still has registered secret
-#: values masked, so a header value can't leak through a library's logger
-#: (LiteLLM's own, say) either.
-_REDACTED_TREES: set[str] = set()
-
-
-def _in_redacted_tree(name: str) -> bool:
-    return any(name == tree or name.startswith(tree + ".") for tree in _REDACTED_TREES)
-
-
-def _redact_record(record: logging.LogRecord) -> None:
-    try:
-        message = record.getMessage()
-    except Exception:  # same rule as SecretRedactingFilter: never kill a line
-        record.args = ()
-        return
-    if _in_redacted_tree(record.name):
-        redacted = redact(message)
-    elif _SECRET_VALUES:
-        redacted = mask_secret_values(message)
-    else:
-        return
-    record.msg = redacted
-    record.args = ()
-
-
-def _install_redacting_record_factory() -> None:
-    """Wrap the global log-record factory once, so every record is redacted
-    when it is created, whichever logger in the tree made it."""
-    previous = logging.getLogRecordFactory()
-    if getattr(previous, "_mylonite_redacting", False):
-        return
-
-    def factory(*args: object, **kwargs: object) -> logging.LogRecord:
-        record = previous(*args, **kwargs)
-        _redact_record(record)
-        return record
-
-    factory._mylonite_redacting = True  # type: ignore[attr-defined]
-    logging.setLogRecordFactory(factory)
+    for target, tree in _redaction_targets(logger_name):
+        if any(isinstance(f, SecretRedactingFilter) and f.tree == tree for f in target.filters):
+            continue
+        flt = SecretRedactingFilter(tree)
+        target.addFilter(flt)
+        installed.append((target, flt))
 
 
 def redact_exception(exc: BaseException) -> str:
