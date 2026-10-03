@@ -15,6 +15,23 @@ without a model, against the live target:
 * **W2 seed control.** A token planted through the target's ``seed_arm`` must
   come back from a recall tool. A failure is ``MYL-INC-006``; no recall tool to
   try is ``MYL-INC-007``.
+* **Readback control (#324).** On a memory-style store the verify read selects
+  the record the ``seed_arm`` writes (a knowledge-graph entity, a fixed key),
+  so no consequential tool's write can show up in it. When no consequential
+  tool passed, and the probe neither changed on its own nor failed to read,
+  the probe is checked on that record instead, in this order: two baseline
+  reads (no change between them), the plant (the seed control's own plant
+  when it ran, so one record serves both), a positive read that must show
+  the planted token, a second read that must not grow and must still show
+  it, then a read that sends a never-planted token in the verify template's
+  argument slot and must answer with a non-empty, non-error result that
+  lacks it (an error, an empty result or a raised call fails). When the
+  seed control has no recall tool and so never plants, this control plants
+  the record itself through ``seed_arm``. Passing it gives ``confirm_only``, never
+  ``certified``: the probe can confirm a planted record appears, but it
+  cannot clear a call that changed nothing, because the plant only proves it
+  sees writes to the one record it reads. The result is not calibrated, and
+  the consequential tools' failure code stays on it.
 
 The controls are real writes, so :func:`calibrate` makes no call at all unless
 the caller passes ``allow_writes=True``; the result is then ``MYL-INC-002``.
@@ -98,6 +115,10 @@ STATUS_FAILED: Final = "failed"
 STATUS_NO_PROBE: Final = "no_probe"
 #: Writes were not allowed, so nothing ran.
 STATUS_NOT_AUTHORIZED: Final = "not_authorized"
+#: No consequential tool passed, but the readback control did: the probe can
+#: confirm a planted record appears; it cannot clear a call that changed
+#: nothing. Not calibrated: every consumer reads it like ``failed``.
+STATUS_CONFIRM_ONLY: Final = "confirm_only"
 
 SEED_PASSED: Final = "passed"
 SEED_FAILED: Final = "failed"
@@ -106,6 +127,10 @@ SEED_NOT_DECLARED: Final = "not_declared"
 
 TOOL_CERTIFIED: Final = "certified"
 TOOL_FAILED: Final = "failed"
+#: The readback control passed through the ``seed_arm`` tool. Never counted in
+#: ``certified_tools``: the plant wrote to the record the verify read selects,
+#: so it shows nothing about where another write through that tool lands.
+TOOL_READBACK: Final = "readback"
 
 #: The most consequential tools one calibration run writes through.
 MAX_CANDIDATE_TOOLS: Final = 5
@@ -158,12 +183,13 @@ class CalibrationResult:
 
     @property
     def calibrated(self) -> bool:
-        """True only when the probe passed both controls."""
+        """True only when the probe passed both controls through at least one
+        consequential tool. ``confirm_only`` is not calibrated."""
         return self.status == STATUS_CERTIFIED
 
     @property
     def certified_tools(self) -> tuple[str, ...]:
-        """The tools whose writes the probe was shown to see."""
+        """The tools whose writes the probe was shown to see (readback excluded)."""
         return tuple(t.tool for t in self.tools if t.status == TOOL_CERTIFIED)
 
 
@@ -351,8 +377,28 @@ async def calibrate(adapter: MCPSessionAdapterBase, allow_writes: bool) -> Calib
             session, page_timeout_s=adapter._mcp_read_timeout.total_seconds()
         )
         specs = _serialise_tools(await adapter._bounded(shim.list_tools()))
-        status, code, detail, tools = await _probe_controls(adapter, session, specs)
-        seed = await _seed_control(adapter, session, specs)
+        status, code, detail, tools, eligible = await _probe_controls(adapter, session, specs)
+        readback: _Readback | None = None
+        if (
+            eligible
+            and spec.effect_probe is not None
+            and spec.seed_arm is not None
+            and _readback_usable(specs, spec)
+        ):
+            readback = await _readback_baseline(adapter, session, spec.effect_probe, spec.seed_arm)
+        seed = await _seed_control(adapter, session, specs, readback=readback)
+        if readback is not None:
+            control = await _readback_finish(adapter, session, readback, specs)
+            tools = (*tools, control)
+            if control.status == TOOL_READBACK:
+                # Not calibrated, and ``code`` is kept: no consequential tool's
+                # write was shown, so the probe may never clear a call.
+                status = STATUS_CONFIRM_ONLY
+                detail = (
+                    "the probe can confirm a planted record appears; it cannot clear a call "
+                    f"that changed nothing (the record planted through {control.tool!r} "
+                    f"showed up, but {detail})"
+                )
 
     result = CalibrationResult(
         spec_key=key,
@@ -559,13 +605,18 @@ def _candidate_tools(
 
 async def _probe_controls(
     adapter: MCPSessionAdapterBase, session: ClientSession, specs: list[ToolSpec]
-) -> tuple[str, str | None, str, tuple[ToolControl, ...]]:
-    """The schema check and the negative and positive controls for the effect probe."""
+) -> tuple[str, str | None, str, tuple[ToolControl, ...], bool]:
+    """The schema check and the negative and positive controls for the effect probe.
+
+    The last item says whether the readback control may still be tried: only
+    when the probe's own read is valid and stable, and no consequential tool
+    passed (none existed, or each one's write failed or did not show).
+    """
     spec = adapter._spec
     scope = adapter._scope
     probe = spec.effect_probe
     if probe is None or not probe.verify_tool:
-        return STATUS_NO_PROBE, None, "the target declares no effect_probe verify_tool", ()
+        return STATUS_NO_PROBE, None, "the target declares no effect_probe verify_tool", (), False
     by_name = {t.name: t for t in specs}
     verify = by_name.get(probe.verify_tool)
     if verify is None:
@@ -574,6 +625,7 @@ async def _probe_controls(
             INC_POSITIVE_FAILED,
             f"verify_tool {probe.verify_tool!r} is not among the server's tools",
             (),
+            False,
         )
 
     if _mentions_payload(probe.verify_args_template):
@@ -587,6 +639,7 @@ async def _probe_controls(
             "attack text, so calibration cannot prove the read an attempt makes; select "
             "the record by a fixed value instead",
             (),
+            False,
         )
 
     token = _new_token()
@@ -598,6 +651,7 @@ async def _probe_controls(
             INC_SCHEMA,
             f"verify_args_template fails {probe.verify_tool!r}'s inputSchema: {errors[0]}",
             (),
+            False,
         )
 
     candidates = _candidate_tools(specs, spec, probe.verify_tool)
@@ -607,6 +661,7 @@ async def _probe_controls(
             INC_POSITIVE_FAILED,
             "no consequential tool with a content argument to write a control record through",
             (),
+            True,
         )
 
     controls: list[ToolControl] = []
@@ -623,12 +678,19 @@ async def _probe_controls(
         c.reason_code == INC_NEGATIVE_FAILED for c in controls
     ):
         certified = ", ".join(c.tool for c in controls if c.status == TOOL_CERTIFIED)
-        return STATUS_CERTIFIED, None, f"certified through {certified}", tuple(controls)
+        return STATUS_CERTIFIED, None, f"certified through {certified}", tuple(controls), False
     first = next(
         (c for c in controls if c.reason_code == INC_NEGATIVE_FAILED),
         next(c for c in controls if c.status == TOOL_FAILED),
     )
-    return STATUS_FAILED, first.reason_code, f"{first.tool}: {first.detail}", tuple(controls)
+    eligible = not any(c.reason_code == INC_NEGATIVE_FAILED or c.is_read_failure for c in controls)
+    return (
+        STATUS_FAILED,
+        first.reason_code,
+        f"{first.tool}: {first.detail}",
+        tuple(controls),
+        eligible,
+    )
 
 
 def _mentions_payload(template: Any) -> bool:
@@ -755,9 +817,19 @@ def _recall_candidates(
 
 
 async def _seed_control(
-    adapter: MCPSessionAdapterBase, session: ClientSession, specs: list[ToolSpec]
+    adapter: MCPSessionAdapterBase,
+    session: ClientSession,
+    specs: list[ToolSpec],
+    *,
+    readback: _Readback | None = None,
 ) -> SeedControl:
-    """Plant a token through the seed_arm, then recall it."""
+    """Plant a token through the seed_arm, then recall it.
+
+    With a ``readback`` whose baseline passed, the plant carries the readback
+    control's token and body, so the one record serves both controls: a
+    store that ignores a second write under the same name (server-memory's
+    ``create_entities``) would otherwise make one of them fail.
+    """
     spec = adapter._spec
     arm = spec.seed_arm
     if arm is None:
@@ -767,8 +839,9 @@ async def _seed_control(
         return SeedControl(
             SEED_NOT_RUN, INC_SEED_NOT_RUN, "no tool could be inferred to recall planted content"
         )
+    shared = readback if readback is not None and readback.failure is None else None
     try:
-        return await _plant_and_recall(adapter, session, arm, specs, recalls)
+        return await _plant_and_recall(adapter, session, arm, specs, recalls, shared=shared)
     except SeedArmUnavailable as exc:
         return SeedControl(SEED_FAILED, INC_SEED_FAILED, exc.reason)
 
@@ -779,16 +852,22 @@ async def _plant_and_recall(
     arm: target_registry.SeedArmSpec,
     specs: list[ToolSpec],
     recalls: list[ToolSpec],
+    *,
+    shared: _Readback | None = None,
 ) -> SeedControl:
-    """Raises ``SeedArmUnavailable`` when the plant fails or no recall returns it."""
+    """Raises ``SeedArmUnavailable`` when the plant fails or no recall returns it.
+
+    ``shared`` (a readback control waiting on this plant) supplies the token
+    and body, and is told whether the plant call went through.
+    """
     scope = adapter._scope
     by_name = {t.name: t for t in specs}
     plant_tool = by_name.get(arm.tool)
     if plant_tool is None:
         raise SeedArmUnavailable(f"seed_arm tool {arm.tool!r} is not among the server's tools")
 
-    token = _new_token()
-    body = f"Mylonite calibration record {token}."
+    token = shared.token if shared is not None else _new_token()
+    body = shared.body if shared is not None else _plant_body(token, "")
     errors = validate_args(
         plant_tool.json_schema, _render_seed_args(arm.args_template, body, scope)
     )
@@ -848,12 +927,20 @@ async def _plant_and_recall(
             continue
         baselines[recall.name] = _result_readback_text(baseline_result)
 
+    if shared is not None:
+        shared.plant_attempted = True
     try:
         await adapter._run_seed_arm(session, arm, body, [])
-    except SeedArmUnavailable:
+    except SeedArmUnavailable as exc:
+        if shared is not None:
+            shared.plant_error = exc.reason
         raise
     except Exception as exc:
+        if shared is not None:
+            shared.plant_error = f"seed_arm plant call raised {type(exc).__name__}"
         raise SeedArmUnavailable(f"seed_arm plant call raised {type(exc).__name__}") from exc
+    if shared is not None:
+        shared.planted = True
 
     for recall, args in calls:
         if recall.name not in baselines:
@@ -874,4 +961,237 @@ async def _plant_and_recall(
         problems.append(f"{recall.name!r} did not return it")
     raise SeedArmUnavailable(
         f"the record planted through {arm.tool!r} was not recalled: " + "; ".join(problems)
+    )
+
+
+# --- the readback control (#324) ---------------------------------------------------
+
+
+def _plant_body(token: str, marker: str) -> str:
+    """The text a calibration plant writes: the token, plus the probe's marker
+    when the marker does not already carry the token."""
+    if marker and token not in marker:
+        return f"Mylonite calibration record {token} {marker}."
+    return f"Mylonite calibration record {token}."
+
+
+@dataclass
+class _Readback:
+    """One readback control in progress, shared with the seed control's plant."""
+
+    probe: target_registry.EffectProbeSpec
+    arm: target_registry.SeedArmSpec
+    token: str
+    marker: str
+    body: str
+    #: The second baseline read, which the positive read is compared against.
+    after: str = ""
+    #: Set when the baseline itself failed; the control ends with it.
+    failure: ToolControl | None = None
+    #: The seed control tried the plant (so this control must not plant again).
+    plant_attempted: bool = False
+    #: The seed control's plant call went through.
+    planted: bool = False
+    plant_error: str = ""
+
+
+def _readback_usable(specs: list[ToolSpec], spec: target_registry.TargetSpec) -> bool:
+    """Whether the seed_arm can carry a readback control at all."""
+    arm = spec.seed_arm
+    if arm is None or spec.effect_probe is None:
+        return False
+    tool = next((t for t in specs if t.name == arm.tool), None)
+    if tool is None or tool.name in frozenset(never_call_names(spec.control_config)):
+        return False
+    return not _is_destructive(tool, spec)
+
+
+def _readback_failed(
+    rb: _Readback, code: str, detail: str, *, is_read_failure: bool = False
+) -> ToolControl:
+    return ToolControl(rb.arm.tool, TOOL_FAILED, code, detail, is_read_failure=is_read_failure)
+
+
+async def _readback_baseline(
+    adapter: MCPSessionAdapterBase,
+    session: ClientSession,
+    probe: target_registry.EffectProbeSpec,
+    arm: target_registry.SeedArmSpec,
+) -> _Readback:
+    """Two verify reads with nothing written between them, before the plant."""
+    token = _new_token()
+    marker = _render_seed_args(probe.expect_marker or "", token, adapter._scope)
+    rb = _Readback(probe, arm, token, marker, _plant_body(token, marker))
+    before = await adapter._probe_verify_content(session, probe, token)
+    after = await adapter._probe_verify_content(session, probe, token)
+    if before is None or after is None:
+        rb.failure = _readback_failed(
+            rb, INC_POSITIVE_FAILED, _read_failed(probe), is_read_failure=True
+        )
+    elif _changed(before, after, marker):
+        rb.failure = _readback_failed(
+            rb,
+            INC_NEGATIVE_FAILED,
+            "the verify output changed between two reads with nothing written",
+        )
+    else:
+        rb.after = after
+    return rb
+
+
+async def _readback_finish(
+    adapter: MCPSessionAdapterBase, session: ClientSession, rb: _Readback, specs: list[ToolSpec]
+) -> ToolControl:
+    """The plant (unless the seed control made it), the positive read, a
+    second read that must not grow and must still show the record, then the
+    discrimination read (:func:`_discrimination_read`)."""
+    if rb.failure is not None:
+        return rb.failure
+    probe = rb.probe
+    read_failed = _read_failed(probe)
+    if rb.plant_attempted and not rb.planted:
+        return _readback_failed(
+            rb, INC_POSITIVE_FAILED, f"the plant did not go through: {rb.plant_error}"
+        )
+    if not rb.planted:
+        # The seed control never reached its plant (no recall tool, or no valid
+        # recall call), so this control plants the record itself.
+        plant_tool = next((t for t in specs if t.name == rb.arm.tool), None)
+        rendered = _render_seed_args(rb.arm.args_template, rb.body, adapter._scope)
+        errors = validate_args(plant_tool.json_schema if plant_tool else None, rendered)
+        if errors:
+            return _readback_failed(
+                rb,
+                INC_SCHEMA,
+                f"seed_arm args_template fails {rb.arm.tool!r}'s inputSchema: {errors[0]}",
+            )
+        try:
+            await adapter._run_seed_arm(session, rb.arm, rb.body, [])
+        except SeedArmUnavailable as exc:
+            return _readback_failed(
+                rb, INC_POSITIVE_FAILED, f"the plant did not go through: {exc.reason}"
+            )
+        except Exception as exc:
+            return _readback_failed(
+                rb, INC_POSITIVE_FAILED, f"the plant call raised {type(exc).__name__}"
+            )
+
+    written = await adapter._probe_verify_content(session, probe, rb.token)
+    if written is None:
+        return _readback_failed(rb, INC_POSITIVE_FAILED, read_failed, is_read_failure=True)
+    for deferral in probe.deferred_markers:
+        if count_deferral_word(written, deferral) > count_deferral_word(rb.after, deferral):
+            return _readback_failed(
+                rb, INC_POSITIVE_FAILED, f"the plant was deferred ({deferral!r})"
+            )
+    if not (
+        _changed(rb.after, written, rb.marker)
+        and written.count(rb.token) > rb.after.count(rb.token)
+    ):
+        return _readback_failed(
+            rb,
+            INC_POSITIVE_FAILED,
+            f"{probe.verify_tool!r} did not show the record planted through {rb.arm.tool!r}",
+        )
+
+    # Stability after the plant: nothing is written, the output does not grow,
+    # and the planted record is still there. An error or empty read
+    # (``_probe_verify_content`` maps ``isError`` to "") loses the token, so it
+    # fails here rather than reading as "no change".
+    still = await adapter._probe_verify_content(session, probe, rb.token)
+    if still is None:
+        return _readback_failed(rb, INC_POSITIVE_FAILED, read_failed, is_read_failure=True)
+    if _changed(written, still, rb.marker):
+        return _readback_failed(
+            rb,
+            INC_NEGATIVE_FAILED,
+            "the verify output changed after the plant with nothing written",
+        )
+    if still.count(rb.token) < written.count(rb.token):
+        return _readback_failed(
+            rb,
+            INC_POSITIVE_FAILED,
+            f"{probe.verify_tool!r} no longer showed the planted record on a second read",
+        )
+    return await _discrimination_read(adapter, session, rb)
+
+
+def _with_string_leaves(value: Any, replacement: str) -> tuple[Any, int]:
+    """``value`` with every string leaf replaced, and how many were replaced."""
+    if isinstance(value, str):
+        return replacement, 1
+    if isinstance(value, dict):
+        out: dict[str, Any] = {}
+        count = 0
+        for key, item in value.items():
+            out[key], n = _with_string_leaves(item, replacement)
+            count += n
+        return out, count
+    if isinstance(value, (list, tuple)):
+        items = [_with_string_leaves(item, replacement) for item in value]
+        return [i for i, _ in items], sum(n for _, n in items)
+    return value, 0
+
+
+async def _discrimination_read(
+    adapter: MCPSessionAdapterBase, session: ClientSession, rb: _Readback
+) -> ToolControl:
+    """Send a never-planted token to the server through the verify read.
+
+    The token goes in the same argument slot the positive read selects its
+    record by (every string leaf of the rendered ``verify_args_template``).
+    The read discriminates only when the call succeeds and returns a
+    non-empty, non-error result that lacks the token. An error, an empty
+    result or a raised call proves nothing, so it is never read as "absent";
+    an echo of the token means the read cannot tell a planted record from
+    its own query.
+    """
+    probe = rb.probe
+    unplanted = _new_token()
+    rendered = _render_seed_args(probe.verify_args_template, unplanted, adapter._scope)
+    args, slots = _with_string_leaves(rendered, unplanted)
+    if not slots:
+        return _readback_failed(
+            rb,
+            INC_POSITIVE_FAILED,
+            f"{probe.verify_tool!r}'s verify_args_template has no argument to send a "
+            "never-planted token through, so the read was not shown to discriminate",
+        )
+    verify = probe.verify_tool or ""
+    not_shown = "so the read was not shown to discriminate"
+    try:
+        result = await adapter._bounded(session.call_tool(verify, args))
+    except Exception as exc:
+        return _readback_failed(
+            rb,
+            INC_POSITIVE_FAILED,
+            f"the read with a never-planted token raised {type(exc).__name__}, {not_shown}",
+            is_read_failure=True,
+        )
+    text = _result_readback_text(result)
+    if getattr(result, "isError", False):
+        return _readback_failed(
+            rb,
+            INC_POSITIVE_FAILED,
+            f"the read with a never-planted token returned an error, {not_shown}",
+        )
+    if not text.strip():
+        return _readback_failed(
+            rb,
+            INC_POSITIVE_FAILED,
+            f"the read with a never-planted token returned nothing, {not_shown}",
+        )
+    if unplanted in text:
+        return _readback_failed(
+            rb,
+            INC_NEGATIVE_FAILED,
+            "the read with a never-planted token echoed that token back, so it cannot "
+            "tell a planted record from its own query",
+        )
+    return ToolControl(
+        rb.arm.tool,
+        TOOL_READBACK,
+        None,
+        "the planted record appeared, stayed, and a read for a never-planted token "
+        "answered without it",
     )

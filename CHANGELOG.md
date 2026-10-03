@@ -87,6 +87,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Calibration now shows when a memory-style store's probe sees its own
+  planted record (#324).** On a knowledge graph or key-value store the probe
+  reads back the record `seed_arm` writes, so the positive control, which
+  wrote through a consequential tool before anything was planted, always
+  failed with `MYL-INC-003`. Calibration now also checks the probe on the
+  planted record: two reads before the plant, the plant (shared with the
+  seed control, or made by this check when the seed control has no recall
+  tool), a read that must show the planted token, a second read that must
+  still show it, and a read with a never-planted token in the verify
+  arguments that must return a non-empty, non-error reply without it. A probe that
+  passes reads `calibration: confirm_only [MYL-INC-003]`, a new status in
+  the scan output and `verdicts.json`: the probe can confirm a planted
+  record appears; it cannot clear a call that changed nothing. It counts as
+  uncalibrated everywhere, so no verdict changes. Stores that echo the
+  query, readbacks that never change, and reads that error, come back empty
+  or raise stay `failed` with their codes. See [Calibration](docs/target-file.md#calibration).
+
 - **CLI messages: no more duplicated warnings, raw tracebacks, or unnamed
   launch failures.** Five on-ramp fixes:
   - A mismatched `--authorize` on a target needing the seed-arm auto-wire

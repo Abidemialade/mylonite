@@ -29,6 +29,7 @@ from typing import Any
 import pytest
 from mcp.types import CallToolResult, TextContent
 from mcp.types import Tool as MCPTool
+from tests.mcp_plugin.fakes.neutral_servers import memory_tools
 
 from mylonite.contracts import ToolSpec
 from mylonite.plugins._mcp import calibration, stdio_adapter, target_registry
@@ -1104,3 +1105,430 @@ def test_candidate_tools_sees_a_redis_like_sets_anyof_union_value() -> None:
     write_args = calibration._fill_required_args(set_tool, {"value": token}, token)
     assert write_args is not None
     assert calibration.validate_args(set_tool.json_schema, write_args) == []
+
+
+# --- #324: the readback control on a memory-style store ----------------------------
+#
+# On a knowledge-graph or key-value store the effect probe reads back the one
+# record the seed_arm writes (``search_nodes(query=<entity name>)``), so no
+# consequential tool's control write can show up in it, and a tool that amends
+# an existing record (``add_observations``) has no record to amend before the
+# plant. The positive control used to run before anything was planted and
+# failed with ``MYL-INC-003``. Calibration now checks the probe on the planted
+# record: baseline reads, the plant, a positive read, then a read that must not
+# change or show a token that was never planted.
+
+_SEED_ENTITY = "mylonite-tpv-seed"
+
+
+def _memory_tool_schemas() -> dict[str, dict[str, Any]]:
+    return {tool.name: dict(tool.json_schema) for tool in memory_tools()}
+
+
+def _memory_subset(*names: str) -> dict[str, dict[str, Any]]:
+    return {n: s for n, s in _memory_tool_schemas().items() if n in names}
+
+
+class _MemoryStore:
+    """A server-memory-shaped knowledge graph that outlives one session."""
+
+    def __init__(self) -> None:
+        self.entities: dict[str, list[str]] = {}
+        self.search_calls = 0
+        #: Writes reply "ok" but store nothing; search echoes its own query.
+        self.echo_only = False
+        #: Search always returns the same text, whatever was written.
+        self.frozen_search = False
+        #: Search raises until something has been planted.
+        self.search_raises_until_planted = False
+        #: The first search call raises; later ones work.
+        self.search_raises_once = False
+        #: Search prefixes every reply with its own query.
+        self.search_echoes_query = False
+        #: A search that matches nothing returns ``isError``.
+        self.search_error_when_no_match = False
+        #: A search that matches nothing returns an empty result.
+        self.search_empty_when_no_match = False
+        #: Once planted, the second read of the seed entity returns ``isError``.
+        self.second_seed_read_errors = False
+        self.seed_reads_after_plant = 0
+
+
+class _MemorySession(_Session):
+    """A fake session over a ``_MemoryStore``."""
+
+    def __init__(self, memory: _MemoryStore, tools: dict[str, dict[str, Any]]) -> None:
+        super().__init__(_Store(), tools)
+        self.memory = memory
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        self.calls.append((name, dict(arguments)))
+        mem = self.memory
+        if name == "create_entities":
+            if mem.echo_only:
+                return _text(f"created {arguments}")
+            for entity in arguments.get("entities", []):
+                # Like the real server: an entity whose name exists is ignored.
+                mem.entities.setdefault(entity["name"], list(entity.get("observations", [])))
+            return _text("created")
+        if name == "add_observations":
+            if mem.echo_only:
+                return _text(f"added {arguments}")
+            for obs in arguments.get("observations", []):
+                entity_name = obs["entityName"]
+                if entity_name not in mem.entities:
+                    return _text(f"Entity with name {entity_name} not found", is_error=True)
+                mem.entities[entity_name].extend(obs.get("contents", []))
+            return _text("added")
+        if name == "create_relations":
+            return _text("relations created")
+        if name in ("search_nodes", "open_nodes", "read_graph"):
+            mem.search_calls += 1
+            if mem.search_raises_once and mem.search_calls == 1:
+                raise RuntimeError("search failed")
+            if mem.search_raises_until_planted and not mem.entities:
+                raise RuntimeError("search failed")
+            if mem.frozen_search:
+                return _text("graph: (no matches)")
+            query = str(arguments.get("query", ""))
+            if mem.echo_only:
+                return _text(f"searched for {query}")
+            if mem.entities and query == _SEED_ENTITY:
+                mem.seed_reads_after_plant += 1
+                if mem.second_seed_read_errors and mem.seed_reads_after_plant == 2:
+                    return _text("graph unavailable", is_error=True)
+            hits = [
+                name_ + ": " + "; ".join(obs)
+                for name_, obs in mem.entities.items()
+                if not query or query in name_ or any(query in o for o in obs)
+            ]
+            if not hits and mem.search_error_when_no_match:
+                return _text("nothing found", is_error=True)
+            if not hits and mem.search_empty_when_no_match:
+                return CallToolResult(content=[], isError=False)
+            reply = "\n".join(hits) or "no matches"
+            if mem.search_echoes_query:
+                reply = f"results for {query}:\n{reply}"
+            return _text(reply)
+        return _text(f"{name} ok")
+
+
+class _MemoryLauncher(_Launcher):
+    """``_Launcher`` over a ``_MemoryStore``."""
+
+    def __init__(
+        self, memory: _MemoryStore, tools: dict[str, dict[str, Any]] | None = None
+    ) -> None:
+        super().__init__(_Store(), tools if tools is not None else _memory_tool_schemas())
+        self.memory = memory
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        session = _MemorySession(self.memory, self.tools)
+        self.sessions.append(session)
+
+        @asynccontextmanager
+        async def _ctx() -> Any:
+            yield session
+
+        return _ctx()
+
+
+def _register_memory(
+    *,
+    consequential: tuple[str, ...] = ("add_observations", "create_relations"),
+    marker: str | None = None,
+) -> None:
+    _register(
+        EffectProbeSpec(
+            verify_tool="search_nodes",
+            verify_args_template={"query": _SEED_ENTITY},
+            expect_marker=marker,
+        ),
+        seed_arm=SeedArmSpec(
+            tool="create_entities",
+            args_template={
+                "entities": [
+                    {"name": _SEED_ENTITY, "entityType": "note", "observations": ["{payload}"]}
+                ]
+            },
+        ),
+        control_config=ControlConfig(
+            consequential_tools=consequential,
+            read_tool_names=("search_nodes", "open_nodes", "read_graph"),
+            destructive_tools=("delete_entities", "delete_observations", "delete_relations"),
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_memory_store_is_confirm_only_through_the_planted_record() -> None:
+    _register_memory()
+    store = _MemoryStore()
+    launcher = _MemoryLauncher(store)
+
+    result = await _calibrate(launcher)
+
+    # The probe can confirm a planted record appears; it cannot clear a call
+    # that changed nothing. Never ``certified``, and not calibrated.
+    assert result.status == calibration.STATUS_CONFIRM_ONLY
+    assert result.calibrated is False
+    assert "cannot clear a call that changed nothing" in result.detail
+    # The consequential tools still showed nothing, so none is certified and
+    # their code stays.
+    assert result.certified_tools == ()
+    assert result.reason_code == "MYL-INC-003"
+    readback = result.tools[-1]
+    assert readback.tool == "create_entities"
+    assert readback.status == calibration.TOOL_READBACK
+    # One plant serves the readback and the seed control (the store ignores a
+    # second entity with the same name), and both pass.
+    assert len(launcher.called("create_entities")) == 1
+    assert result.seed_control.status == calibration.SEED_PASSED
+    assert any("myl-cal-" in o for o in store.entities[_SEED_ENTITY])
+    # The order: two baseline reads, the plant, then the positive and negative reads.
+    names = [
+        n
+        for n, args in launcher.calls
+        if n == "create_entities" or args.get("query") == _SEED_ENTITY
+    ]
+    plant_at = names.index("create_entities")
+    assert names[plant_at - 2 : plant_at] == ["search_nodes", "search_nodes"]
+    assert names[plant_at + 1 :] == ["search_nodes", "search_nodes"]
+
+
+@pytest.mark.asyncio
+async def test_memory_store_summary_is_confirm_only_and_not_calibrated() -> None:
+    _register_memory()
+    await _calibrate(_MemoryLauncher(_MemoryStore()))
+    summary = calibration.summary_for(target_registry.resolve_target(FAMILY, None), None)
+    assert summary is not None
+    assert summary.status == "confirm_only"
+    assert summary.calibrated is False
+    assert summary.certified_tools == ()
+    assert summary.reason_code == "MYL-INC-003"
+
+
+@pytest.mark.asyncio
+async def test_memory_store_with_no_writable_candidate_is_confirm_only() -> None:
+    """No consequential candidate at all (go-memory before its schemas resolved)."""
+    _register_memory(consequential=("no_such_tool",))
+    tools = _memory_subset("create_entities", "search_nodes")
+    result = await _calibrate(_MemoryLauncher(_MemoryStore(), tools))
+    assert result.status == calibration.STATUS_CONFIRM_ONLY
+    assert result.calibrated is False
+    assert result.certified_tools == ()
+    assert result.tools[-1].status == calibration.TOOL_READBACK
+
+
+@pytest.mark.asyncio
+async def test_echo_only_memory_store_is_not_calibrated() -> None:
+    _register_memory()
+    store = _MemoryStore()
+    store.echo_only = True
+    result = await _calibrate(_MemoryLauncher(store))
+    assert result.calibrated is False
+    assert result.status == calibration.STATUS_FAILED
+    assert result.reason_code == "MYL-INC-003"
+    assert result.tools[-1].tool == "create_entities"
+    assert result.tools[-1].status == calibration.TOOL_FAILED
+    assert result.seed_control.status == calibration.SEED_FAILED
+
+
+@pytest.mark.asyncio
+async def test_memory_store_whose_readback_never_changes_is_not_calibrated() -> None:
+    _register_memory()
+    store = _MemoryStore()
+    store.frozen_search = True
+    result = await _calibrate(_MemoryLauncher(store))
+    assert result.calibrated is False
+    assert result.reason_code == "MYL-INC-003"
+    assert result.tools[-1].reason_code == "MYL-INC-003"
+    assert "did not show the record planted" in result.tools[-1].detail
+
+
+@pytest.mark.asyncio
+async def test_memory_store_whose_baseline_read_raises_is_not_calibrated() -> None:
+    """The readback's first baseline read raises: nothing after it can certify."""
+    _register_memory(consequential=("no_such_tool",))
+    store = _MemoryStore()
+    store.search_raises_once = True
+    result = await _calibrate(
+        _MemoryLauncher(store, _memory_subset("create_entities", "search_nodes"))
+    )
+    assert result.calibrated is False
+    assert result.reason_code == "MYL-INC-003"
+    assert result.tools[-1].is_read_failure is True
+
+
+@pytest.mark.asyncio
+async def test_memory_store_whose_reads_raise_before_the_plant_is_not_calibrated() -> None:
+    """Every read before the plant raises. The seed control's baseline guard
+    (#324 re-review) and the readback both refuse the reads after it."""
+    _register_memory()
+    store = _MemoryStore()
+    store.search_raises_until_planted = True
+    result = await _calibrate(_MemoryLauncher(store))
+    assert result.calibrated is False
+    assert result.status == calibration.STATUS_FAILED
+    assert result.seed_control.status == calibration.SEED_FAILED
+    assert result.seed_control.reason_code == "MYL-INC-006"
+
+
+@pytest.mark.asyncio
+async def test_readback_never_runs_after_the_probe_changed_on_its_own() -> None:
+    """A negative-control failure is about the probe; a plant cannot fix it."""
+    _register(EffectProbeSpec(verify_tool="list_outbox"))
+    store = _Store()
+    store.noisy_verify = True
+    result = await _calibrate(_Launcher(store))
+    assert result.reason_code == "MYL-INC-004"
+    assert all(t.status != calibration.TOOL_READBACK for t in result.tools)
+    assert all(t.tool != "remember" for t in result.tools)
+
+
+@pytest.mark.asyncio
+async def test_a_certifying_target_stays_certified_and_never_runs_the_readback() -> None:
+    """A consequential tool's write shows up: ``certified``, as before."""
+    _register()
+    launcher = _Launcher(_Store())
+    result = await _calibrate(launcher)
+    assert result.status == calibration.STATUS_CERTIFIED
+    assert result.calibrated is True
+    assert result.reason_code is None
+    assert result.certified_tools == ("send_email",)
+    assert all(t.status != calibration.TOOL_READBACK for t in result.tools)
+
+
+@pytest.mark.asyncio
+async def test_confirm_only_never_calibrates_an_attempt_even_with_no_dispatch() -> None:
+    """Every consumer reads ``confirm_only`` like a failed calibration: the
+    per-attempt ``calibrated`` flag the verdict reads is computed from
+    ``CalibrationResult.calibrated``, which is False whatever was dispatched."""
+    _register_memory()
+    result = await _calibrate(_MemoryLauncher(_MemoryStore()))
+    cal = calibration.lookup(target_registry.resolve_target(FAMILY, None), None)
+    assert cal is result
+    for dispatched in (set(), {"add_observations"}, {"create_entities"}):
+        assert not (cal.calibrated and dispatched <= set(cal.certified_tools))
+
+
+# --- the discrimination read: a never-planted token through the verify slot ------
+#
+# The last read must show that the verify read can tell a planted record from
+# one that was never planted: the same tool and argument slot, sent a
+# never-planted token, must answer with a non-empty, non-error result that
+# lacks it. The earlier check read through the fixed template, so the token
+# never reached the server and an error, empty or echoing read still passed.
+
+
+async def _memory_run(**flags: bool) -> tuple[calibration.CalibrationResult, _MemoryLauncher]:
+    _register_memory()
+    store = _MemoryStore()
+    for flag, value in flags.items():
+        setattr(store, flag, value)
+    launcher = _MemoryLauncher(store)
+    return await _calibrate(launcher), launcher
+
+
+def _sent_a_fresh_token(launcher: _MemoryLauncher, result: calibration.CalibrationResult) -> bool:
+    """The discrimination read went to the server with a token no plant carried."""
+    planted = "".join(str(a) for a in launcher.called("create_entities"))
+    queries = [str(a.get("query", "")) for a in launcher.called("search_nodes")]
+    return any(q.startswith("myl-cal-") and q not in planted for q in queries)
+
+
+@pytest.mark.asyncio
+async def test_discrimination_read_that_errors_is_not_confirm_only() -> None:
+    result, launcher = await _memory_run(search_error_when_no_match=True)
+    assert _sent_a_fresh_token(launcher, result)
+    assert result.status == calibration.STATUS_FAILED
+    assert result.reason_code == "MYL-INC-003"
+    assert "returned an error" in result.tools[-1].detail
+
+
+@pytest.mark.asyncio
+async def test_discrimination_read_that_is_empty_is_not_confirm_only() -> None:
+    result, launcher = await _memory_run(search_empty_when_no_match=True)
+    assert _sent_a_fresh_token(launcher, result)
+    assert result.status == calibration.STATUS_FAILED
+    assert result.reason_code == "MYL-INC-003"
+    assert "returned nothing" in result.tools[-1].detail
+
+
+@pytest.mark.asyncio
+async def test_discrimination_read_that_echoes_the_token_is_not_confirm_only() -> None:
+    result, launcher = await _memory_run(search_echoes_query=True)
+    assert _sent_a_fresh_token(launcher, result)
+    assert result.status == calibration.STATUS_FAILED
+    assert result.reason_code == "MYL-INC-003"
+    assert result.tools[-1].reason_code == "MYL-INC-004"
+    assert "echoed" in result.tools[-1].detail
+
+
+@pytest.mark.asyncio
+async def test_a_discriminating_read_gives_confirm_only() -> None:
+    result, launcher = await _memory_run()
+    assert _sent_a_fresh_token(launcher, result)
+    assert result.status == calibration.STATUS_CONFIRM_ONLY
+    assert result.tools[-1].status == calibration.TOOL_READBACK
+
+
+@pytest.mark.asyncio
+async def test_a_second_read_that_errors_after_the_plant_is_not_confirm_only() -> None:
+    """``isError`` reads as an empty text. With a marker, "no change" only
+    means "the marker did not grow", so an error read must still fail."""
+    _register_memory(marker="calibration-marker")
+    store = _MemoryStore()
+    store.second_seed_read_errors = True
+    result = await _calibrate(_MemoryLauncher(store))
+    assert result.status == calibration.STATUS_FAILED
+    assert "no longer showed the planted record" in result.tools[-1].detail
+
+
+@pytest.mark.asyncio
+async def test_a_verify_template_with_no_string_slot_is_not_confirm_only() -> None:
+    _register(
+        EffectProbeSpec(verify_tool="read_graph", verify_args_template={}),
+        seed_arm=SeedArmSpec(
+            tool="create_entities",
+            args_template={
+                "entities": [
+                    {"name": _SEED_ENTITY, "entityType": "note", "observations": ["{payload}"]}
+                ]
+            },
+        ),
+        control_config=ControlConfig(consequential_tools=("add_observations",)),
+    )
+    result = await _calibrate(_MemoryLauncher(_MemoryStore()))
+    assert result.status == calibration.STATUS_FAILED
+    assert "no argument to send a never-planted token" in result.tools[-1].detail
+
+
+@pytest.mark.asyncio
+async def test_readback_plants_itself_when_the_seed_control_has_no_recall_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(calibration, "_recall_candidates", lambda *a, **k: [])
+    _register_memory()
+    launcher = _MemoryLauncher(_MemoryStore())
+    result = await _calibrate(launcher)
+    assert result.seed_control.status == calibration.SEED_NOT_RUN
+    assert len(launcher.called("create_entities")) == 1
+    assert result.status == calibration.STATUS_CONFIRM_ONLY
+
+
+@pytest.mark.asyncio
+async def test_readback_self_plant_that_fails_the_schema_is_not_confirm_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(calibration, "_recall_candidates", lambda *a, **k: [])
+    _register(
+        EffectProbeSpec(verify_tool="search_nodes", verify_args_template={"query": _SEED_ENTITY}),
+        seed_arm=SeedArmSpec(tool="create_entities", args_template={"wrong": "{payload}"}),
+        control_config=ControlConfig(consequential_tools=("add_observations",)),
+    )
+    launcher = _MemoryLauncher(_MemoryStore())
+    result = await _calibrate(launcher)
+    assert result.status == calibration.STATUS_FAILED
+    assert result.tools[-1].reason_code == "MYL-INC-005"
+    assert launcher.called("create_entities") == []
