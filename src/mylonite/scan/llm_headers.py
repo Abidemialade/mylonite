@@ -14,9 +14,10 @@ an entry. In logs, the filters ``install_log_redaction`` adds mask it in the
 message, exception traceback, stack info and string ``extra=`` fields of
 records on the ``mylonite`` logger tree, on LiteLLM's ``LiteLLM`` and
 ``litellm`` loggers, and on records reaching the root logger's handlers and
-Python's fallback stderr handler. Not covered: a handler the host
-application adds after installation, for a record from a module logger
-created after installation. Values shorter than four characters are not
+Python's fallback stderr handler, and on handlers already attached to the
+``mylonite`` loggers at installation. Not covered: a handler added after
+installation, on any logger, for a record from a module logger created
+after installation. Values shorter than four characters are not
 registered (masking them would shred ordinary text).
 
 The configured set is process-wide, like the request ceiling: the root CLI

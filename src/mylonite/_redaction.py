@@ -475,19 +475,23 @@ class SecretRedactingFilter(logging.Filter):
 
     @staticmethod
     def _mask_exception(record: logging.LogRecord, mask: Callable[[str], str]) -> None:
-        if record.exc_info and not record.exc_text:
+        text = record.exc_text
+        if not text and record.exc_info:
             try:
-                record.exc_text = logging.Formatter().formatException(record.exc_info)
+                text = logging.Formatter().formatException(record.exc_info)
             except Exception:  # a broken exception must not kill the line
                 return
-        if record.exc_text:
-            masked = mask(record.exc_text)
-            if masked != record.exc_text:
-                # Formatters print exc_text when it is set; dropping exc_info
-                # stops a handler that renders the exception object itself
-                # from printing the unmasked original.
-                record.exc_text = masked
-                record.exc_info = None
+        if not text:
+            return
+        masked = mask(text)
+        if masked != text:
+            # Only now touch the record: a record with nothing to mask keeps
+            # its exc_info and an unset exc_text, so a host handler's own
+            # formatException still renders it. Formatters print exc_text
+            # when it is set; dropping exc_info stops a handler that renders
+            # the exception object itself from printing the original.
+            record.exc_text = masked
+            record.exc_info = None
 
 
 #: Every (logger-or-handler, filter) pair :func:`install_log_redaction`
@@ -502,19 +506,35 @@ _LIBRARY_LOGGERS: Final = ("LiteLLM", "litellm")
 def _redaction_targets(logger_name: str) -> list[tuple[logging.Filterer, str | None]]:
     """Where a filter goes: the tree's own logger (full redaction), every
     child logger that already exists, the handlers that will print the
-    tree's records (the root logger's, plus Python's last-resort stderr
-    handler used when none is configured), and LiteLLM's loggers."""
-    targets: list[tuple[logging.Filterer, str | None]] = [(logging.getLogger(logger_name), None)]
+    tree's records (those already on the tree's loggers and on the root
+    logger, plus Python's last-resort stderr handler used when none is
+    configured), and LiteLLM's loggers."""
+    own = logging.getLogger(logger_name)
+    targets: list[tuple[logging.Filterer, str | None]] = [(own, None)]
+    handlers = list(own.handlers)
     prefix = logger_name + "."
     for name, child in list(logging.Logger.manager.loggerDict.items()):
         if name.startswith(prefix) and isinstance(child, logging.Logger):
             targets.append((child, None))
-    handlers = list(logging.getLogger().handlers)
+            handlers.extend(child.handlers)
+    handlers.extend(logging.getLogger().handlers)
     if logging.lastResort is not None:
         handlers.append(logging.lastResort)
     targets.extend((handler, logger_name) for handler in handlers)
     targets.extend((logging.getLogger(name), logger_name) for name in _LIBRARY_LOGGERS)
     return targets
+
+
+def _all_attached_handlers() -> list[logging.Handler]:
+    loggers = [logging.getLogger()] + [
+        lg
+        for lg in list(logging.Logger.manager.loggerDict.values())
+        if isinstance(lg, logging.Logger)
+    ]
+    handlers = [h for lg in loggers for h in lg.handlers]
+    if logging.lastResort is not None:
+        handlers.append(logging.lastResort)
+    return handlers
 
 
 def install_log_redaction(enabled: bool = True, logger_name: str = "mylonite") -> None:
@@ -530,9 +550,10 @@ def install_log_redaction(enabled: bool = True, logger_name: str = "mylonite") -
     ``enabled`` is false, every filter this function added for the tree is
     removed, so the flag is honoured for library users who toggle it off.
 
-    Limit: a handler added after this call (by the host application) and a
-    module logger created after it are not filtered; their records are
-    masked at source by the call sites that log exception text.
+    Limit: a handler added (on any logger) after this call does not see a
+    record from a module logger created after this call through a filter;
+    such records are still masked at source by the call sites that log
+    exception text.
     """
     installed = _INSTALLED.setdefault(logger_name, [])
     if not enabled:
@@ -544,6 +565,12 @@ def install_log_redaction(enabled: bool = True, logger_name: str = "mylonite") -
             if isinstance(leftover, SecretRedactingFilter):
                 own.removeFilter(leftover)
         return
+    # Forget handlers no longer attached to any logger (a test's capture
+    # handler, a host handler since removed): nothing left to undo there.
+    attached = {id(h) for h in _all_attached_handlers()}
+    installed[:] = [
+        (t, f) for t, f in installed if not isinstance(t, logging.Handler) or id(t) in attached
+    ]
     for target, tree in _redaction_targets(logger_name):
         if any(isinstance(f, SecretRedactingFilter) and f.tree == tree for f in target.filters):
             continue
