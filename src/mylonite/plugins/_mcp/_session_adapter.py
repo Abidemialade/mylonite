@@ -134,6 +134,30 @@ def _is_timeout_error(exc: BaseException) -> bool:
     return isinstance(exc, McpError) and exc.error.code == _MCP_REQUEST_TIMEOUT_CODE
 
 
+def _unwrap_sole_exception(exc: BaseException) -> BaseException:
+    """Peel nested single-child ``ExceptionGroup``s down to their one leaf.
+
+    ``asyncio.TaskGroup`` (used by the MCP SDK's own session plumbing, and by
+    any nested ``TaskGroup`` such as calibration's plant/recall) wraps
+    whatever escapes it in an ``ExceptionGroup``, one layer per enclosing
+    task group. A ``SeedArmUnavailable`` or a target/transport failure
+    (``BrokenResourceError`` and the like) raised two task groups deep
+    therefore arrives at ``invoke()``'s catch-all as
+    ``ExceptionGroup(ExceptionGroup(SeedArmUnavailable))`` — which neither
+    matches the control-flow allowlist above (it is a group CONTAINING a
+    ``SeedArmUnavailable``, not an instance of one) nor names correctly in
+    ``_classify_failure`` (``type(exc).__name__`` is just ``"ExceptionGroup"``)
+    (#319). A group that holds exactly one sub-exception carries no
+    information beyond that sub-exception, so recurse into it. A group with
+    more than one leaf has no single cause to attribute the attempt to; it is
+    returned AS IS, and the caller's name-based classification correctly
+    falls through to its catch-all, same as before this helper existed.
+    """
+    while isinstance(exc, ExceptionGroup) and len(exc.exceptions) == 1:
+        exc = exc.exceptions[0]
+    return exc
+
+
 def _serialise_tools(descs: list[ToolDescription]) -> list[ToolSpec]:
     from mylonite.scan.tool_classifier import neutralize_uniform_default_annotations
 
@@ -806,7 +830,18 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         except (AdapterInvocationSkipped, SeedArmUnavailable, BudgetExceededError):
             raise
         except Exception as exc:
-            reason = self._classify_failure(exc)
+            # #319: a nested ``asyncio.TaskGroup`` wraps an allowlisted
+            # exception (above) or an otherwise-classifiable failure in one
+            # ``ExceptionGroup`` per enclosing task group before it reaches
+            # here. Peel those back to the real leaf first, so the allowlist
+            # check and the classification below see what actually failed
+            # instead of an opaque "ExceptionGroup".
+            cause = _unwrap_sole_exception(exc)
+            if isinstance(
+                cause, (AdapterInvocationSkipped, SeedArmUnavailable, BudgetExceededError)
+            ):
+                raise cause from exc
+            reason = self._classify_failure(cause)
             logger.info(
                 "%s: invoke raised on %s — skipping (%s)",
                 type(self).__name__,
@@ -845,13 +880,13 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 except Exception:
                     where = ""
             raise AdapterInvocationSkipped(
-                f"{reason} on {payload.pattern_id}{where}: {self._skip_exception_detail(exc)}",
+                f"{reason} on {payload.pattern_id}{where}: {self._skip_exception_detail(cause)}",
                 attempt_metadata={
                     "family": self._family,
                     "scope": self._scope or "",
                     "seed_id": payload.metadata.get("seed_id", ""),
                     "reason": reason,
-                    "exception": type(exc).__name__,
+                    "exception": type(cause).__name__,
                 },
             ) from exc
 
@@ -1565,7 +1600,20 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         # broken, which sent them looking in entirely the wrong place.
         if name in {"FileNotFoundError", "NotADirectoryError", "PermissionError"}:
             return "launch_failure"
-        if name in {"ProcessLookupError", "BrokenPipeError", "ConnectionResetError"}:
+        # anyio's own names for the same shapes stdlib raises above (the MCP
+        # SDK's stdio/streamable-HTTP transports run on anyio, not asyncio
+        # sockets directly): the target process exited or closed its pipe
+        # mid-attempt. Named here too so a transport failure reads as a
+        # target crash, not a "planner_exception" that sends the operator
+        # looking at their planner model instead of the target (#319).
+        if name in {
+            "ProcessLookupError",
+            "BrokenPipeError",
+            "ConnectionResetError",
+            "BrokenResourceError",
+            "ClosedResourceError",
+            "EndOfStream",
+        }:
             return "subprocess_crash"
         if name in {"ProtocolError", "JSONRPCError", "McpError"}:
             return "mcp_protocol_error"

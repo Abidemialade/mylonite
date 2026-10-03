@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attack with a 422 before it reached the agent, and the class read NOT TESTED. When the
   body is JSON and the target file sets no `Content-Type`, Mylonite now sends
   `application/json`. A content type you declare always wins.
+- **A missing seed arm or a target crash wrapped in nested task groups no longer
+  reads as a crashed planner.** `--allow-no-seed-arm` promises a designed skip
+  when a seed's planting arm doesn't exist on the target, but on a transport
+  whose session setup runs inside `asyncio.TaskGroup`s (the streamable-HTTP
+  example server, among others), the missing-arm error arrived wrapped in
+  nested `ExceptionGroup`s and fell through to the generic "planner failed"
+  classification instead. A target process crashing mid-attempt (a broken
+  pipe, a closed connection) hit the same fallthrough and was also mislabelled
+  as a planner failure, sending the operator to debug the wrong thing. Both
+  are now unwrapped to their real cause before classification: a missing seed
+  arm reads as the undelivered-payload skip it always should have, and a
+  target/transport crash reads as a target failure, not a planner one. A
+  group that does not collapse to one cause is left alone and still reads as
+  an unclassified planner exception, as before. (#319)
 - **A rejection no longer says the guard "did not block" when it blocked everything it
   could see.** When the guarded side of a custom-target differential leaked nothing but
   some runs reached no verdict (for example, an effect probe that failed calibration),
