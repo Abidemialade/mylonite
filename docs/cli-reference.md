@@ -395,7 +395,9 @@ results](reading-results.md#the-gating-pr).
 **`gate` does not modify your repository unless you ask it to.** By default it writes
 only to `--out` (normally `.mylonite/gate/`) and prints the `git`/`gh` commands to
 commit and open the PR yourself. `--open-pr` performs the branch/commit/push/PR;
-`--workflows` scaffolds the two CI templates. Both default to off — changed in 0.8.5,
+`--workflows` scaffolds the two CI templates, but only once this run has kept at
+least one finding — a run that keeps nothing writes no workflow file, and says so,
+naming why. Both default to off — changed in 0.8.5,
 where `--workflows` defaulted on and the branch and commit happened on every run.
 Either flag resolves the repository root with `git rev-parse --show-toplevel` — so
 `gate` works from any subdirectory — and fails fast, on exit code 8, outside a git

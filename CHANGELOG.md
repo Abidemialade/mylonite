@@ -63,6 +63,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   entry it actually writes, not the segment the traversal cancels out — the
   filesystem predicate used to credit the wrong (or no) entry and under-report
   the finding.
+- **Reusing `gate --out` no longer leaves stale kept tests behind, or risks a
+  same-named one.** A finding kept by an earlier run against the same `--out`,
+  but not found again (or not kept again) by the current run, used to stay on
+  disk indefinitely — a manual `git add` of the output directory could then
+  commit it. `gate` now clears exactly that: a finding's own folder (or, for a
+  single finding, its root-level test and exploit files), identified by its
+  own naming and an `exploit_*.json` record inside, never by name alone and
+  never a file of yours. A finding this run reprocesses is left to the
+  existing restore behaviour, so its earlier KEPT test, exploit and
+- **Reusing `gate --out` now says which earlier kept findings this run left
+  alone, and never risks a same-named one.** `gate` never deletes anything
+  from `--out`. A finding kept by an earlier run against the same `--out`,
+  but not found (or not kept) again by the current run, used to just sit
+  there with no explanation. It is now named in a report at the end of the
+  run — "left in place, not re-proven this run" — identified by its own
+  naming and an `exploit_*.json` record inside, never by name alone, so a
+  user's own similarly-named file or folder is never listed as if `gate`
+  had written it. "Not found again" is never treated as "fixed": a flaky
+  planner miss, a NOT TESTED or aborted attempt, or a narrower target scope
+  can all explain it just as well, and the report says so when the scan
+  itself was partial or aborted. A finding this run reprocesses is left to
+  the existing restore behaviour, so its earlier KEPT test, exploit and
+  recordings are still put back untouched when this run's own attempt
+  doesn't keep it, and two different findings landing on the same short id
+  in one run still get distinct folders. (#225)
+- **`gate --workflows` says plainly when it wrote no workflow file.** A
+  workflow wires in the test a kept finding just committed, so a run that
+  keeps nothing — a clean scan, every finding rejected, or only candidates —
+  has never written one; it used to exit without mentioning `--workflows` at
+  all. It now names why, every time. `docs/ci-gating.md`, `docs/cli-reference.md`
+  and `README.md` no longer read as if a workflow is always written. (#225)
 - **A JSON request body is sent as JSON.** The `rest` transport sent its body with no
   content type, so agent servers that require one (FastAPI, for example) rejected every
   attack with a 422 before it reached the agent, and the class read NOT TESTED. When the

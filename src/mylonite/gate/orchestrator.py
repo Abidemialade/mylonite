@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import sys
 from collections.abc import Callable
@@ -219,6 +220,142 @@ def exploit_filename_for(test_filename: str) -> str:
     """
     stem = Path(test_filename).stem
     return f"exploit_{stem.removeprefix('test_')}.json"
+
+
+#: Matches the shape of a short id this gate assigns (see :func:`_finding_id`
+#: / :func:`_finding_ids`): a weakness tag, a dash, six hex digits, and an
+#: optional ``-N`` collision suffix. Matching this shape is never enough on
+#: its own to treat something as the gate's own output -- see
+#: :func:`_our_pattern_id_if_marker`, which is always checked alongside it.
+_FINDING_ID_SHAPE = re.compile(r"^[a-z][a-z0-9]*-[0-9a-f]{6}(?:-\d+)?$")
+
+
+def _our_pattern_id_if_marker(path: Path) -> str | None:
+    """The ``pattern_id`` recorded in ``path``, iff it is a file this gate
+    could actually have written: valid JSON holding the shape of an
+    :class:`ExploitRecord` dump (see :func:`_write_redacted_exploit`). ``None``
+    for anything else -- a missing file, unreadable JSON, or JSON that is not
+    shaped like this gate's own record -- so a user's own ``exploit_*.json``
+    sitting in the gate directory for some other reason is never mistaken for
+    this gate's own marker and named in :func:`_leftover_earlier_findings`.
+    An empty string is a valid (if unusual) answer: the record is genuinely
+    ours, it just has no pattern id recorded.
+    """
+    try:
+        if path.is_symlink() or not path.is_file():
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not (isinstance(data, dict) and "pattern_id" in data and "payload" in data):
+        return None
+    pattern_id = data.get("pattern_id")
+    return pattern_id if isinstance(pattern_id, str) else ""
+
+
+def _leftover_earlier_findings(out_dir: Path, current_ids: set[str]) -> list[tuple[str, str]]:
+    """Every finding id under ``out_dir`` this gate itself kept on an earlier
+    run against this ``--out``, that the current run does not touch at all
+    (#225) -- reported, never removed. ``gate`` never deletes anything from
+    ``--out``: pruning what an earlier run wrote needs a manifest of what
+    Mylonite itself wrote, which is a separate, larger change (tracked
+    outside this one). "Not touched by the current run" is also not evidence
+    that the earlier finding is gone -- a flaky miss, a NOT TESTED or aborted
+    attempt, or a target file that now declares a narrower
+    ``weakness_classes`` can all make a real, still-live finding vanish from
+    one run's own ``current_ids`` without it having been fixed at all.
+
+    An id the current run DOES reprocess is never reported here, kept or not:
+    :func:`_snapshot_earlier` / :func:`_put_back_earlier` already restore
+    that finding's earlier KEPT test byte for byte if this run's own attempt
+    does not keep it, so there is nothing stale to report for it.
+
+    Returns ``(finding_id, pattern_id)`` pairs, sorted by id. Matched only by
+    BOTH the gate's own naming shape (:data:`_FINDING_ID_SHAPE`) AND one of
+    its own marker files -- a genuine ``exploit_*.json`` record
+    (:func:`_our_pattern_id_if_marker`), never a directory or file recognised
+    by name alone, so a user's own similarly-named file or folder is never
+    listed as if this gate had written it. A symlink or junction — to a
+    finding folder, or to a loose ``test_<id>.py`` — is always skipped: this
+    function only ever reads, never writes or removes, but a link into
+    somewhere unexpected is never worth following just to decide what to
+    print.
+    """
+    if not out_dir.is_dir():
+        return []
+    leftovers: dict[str, str] = {}
+    for child in sorted(out_dir.iterdir()):
+        if (
+            child.name in current_ids
+            or child.is_symlink()
+            or not _FINDING_ID_SHAPE.match(child.name)
+        ):
+            continue
+        try:
+            if not child.is_dir():
+                continue
+        except OSError:
+            continue
+        for exploit_path in sorted(child.glob("exploit_*.json")):
+            pattern_id = _our_pattern_id_if_marker(exploit_path)
+            if pattern_id is not None:
+                leftovers[child.name] = pattern_id
+                break
+    for test_path in sorted(out_dir.glob("test_*.py")):
+        if test_path.is_symlink():
+            continue
+        finding_id = test_path.stem.removeprefix("test_")
+        if finding_id in current_ids or finding_id in leftovers:
+            continue
+        if not _FINDING_ID_SHAPE.match(finding_id):
+            continue
+        exploit_path = out_dir / exploit_filename_for(test_path.name)
+        pattern_id = _our_pattern_id_if_marker(exploit_path)
+        if pattern_id is not None:
+            leftovers[finding_id] = pattern_id
+    return sorted(leftovers.items())
+
+
+def _partial_scan_reason(outcome: ScanOutcome) -> str | None:
+    """Why this run's own scan may not have reached every earlier finding, or
+    ``None`` when it ran to completion with full coverage -- appended to
+    :func:`_report_leftover_earlier_findings`'s note so "not re-proven" is
+    never read as "fixed" when the scan itself didn't get the chance to
+    re-check.
+    """
+    if outcome.abort is not None:
+        return f"this run's scan aborted ({outcome.abort.value}) before finishing"
+    if outcome.coverage is not Coverage.EXERCISED:
+        return f"this run's scan coverage was partial ({outcome.not_tested} attempt(s) not tested)"
+    return None
+
+
+def _report_leftover_earlier_findings(
+    out_dir: Path, current_ids: set[str], outcome: ScanOutcome
+) -> None:
+    """Print, never remove, every earlier kept finding this run did not
+    touch (#225). ``gate`` never deletes anything from ``--out`` -- see
+    :func:`_leftover_earlier_findings` for why "not found again" is not
+    evidence of staleness.
+    """
+    leftovers = _leftover_earlier_findings(out_dir, current_ids)
+    if not leftovers:
+        return
+    lines = [
+        f"Mylonite gate: {len(leftovers)} earlier kept finding(s) under {out_dir} were "
+        "left in place, not re-proven this run:"
+    ]
+    for finding_id, pattern_id in leftovers:
+        label = f" ({pattern_id})" if pattern_id else ""
+        lines.append(f"  {finding_id}{label}")
+    reason = _partial_scan_reason(outcome)
+    if reason is not None:
+        lines.append(f"  ({reason} -- this run may simply not have reached it yet)")
+    lines.append(
+        "Delete a leftover's own folder (or its root test_<id>.py/exploit_<id>.json) "
+        "yourself once you've confirmed the weakness is fixed."
+    )
+    echo("\n".join(lines))
 
 
 #: Windows' MAX_PATH is 260 characters including the terminating NUL, so a
@@ -711,7 +848,22 @@ def run_gate(
     target_context: Any | None = None,
     budget_hint_text: str | None = None,
     validation_cost_hint: str | None = None,
+    workflows: bool = False,
 ) -> GateResult:
+    def _note_no_workflows_written() -> None:
+        # `--workflows` only ever renders .github/workflows/* from inside
+        # open_pr_fn (gate/wiring.py), which this function calls only once
+        # something was KEPT (see the bottom of this function) -- every
+        # return point above that call skips write_workflows entirely. #225:
+        # that used to be silent; every such return now says so plainly,
+        # and only when the operator actually asked for a workflow this run.
+        if workflows:
+            echo(
+                "Mylonite gate: --workflows was given, but nothing was kept this run, so "
+                "no CI workflow file was written -- a workflow only wires in a kept "
+                "finding's test, and this run kept none."
+            )
+
     bundle = scan_fn()
     exploits = bundle.exploits
     if not exploits:
@@ -725,8 +877,10 @@ def run_gate(
         # before stopping is gated on that finding.
         if not bundle.outcome.trustworthy_clean:
             _echo_nonempty(_abort_message(bundle.outcome, budget_hint_text))
+            _note_no_workflows_written()
             return GateResult(exit_code=bundle.outcome.exit_code, opened_pr=False, kept=None)
         echo("Mylonite gate: no exploit found — nothing to gate.")
+        _note_no_workflows_written()
         return GateResult(exit_code=EXIT_SUCCESS, opened_pr=False, kept=None)
 
     # Deterministic order: every finding is gated, in the same order every
@@ -740,11 +894,21 @@ def run_gate(
     path_problem = gate_path_problem(out_dir, finding_ids, multi=multi)
     if path_problem is not None:
         echo(f"{path_problem} The scan ran; nothing was generated or validated.")
+        _note_no_workflows_written()
         return GateResult(exit_code=EXIT_CONFIG, opened_pr=False, kept=None)
     if multi:
         n = len(sorted_exploits)
         cost = f" — {validation_cost_hint}" if validation_cost_hint else ""
         echo(f"{n} findings: validating each (about {n}x the single-finding validation cost{cost})")
+
+    # A reused --out can still hold this gate's own KEPT output from an
+    # earlier run, for a finding id this run no longer finds at all. #225:
+    # report it, never remove it -- "not found again" is not evidence the
+    # finding is fixed (a flaky miss, a NOT TESTED/aborted attempt, or a
+    # narrower target scope can all do the same). An id this run DOES
+    # process is never reported here; the per-finding snapshot/restore below
+    # already owns that one.
+    _report_leftover_earlier_findings(out_dir, set(finding_ids), bundle.outcome)
 
     # With multiple findings, give each its own subdir so tests don't clobber
     # each other; a single finding keeps the exact dir the operator chose —
@@ -806,12 +970,14 @@ def run_gate(
             result.exit_code = bundle.outcome.exit_code
         elif bundle.outcome.operator_message:
             echo(bundle.outcome.operator_message)
+        if result.kept is not True:
+            _note_no_workflows_written()
         return result
 
     if not kept and candidates:
         echo(
             f"Mylonite gate: no proven finding to gate - {len(candidates)} candidate(s), "
-            "nothing written as a gate test, no workflows written, no PR opened."
+            "nothing written as a gate test, no PR opened."
         )
         return _finish(
             GateResult(

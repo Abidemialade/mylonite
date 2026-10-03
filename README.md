@@ -284,7 +284,8 @@ mylonite gate --target-file app.yaml --authorize my-app --open-pr    # ...and op
 files under `.mylonite/gate/` — the test, the weakness record, the confirmation report — and
 prints the exact `git` and `gh` commands so you can commit and open the PR yourself. Add
 `--open-pr` to have it create the branch, commit and open the PR; add `--workflows` to also
-write two CI templates (a cheap per-PR gate and a nightly discovery run).
+write two CI templates (a cheap per-PR gate and a nightly discovery run) for whatever this
+run kept — a run that keeps nothing writes no workflow file, and says so.
 
 The pull request carries the finding, its OWASP/ASI/ATLAS/NIST tags, the supporting
 evidence, and a recommended fix that names the actual tool and argument the attack used.

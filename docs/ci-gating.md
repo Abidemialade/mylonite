@@ -275,9 +275,31 @@ full pattern id, keep replaying unchanged. When you upgrade, re-run `gate` with
 to the new version, before committing new tests: an older pin cannot replay
 the new recordings, so those tests would fail in CI on their first run. `gate`
 prints a warning naming the workflow file when it finds an older pin. A new
-run into the same `--out` writes the short-id layout beside the old folders
-and leaves them alone, so `pytest .mylonite/gate/` then runs both; delete the
-old folders once the new tests are committed.
+run into the same `--out` writes the short-id layout beside the old (full
+pattern id) folders and leaves them alone, so `pytest .mylonite/gate/` then
+runs both; delete the old folders once the new tests are committed.
+
+**Reusing `--out` for a finding this run keeps again is safe: nothing is lost.**
+If the same finding id does not keep this time, its earlier KEPT test, exploit
+and recordings are put back exactly as they were, never overwritten and never
+left half-rewritten. If a different finding happens to land on the same short
+id in one run, the second one gets a numbered folder (`w2-1a2b3c-2`) instead of
+colliding with the first.
+
+**`gate` never deletes anything from `--out`, including a finding this run
+never finds at all.** "Not found again" is not evidence a finding is fixed —
+a flaky planner miss, a NOT TESTED or aborted attempt, or a target file that
+now declares a narrower `weakness_classes` can all make a real, still-live
+finding vanish from one run's own result without the weakness being gone.
+Instead, each earlier kept finding this run did not touch — identified by its
+own naming and an `exploit_*.json` record inside, never a file of yours that
+merely sits nearby — is named in a report at the end of the run: "left in
+place, not re-proven this run." When the scan itself was partial or aborted,
+the report says so, since that run may simply not have reached the finding
+yet. Delete a leftover's folder (or, for a single finding, its root-level
+test and exploit files) yourself once you've confirmed the weakness is
+fixed. A manual `git add .mylonite/gate` can still pick up a leftover you
+haven't deleted — stage with the printed command instead (see below).
 
 ### Windows path length
 
@@ -317,9 +339,14 @@ Two flags opt in to the rest, independently:
   output now lives on that branch, so it leaves your working tree; run
   `git checkout <gate branch>` to look at it.
 - **`--workflows`** scaffolds the two `.github/workflows/` templates described
-  below — this writes to disk whether or not `--open-pr` is also set. Pass
-  `--workflows` alone and the printed summary lists the workflow file(s) it
-  wrote, rather than claiming nothing outside the output directory changed.
+  below — this writes to disk whether or not `--open-pr` is also set, **but
+  only once this run has kept at least one finding.** A workflow wires in the
+  test `gate` just committed, so a run that keeps nothing (a clean scan, every
+  finding rejected, or only STABLE, NOT PROVEN candidates) writes no workflow
+  file at all; the summary says so plainly, naming why, instead of exiting as
+  if nothing had been asked. When something is kept, the printed summary lists
+  the workflow file(s) it wrote, rather than claiming nothing outside the
+  output directory changed.
 
 Both are off by default. Writing into someone's repository is an action you ask
 for, not one you opt out of.
