@@ -245,6 +245,65 @@ def test_open_pr_fn_no_target_file_no_secrets_notice(tmp_path: Path, monkeypatch
 
 
 # ---------------------------------------------------------------------------
+# The local/multi-key-provider refusal is a preflight: it fires in
+# make_open_pr_fn itself, before run_gate's scan/generate/validate ever
+# starts -- not only at the very end, inside open_pr_fn, after the whole
+# paid run already happened.
+# ---------------------------------------------------------------------------
+
+
+def test_make_open_pr_fn_refuses_a_local_model_before_open_pr_fn_is_even_called(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    import typer
+
+    from mylonite.exit_codes import EXIT_PR_FAILED
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(typer.Exit) as excinfo:
+        make_open_pr_fn(
+            runs_on="ubuntu-latest",
+            workflows=True,
+            target_file=None,
+            pr_mod=_FakePrMod(),
+            model="ollama_chat/llama3.2:3b",
+        )
+    assert excinfo.value.exit_code == EXIT_PR_FAILED
+
+
+def test_make_open_pr_fn_refuses_a_multi_key_provider_before_open_pr_fn_is_even_called(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    import typer
+
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(typer.Exit):
+        make_open_pr_fn(
+            runs_on="ubuntu-latest",
+            workflows=True,
+            target_file=None,
+            pr_mod=_FakePrMod(),
+            model="bedrock/anthropic.claude-haiku",
+        )
+
+
+def test_make_open_pr_fn_does_not_refuse_a_bad_model_when_workflows_is_false(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """The preflight only applies when `workflows` is true -- a plain
+    `--open-pr` (no `--workflows`) never scaffolds anything, so there is
+    nothing for a local/multi-key model to make unscaffoldable."""
+    monkeypatch.chdir(tmp_path)
+    make_open_pr_fn(
+        runs_on="ubuntu-latest",
+        workflows=False,
+        target_file=None,
+        pr_mod=_FakePrMod(),
+        model="ollama_chat/llama3.2:3b",
+    )
+
+
+# ---------------------------------------------------------------------------
 # #224: a bundled MCP target (no --target-file, no file of its own) can't
 # publish a workflow/PR whose emitted test has no target.yaml to load.
 # ---------------------------------------------------------------------------
