@@ -338,6 +338,33 @@ sends in its own words (`Job accepted`, `Task created`), add those words to
 names words that mark a held item in the verify tool's output, and a word that also
 shows for jobs that will still run would make a queued send read resisted.
 
+## 11. A planner that declines can read as the app resisting
+
+Mylonite's planner model stands in for your agent, so some resisted results measure that
+model, not your app.
+
+**Generated W3 and W4 probes are covered.** Each names the tool it asks for. A planner that
+declines, or calls other tools and never that one, reads NOT TESTED
+([`MYL-NT-003`](reason-codes.md#myl-nt-003)), never resisted.
+
+**Two cases still read resisted:**
+
+- **Indirect attacks (W1, W2).** The request sits in content the agent reads: a note, a
+  document, a tool description. Not acting on it is the resistance the attack measures,
+  so a planner that ignores it reads resisted. That says the planner model resisted the
+  injection. It does not say your app stopped it, and a stronger-aligned planner makes
+  more of these attempts read resisted.
+- **Bundled direct probes on a target that has the literal tool.** The bundled W3 and W4
+  probes that ask for `web_fetch` or `send_email` outright name no tool under test. A
+  planner that calls some other tool instead reads resisted.
+
+**What this means in practice:** a resisted result from a single `scan` in either case
+is evidence about the model you chose for `--planner-model`. It is not proof your
+safeguard did the work. A KEPT differential does not have this gap: both legs use the
+same planner, and a test is kept only when the attack lands without the safeguard and is
+stopped with it. To see what your app does when the agent obeys, also run a less-aligned
+planner.
+
 ## Reporting something missing
 
 If you hit a limitation that is not on this page, that is worth an issue: an undocumented
