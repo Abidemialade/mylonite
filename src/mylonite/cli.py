@@ -1780,7 +1780,15 @@ def _validate_custom(
     # does not require the deliberately-vulnerable mcp_kitchen_sink demo package
     # to be installed just to check "is my provider reachable".
     timeout_s, why = iteration_timeout_s or _DEFAULT_ITERATION_TIMEOUT_S, _PreflightFailure()
-    reachable = _provider_preflight_direct(provider, model, timeout_s=timeout_s, failure=why)
+    reachable = _provider_preflight_direct(
+        provider,
+        planner_model or model,
+        customiser_model or model,
+        judge_model or model,
+        timeout_s=timeout_s,
+        failure=why,
+        api_base=policy.api_base if policy is not None else None,
+    )
     _exit_if_provider_unreachable(reachable, why, provider=provider, model=model)
 
     target_registry.clear_runtime_targets()
@@ -1920,13 +1928,22 @@ def _locate_generated(target: Path) -> tuple[Path, Path]:
 def _exit_if_provider_unreachable(
     reachable: bool, failure: _PreflightFailure | None = None, *, provider: str, model: str
 ) -> None:
-    """Shared by both `validate` branches so this message can't drift (#191 for rate limits)."""
+    """Shared by both `validate` branches so this message can't drift (#191 for rate limits).
+
+    V2: names the role model that actually failed (``failure.model``, e.g. the
+    judge's model when only the judge is unreachable) rather than always the
+    run's primary ``--model``, falling back to ``model`` when the preflight
+    didn't record one (an older caller, or a stub in a test).
+    """
     if reachable:
         return
-    if (specific := preflight_failure_message(failure, provider=provider, model=model)) is not None:
+    failing_model = (failure.model if failure is not None else None) or model
+    if (
+        specific := preflight_failure_message(failure, provider=provider, model=failing_model)
+    ) is not None:
         echo_err(specific)
         raise typer.Exit(code=EXIT_PROVIDER)
-    echo_err(unreachable_hint(provider, model) + "\n" + _LOCAL_MODEL_HINT)
+    echo_err(unreachable_hint(provider, failing_model) + "\n" + _LOCAL_MODEL_HINT)
     raise typer.Exit(code=EXIT_PROVIDER)
 
 
@@ -2232,7 +2249,7 @@ def validate(
     else:
         from mylonite.plugins._reference.reference_validator import workload_message
 
-        echo_err(workload_message(iterations, fast=fast))
+        echo_err(workload_message(iterations, model=effective_model, fast=fast))
         # T14/H3: cheap, no-network credential-presence pre-flight before the
         # real live _provider_preflight call just below (no authorize gate on
         # this branch -- the bundled reference twins are safe-by-construction).
@@ -2245,14 +2262,20 @@ def validate(
         )
         # Fail fast on an unreachable provider with a distinct exit 4 — otherwise
         # the full loop would just report a misleading non-discriminating result.
+        # V1/T7: one tiny completion per role model, scoped to the run's own
+        # api_base -- no longer a full reference scan, so this no longer
+        # touches mcp_kitchen_sink at all (the earlier import above is the
+        # only place that can raise it missing).
         why = _PreflightFailure()
-        try:
-            reachable = _provider_preflight(
-                effective_provider, effective_model, timeout_s=iteration_timeout, failure=why
-            )
-        except (ModuleNotFoundError, ImportError) as exc:
-            _exit_if_missing_kitchen_sink(exc)
-            raise
+        reachable = _provider_preflight(
+            effective_provider,
+            effective_planner_model,
+            effective_customiser_model,
+            effective_judge_model,
+            timeout_s=iteration_timeout,
+            failure=why,
+            api_base=effective_policy.api_base,
+        )
         _exit_if_provider_unreachable(
             reachable, why, provider=effective_provider, model=effective_model
         )
