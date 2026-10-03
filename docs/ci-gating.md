@@ -311,7 +311,11 @@ recommended default.
 ## Adopting it in GitHub CI
 
 Add one secret — `MYLONITE_API_KEY` (your provider key) — and the two
-scaffolded workflows. If your target file has secret-shaped fields (a header,
+scaffolded workflows. Both map that one secret to the credential variable
+your chosen model's provider actually needs (`ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, …), computed when `gate --workflows` wrote them — see
+[Provider keys](#provider-keys) below for what that means if you later
+switch providers. If your target file has secret-shaped fields (a header,
 an `env:` entry), add one repository secret per `${MYLONITE_TARGET_...}`
 placeholder too — `gate` names the exact variables in its console output and
 `PR_BODY.md` the first time it writes a redacted `target.yaml`. The
@@ -358,6 +362,34 @@ Outside these workflows (a local run, another CI system), an empty
   [target.yaml](target-file.md)); the workflow passes it to
   `mylonite gate --authorize` through an environment variable, so a value
   holding a quote or `;` stays one argument.
+
+**Both workflows are hardened the same way every workflow in this
+repository is.** Every action is pinned by commit SHA, with the tag as a
+comment (a moved tag would run new code in your CI the next time the job
+fires). Each job sets `concurrency:` — the per-PR gate cancels a
+superseded run on the same ref, the nightly discovery job serializes
+instead so one run never races a PR it is in the middle of opening — and a
+`timeout-minutes:` so a hung provider or MCP server fails the job instead of
+riding your CI platform's much larger default cap. Each job also sets
+`MYLONITE_REDRIVE_ATTEMPTS` explicitly rather than leaving it to the
+default: `1` on `mylonite-gate.yml` (the per-PR job already explained
+above spends real money on every PR, so it takes the cheaper, less
+conclusive bound) and `3` on `mylonite-discovery.yml` (the nightly job,
+where the fuller signal is worth the extra re-drives). See [What a live
+gate costs](#what-a-live-gate-costs) for the trade-off either number makes.
+
+**If your target launches with `npx`/`node` or `uvx`/`uv`,** the scaffolded
+workflow adds a Node or `uv` setup step automatically — read from the
+target file's own `command:` at the time `gate --workflows` ran. A hosted
+runner has neither preinstalled the way it has Python, so without this the
+job would fail to launch your target with no clearer message than "command
+not found".
+
+**A bundled MCP target (`mcp:<family>[:scope]`, no `--target-file`) refuses
+`--open-pr`/`--workflows` outright.** It has no `target.yaml` of its own, so
+the committed test's `target.yaml` load would fail every time CI re-drives
+it. Run `mylonite scan --scaffold` first to write one, then gate with
+`--target-file <path>` instead.
 
 **No default model, so both workflows pin the one `gate --workflows` used —
 but what that controls is NOT the same in each.** There is no default
@@ -444,8 +476,15 @@ once the precondition is fixed.
     target-file: .mylonite/gate/target.yaml
     authorize: ${{ vars.MYLONITE_AUTHORIZE }}   # your target's scope, or family if no scope
     model: anthropic/claude-haiku-4-5           # no default -- pick one: see "Choose a model"
+    api-key: ${{ secrets.MYLONITE_API_KEY }}    # mapped automatically to the model's provider
     open-pr: "true"
+    # llm-headers: ${{ secrets.MYLONITE_LLM_HEADERS }}   # optional
 ```
+
+The action also configures a git identity before it calls `mylonite gate
+--open-pr` (a hosted runner has none by default, so the commit would
+otherwise fail), and sets up Node or installs `uv` on its own when your
+target file's `command:` needs one.
 
 **The tag is the release.** The action lives in this repository
 (`gate-action/action.yml`), so every Mylonite release tag `vX.Y.Z` is also an
@@ -517,6 +556,10 @@ MYLONITE_LIVE_TARGET=1 MYLONITE_REDRIVE_ATTEMPTS=1 pytest .mylonite/gate
 MYLONITE_LIVE_TARGET=1 pytest .mylonite/gate
 ```
 
+The scaffolded `mylonite-gate.yml`/`mylonite-discovery.yml` already set this
+for you — `1` on the per-PR job, `3` on the nightly one — so you only need
+the commands above on another CI system or a local override.
+
 One attempt proves less: an attack that lands 40% of the time resists a single re-drive
 60% of the time. A test that passes `attempts=` itself keeps that number whatever the
 variable says.
@@ -528,11 +571,49 @@ SARIF 2.1.0 if your platform ingests it.
 
 ### Provider keys
 
-The scaffolded workflows map the `MYLONITE_API_KEY` secret to
-`ANTHROPIC_API_KEY` (Anthropic is the default provider). If you run a different
-provider, set that provider's key env var in the workflow instead (e.g.
-`OPENAI_API_KEY`) and pass `--model` with a `provider/model` prefix (e.g.
-`--model openai/gpt-4o`) — Mylonite routes through LiteLLM.
+There is no default provider. The scaffolded workflows map the one
+`MYLONITE_API_KEY` secret to the credential variable the model `gate
+--workflows` resolved actually needs — `ANTHROPIC_API_KEY` for an
+Anthropic model, `OPENAI_API_KEY` for an OpenAI one, and so on, read from
+the approved-provider registry at the time the workflow was written, never
+hardcoded to one provider.
+
+**That mapping is baked in, not re-computed at CI time.** Setting a
+repository `MYLONITE_MODEL` variable to a model from a *different*
+provider (see above) changes which model the *discovery* workflow drives,
+but **not** which credential variable it exports — the workflow still only
+ever sets the one baked in when it was scaffolded. Switching providers
+needs a fresh `gate --workflows` run (with the new model) to re-bake both
+the model fallback and the key mapping together; a repository variable
+alone is enough only for staying on the same provider's other models.
+
+A model whose provider needs more than one credential variable (Bedrock's
+access-key pair) or none that Mylonite's registry knows about makes `gate
+--workflows` refuse to scaffold at all, naming why — a single
+`MYLONITE_API_KEY` secret can't express either case. Write that workflow by
+hand instead. The same holds for a **local** model (Ollama, vLLM): there is
+no key to map, and a hosted GitHub runner can't reach it regardless, so
+scaffolding would only produce CI that can never pass.
+
+### Supply-chain pinning
+
+Both the scaffolded workflows and `gate-action` cap and pin their LiteLLM
+install: `pyproject.toml` bounds the floor-only range Mylonite itself
+depends on, and a `mylonite-constraints.txt` (vendored next to the
+templates and the action) pins the exact tested release the install step
+applies with `pip install -c mylonite-constraints.txt`. This is an exact
+pin, not a hash lock (`--require-hashes` needs a network resolve across
+every package in the tree) — raise the pin alongside `pyproject.toml`'s own
+floor when you upgrade deliberately, not by letting the range drift.
+
+### Optional: extra LLM request headers
+
+Set a `MYLONITE_LLM_HEADERS` repository secret (`NAME=VALUE` pairs,
+comma- or newline-separated — e.g. a provider workspace id your account
+needs on every request) and both scaffolded workflows, and the reusable
+Action's `llm-headers` input, pass it straight through as an environment
+variable, never through a command-line flag. Leave it unset if you don't
+need one.
 
 ### Surfacing findings in the Security tab
 

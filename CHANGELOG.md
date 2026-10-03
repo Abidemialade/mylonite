@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The scaffolded gate workflows and `gate-action` now map your actual
+  provider's credential, not always Anthropic's.** `gate --workflows` used
+  to always render `ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_API_KEY }}`, so
+  an OpenAI, Gemini or other non-Anthropic model's gate job failed in CI
+  with no useful message. Both templates now read the credential variable
+  for the model's own provider from the approved-provider registry, and
+  refuse to scaffold for a local model (Ollama, vLLM — no key, and a hosted
+  runner can't reach it) or a provider needing more than one credential
+  variable (Bedrock's keypair). `gate-action` gains a matching `api-key`
+  input, mapped the same way at run time, plus a git-identity step (a
+  hosted runner has none by default, so `--open-pr`'s commit used to fail
+  without it) and an optional `llm-headers` input for extra LLM request
+  headers. **If you have committed workflows from an earlier release,
+  re-run `mylonite gate --workflows` to pick this up** — the old files keep
+  working, but still hardcode Anthropic's key variable.
+- **A bundled MCP target (`mcp:<family>[:scope]`, no `--target-file`)
+  refuses `--open-pr`/`--workflows` instead of publishing a workflow that
+  can never pass.** It has no `target.yaml` of its own, so the emitted
+  test's load of one failed every time CI re-drove it. `gate` now says so
+  up front and points at `mylonite scan --scaffold`.
+- **The scaffolded workflows and `gate-action` are hardened the way this
+  repository's own CI already is.** Actions are pinned by commit SHA
+  (tag as a comment), each job sets `concurrency:` and `timeout-minutes:`,
+  and each sets `MYLONITE_REDRIVE_ATTEMPTS` explicitly (`1` on the per-PR
+  gate, `3` on nightly discovery) rather than leaving the default
+  unstated. A target launched with `npx`/`node` or `uvx`/`uv` now gets a
+  matching runtime-setup step, read from the target file's own `command:` —
+  a hosted runner has neither preinstalled the way it has Python.
+- **LiteLLM's install range is capped, with an exact-pin constraints file.**
+  `pyproject.toml`'s floor-only `litellm` dependency let a bad or
+  compromised release (LiteLLM had a real one, 24 Mar 2026) reach every
+  install the day it published; it is now capped, and the scaffolded
+  workflows and `gate-action` additionally pin to one exact, verified
+  release via a vendored constraints file.
+
 ### Changed
 
 - **A test `generate` writes from a scan now says it is unproven.** Its first

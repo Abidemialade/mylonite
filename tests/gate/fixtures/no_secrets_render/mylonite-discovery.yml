@@ -28,6 +28,9 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_API_KEY }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MYLONITE_REDRIVE_ATTEMPTS: "3"
+      # Optional: extra LLM request headers (e.g. a workspace id), as
+      # NAME=VALUE pairs. Empty when the repository secret isn't set.
+      MYLONITE_LLM_HEADERS: ${{ secrets.MYLONITE_LLM_HEADERS }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
