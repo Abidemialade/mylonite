@@ -24,6 +24,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   same target (the `target.yaml` beside the report, still there and unchanged
   since, and any `--target-file` matching it). `gate` is unchanged. The new
   flag changed the command-tree snapshot.
+- **`scan --weakness-class` means one thing on every target: only the named
+  classes run.** It used to filter a `reference:*`/bundled `mcp:<family>`
+  target's seeds but *add* to a custom target's declared `weakness_classes`
+  (`--target-file` or inline `mcp:custom`) — the same flag widening one scan
+  and narrowing another. It now filters a custom target's declared classes
+  the same way: naming a class the target also declares narrows to the
+  overlap, and naming only classes it doesn't declare matches nothing and
+  refuses with one line before any LLM call (`MYL-PRE-006`), instead of
+  running every declared class plus whatever the flag added. If your target
+  file already lists `weakness_classes` and you pass `--weakness-class` for a
+  class outside that list, check the list first — that scan now runs a
+  narrower set than before. A target file with no `weakness_classes` declared
+  at all is unaffected: the flag still declares them, as it already did for
+  inline `mcp:custom` targets.
 
 - **`validate --iteration-timeout` now bounds the reference differential too.**
   It used to reach only the provider check and custom targets, so a slow
