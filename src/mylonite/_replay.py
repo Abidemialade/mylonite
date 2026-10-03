@@ -244,6 +244,35 @@ def _resolve_key_version(
     return CACHE_KEY_VERSION
 
 
+#: How many leading hex digits of a cache key name a NEWLY recorded fixture
+#: file. The full 64-digit SHA-256 made each name 69 characters, which is what
+#: pushed a committed gate directory past Windows' 260-character path limit
+#: from a moderately deep checkout. 12 hex digits is 48 bits: a collision
+#: inside one fixture directory (tens of files) is not a practical concern:
+#: record mode refuses to overwrite a different response, and a short-named
+#: recording stores its full key (:data:`_KEY_FIELD`), which replay checks.
+#:
+#: Lookup tries the exact full 64-digit name first, then the short one, so
+#: every directory recorded before this change keeps replaying unchanged.
+FIXTURE_NAME_LENGTH = 12
+
+
+#: Field a short-named recording carries with its full cache key, so a replay
+#: whose key merely shares the 12-digit prefix is a miss, never another
+#: call's answer. Full-length recordings are named by the key itself.
+_KEY_FIELD = "_key"
+
+
+def _fixture_candidates(
+    fixtures_dir: Path | Traversable, key: str
+) -> tuple[Path | Traversable, Path | Traversable]:
+    """The short (current) and full-length (legacy) file for ``key``."""
+    return (
+        fixtures_dir / f"{key[:FIXTURE_NAME_LENGTH]}.json",
+        fixtures_dir / f"{key}.json",
+    )
+
+
 def _response_from_dict(data: dict[str, Any]) -> SimpleNamespace:
     """Rebuild a minimal LiteLLM-shaped response object from JSON.
 
@@ -429,10 +458,26 @@ class LiteLLMRecorder:
             if self._key_version >= 2
             else _stable_key_v1(model, msgs)
         )
-        path = self.fixtures_dir / f"{key}.json"
+        short, full = _fixture_candidates(self.fixtures_dir, key)
+        # An existing full-length file (a directory recorded before short names)
+        # wins in both modes: replay reads it, and record compares against it
+        # instead of writing a second copy under the short name.
+        path = full if full.is_file() else short
         if self.mode == "replay":
+            if path is short and short.is_file() and not self._short_name_matches(short, key):
+                path = full  # another key's recording under the same prefix: a miss
             return self._load_fixture(key=key, model=model, path=path)
-        return await self._record(model=model, messages=messages, path=path, kwargs=kwargs)
+        return await self._record(model=model, messages=messages, path=path, kwargs=kwargs, key=key)
+
+    @staticmethod
+    def _short_name_matches(path: Path | Traversable, key: str) -> bool:
+        """``False`` only when a short-named recording names a different key."""
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return True  # let _load_fixture report the file itself
+        stored = data.get(_KEY_FIELD) if isinstance(data, dict) else None
+        return stored is None or stored == key
 
     def _load_fixture(self, *, key: str, model: str, path: Path | Traversable) -> SimpleNamespace:
         if not path.is_file():
@@ -462,6 +507,7 @@ class LiteLLMRecorder:
         messages: Sequence[Any],
         path: Path | Traversable,
         kwargs: dict[str, Any],
+        key: str,
     ) -> Any:
         # Record mode — defer to litellm.acompletion for the real call. The
         # import stays lazy so replay mode never needs litellm at call time.
@@ -472,7 +518,12 @@ class LiteLLMRecorder:
         import litellm
 
         real = await litellm.acompletion(model=model, messages=list(messages), **kwargs)
-        serialised = json.dumps(_dictify_response(real), indent=2, sort_keys=True) + "\n"
+        recorded = _dictify_response(real)
+        if path.name != f"{key}.json":
+            # A short name drops most of the key; store it so replay can tell
+            # this recording from another key's with the same prefix.
+            recorded[_KEY_FIELD] = key
+        serialised = json.dumps(recorded, indent=2, sort_keys=True) + "\n"
         if not isinstance(path, Path):
             # __post_init__ enforces a real Path in record mode (mkdir/write are
             # Path-only), so this should be unreachable — but never trust that an
@@ -496,6 +547,7 @@ class LiteLLMRecorder:
 __all__ = [
     "CACHE_KEY_VERSION",
     "CACHE_KEY_VERSION_FIELD",
+    "FIXTURE_NAME_LENGTH",
     "GENERIC_RERECORD_HINT",
     "CorruptFixtureError",
     "FixtureConflictError",

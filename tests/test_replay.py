@@ -30,6 +30,7 @@ import pytest
 
 from mylonite._replay import (
     CACHE_KEY_VERSION_FIELD,
+    FIXTURE_NAME_LENGTH,
     CorruptFixtureError,
     FixtureConflictError,
     LiteLLMRecorder,
@@ -167,7 +168,9 @@ async def test_record_mode_forwards_tools_kwarg(
     # fix: recording under v1 here would silently drop the tool schema from
     # cache identity.
     key = _stable_key_v2("claude-x", _MSGS, tools=tools)
-    written = json.loads((tmp_path / f"{key}.json").read_text(encoding="utf-8"))
+    written = json.loads(
+        (tmp_path / f"{key[:FIXTURE_NAME_LENGTH]}.json").read_text(encoding="utf-8")
+    )
     assert written["choices"][0]["message"]["content"] == "ok"
 
 
@@ -469,3 +472,99 @@ async def test_v2_recording_with_tools_replays_when_sidecar_declares_v2(
     assert response.choices[0].message.content == ""
     assert replay.cache_hits == 1
     assert replay.cache_misses == 0
+
+
+# --- short fixture file names ------------------------------------------------
+#
+# A recorded fixture is named after the first FIXTURE_NAME_LENGTH hex digits of
+# its key, not all 64, so a committed gate directory fits under Windows' path
+# limit from a deeper checkout. Directories recorded before keep their full
+# names and still replay.
+
+
+@pytest.mark.asyncio
+async def test_record_mode_writes_the_short_fixture_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_acompletion(**_: Any) -> SimpleNamespace:
+        return _fake_response("ok")
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
+    await recorder(model="claude-x", messages=_MSGS)
+
+    key = _stable_key_v2("claude-x", _MSGS)
+    assert [p.name for p in tmp_path.glob("*.json")] == [f"{key[:FIXTURE_NAME_LENGTH]}.json"]
+    assert FIXTURE_NAME_LENGTH == 12
+
+
+@pytest.mark.asyncio
+async def test_replay_reads_a_short_fixture_name(tmp_path: Path) -> None:
+    key = _stable_key_v2("claude-x", _MSGS)
+    (tmp_path / f"{key[:FIXTURE_NAME_LENGTH]}.json").write_text(
+        _fixture_payload("short"), encoding="utf-8"
+    )
+    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    response = await replay(model="claude-x", messages=_MSGS)
+    assert response.choices[0].message.content == "short"
+    assert replay.cache_hits == 1
+
+
+@pytest.mark.asyncio
+async def test_replay_still_reads_a_full_length_fixture_name(tmp_path: Path) -> None:
+    _write_fixture(tmp_path, "claude-x", _MSGS, content="legacy")
+    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    response = await replay(model="claude-x", messages=_MSGS)
+    assert response.choices[0].message.content == "legacy"
+    assert replay.cache_hits == 1
+
+
+@pytest.mark.asyncio
+async def test_record_into_a_full_length_directory_keeps_the_full_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_acompletion(**_: Any) -> SimpleNamespace:
+        return _fake_response("same")
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    await LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")(model="claude-x", messages=_MSGS)
+    # Turn the recording into one made before short names existed.
+    # Those were named by the full key and carried no `_key` field.
+    key = _stable_key_v2("claude-x", _MSGS)
+    short = tmp_path / f"{key[:FIXTURE_NAME_LENGTH]}.json"
+    data = json.loads(short.read_text(encoding="utf-8"))
+    assert data.pop("_key") == key
+    (tmp_path / f"{key}.json").write_text(
+        json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    short.unlink()
+
+    await LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")(model="claude-x", messages=_MSGS)
+    assert [p.name for p in tmp_path.glob("*.json")] == [f"{key}.json"]
+
+
+@pytest.mark.asyncio
+async def test_missing_fixture_error_names_the_short_path(tmp_path: Path) -> None:
+    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    with pytest.raises(MissingFixtureError) as excinfo:
+        await replay(model="claude-x", messages=_MSGS)
+    key = _stable_key_v2("claude-x", _MSGS)
+    assert f"{key[:FIXTURE_NAME_LENGTH]}.json" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_a_short_name_holding_another_keys_recording_is_a_miss(tmp_path: Path) -> None:
+    # Two keys can share the first 12 hex digits. A short-named recording
+    # stores its full key, so replay never answers with another call's reply.
+    key = _stable_key_v2("claude-x", _MSGS)
+    other = json.loads(_fixture_payload("someone else's answer"))
+    other["_key"] = key[:FIXTURE_NAME_LENGTH] + "f" * (64 - FIXTURE_NAME_LENGTH)
+    (tmp_path / f"{key[:FIXTURE_NAME_LENGTH]}.json").write_text(json.dumps(other), encoding="utf-8")
+    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    with pytest.raises(MissingFixtureError):
+        await replay(model="claude-x", messages=_MSGS)
+    assert replay.cache_hits == 0
