@@ -199,6 +199,65 @@ def test_action_never_writes_the_api_key_to_github_env():
     assert 'export "$KEY_VAR=$API_KEY"' in run_step["run"]
 
 
+def _run_final_step_script(**env: str) -> subprocess.CompletedProcess:
+    """Execute the action's final ("Run mylonite gate") step's own script
+    up to (not including) the `mylonite gate` call, replacing it with a
+    probe that prints what the export logic actually left behind --
+    whether $KEY_VAR's target got the key, and whether $API_KEY itself is
+    still set afterward."""
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash not available to execute the rendered run script")
+    doc = yaml.safe_load(Path("gate-action/action.yml").read_text(encoding="utf-8"))
+    run_script = doc["runs"]["steps"][-1]["run"]
+    probe = (
+        'printf "KEY_VAR_TARGET=%s\\n" "${!KEY_VAR}"\n'
+        'printf "API_KEY_STILL_SET=%s\\n" "${API_KEY+yes}"\n'
+    )
+    script = run_script.replace('mylonite gate "${args[@]}"', probe)
+    base_env = {"PATH": __import__("os").environ.get("PATH", "")}
+    return subprocess.run(
+        [bash, "-c", script],
+        env={
+            **base_env,
+            "MODE": "discovery",
+            "RUNS_ON": "ubuntu-latest",
+            "TARGET_FILE": "target.yaml",
+            "AUTHORIZE": "my-app",
+            "MODEL": "anthropic/claude-haiku-4-5",
+            "OPEN_PR": "",
+            **env,
+        },
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_action_does_not_export_an_empty_api_key_over_a_real_one():
+    """A caller who already exports the real credential at job
+    level, but wires `api-key` to an unset secret (empty string), must not
+    have that real key overwritten with an empty one -- the export only
+    fires when BOTH the variable name and the key are non-empty."""
+    result = _run_final_step_script(KEY_VAR="ANTHROPIC_API_KEY", API_KEY="")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "KEY_VAR_TARGET=\n" in result.stdout
+
+
+def test_action_exports_a_real_key_to_its_mapped_variable():
+    result = _run_final_step_script(KEY_VAR="ANTHROPIC_API_KEY", API_KEY="sk-ant-test")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "KEY_VAR_TARGET=sk-ant-test\n" in result.stdout
+
+
+def test_action_unsets_api_key_after_exporting_it():
+    """The key doesn't travel under a second name (API_KEY) into
+    the `mylonite gate` subprocess tree once it's been exported to the
+    provider's own variable."""
+    result = _run_final_step_script(KEY_VAR="ANTHROPIC_API_KEY", API_KEY="sk-ant-test")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "API_KEY_STILL_SET=\n" in result.stdout
+
+
 def _run_bash_step(step: dict, env: dict[str, str], tmp_path: Path) -> subprocess.CompletedProcess:
     """Execute one composite-action step's own `run:` script, exactly as
     GitHub Actions does (`bash --noprofile --norc -eo pipefail`), with a
@@ -284,8 +343,13 @@ def test_runtime_detection_step_reduces_an_absolute_path_to_its_basename(tmp_pat
 def test_runtime_detection_step_survives_a_missing_target_file(tmp_path: Path) -> None:
     """Never the job's problem to fail on -- a missing/unreadable target
     file is caught properly, with a real error, by the step that actually
-    runs `mylonite gate`."""
+    runs `mylonite gate`. It still leaves a visible trail -- a
+    ::notice:: naming the exception type, not swallowed silently (never
+    the exception's own message, which could echo back an unredacted
+    field value)."""
     missing = tmp_path / "does-not-exist.yaml"
     result = _run_bash_step(_runtime_step(), {"TARGET_FILE": str(missing)}, tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "needs=\n" in result.github_output
+    assert "::notice::" in result.stdout
+    assert "FileNotFoundError" in result.stdout
