@@ -2528,6 +2528,21 @@ def gate(
             ),
         ),
     ] = None,
+    allow_no_seed_arm: Annotated[
+        bool,
+        typer.Option(
+            "--allow-no-seed-arm",
+            help=(
+                "Gate a custom target that declares an indirect-injection weakness "
+                "class (e.g. W2) without a seed_arm. Those seeds will report NOT "
+                "TESTED rather than block the gate -- same meaning as `scan`'s flag "
+                "of the same name. Unlike `scan`, `gate` never auto-wires a "
+                "seed_arm from the live tool surface, so this is the only way to "
+                "gate such a target; run `scan --target-file <file> --authorize "
+                "<family>` first if you want the seed_arm auto-wired instead."
+            ),
+        ),
+    ] = False,
     open_pr: Annotated[
         bool,
         typer.Option(
@@ -2929,6 +2944,7 @@ def gate(
         tf,
         adapter,
         command="gate",
+        allow_no_seed_arm=allow_no_seed_arm,
         timeout_s=_autowire_budget_s(tf.timeout_s) if tf is not None else None,
     )
 

@@ -3969,6 +3969,77 @@ def test_gate_refuses_before_run_gate_when_a_class_is_uncoverable(
     target_registry.clear_runtime_targets()
 
 
+def test_gate_allow_no_seed_arm_exempts_w2_from_the_uncoverable_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#210: unlike `scan`, `gate` never auto-wires a seed_arm, so a target
+    declaring W2 with no seed_arm and no content-storing tool used to have no
+    way to gate at all -- not even to prove the OTHER classes are clean.
+    `--allow-no-seed-arm` gives `gate` the same escape hatch `scan` already
+    has: W2 reports NOT TESTED instead of blocking the whole run."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.plugins._mcp import stdio_adapter, target_registry
+
+    target_registry.clear_runtime_targets()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    class _FakeSession:
+        async def initialize(self) -> None:
+            return None
+
+        async def list_tools(self) -> Any:
+            # No store/recall-shaped tool at all -- W2 is genuinely uncoverable,
+            # not just missing a declared seed_arm.
+            tool = SimpleNamespace(name="lookup_status", description="read-only", inputSchema={})
+            return SimpleNamespace(tools=[tool])
+
+    @asynccontextmanager
+    async def _fake_open(*_a: Any, **_k: Any):  # type: ignore[no-untyped-def]
+        yield _FakeSession()
+
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _fake_open)
+
+    class _Reached(Exception):
+        pass
+
+    def _stub_run_gate(**_kwargs: Any) -> Any:
+        raise _Reached()
+
+    monkeypatch.setattr("mylonite.gate.run_gate", _stub_run_gate)
+
+    target = tmp_path / "app.yaml"
+    target.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",
+        encoding="utf-8",
+    )
+
+    # Without the flag: blocked, same as before.
+    blocked = runner.invoke(
+        app, ["gate", "--target-file", str(target), "--authorize", "myapp", "--no-workflows"]
+    )
+    out = blocked.stderr or blocked.output
+    assert blocked.exit_code == EXIT_CONFIG, out
+    assert "W2" in out
+    target_registry.clear_runtime_targets()
+
+    # With the flag: reaches run_gate instead of refusing.
+    allowed = runner.invoke(
+        app,
+        [
+            "gate",
+            "--target-file",
+            str(target),
+            "--authorize",
+            "myapp",
+            "--no-workflows",
+            "--allow-no-seed-arm",
+        ],
+    )
+    assert isinstance(allowed.exception, _Reached), allowed.stderr or allowed.output
+    target_registry.clear_runtime_targets()
+
+
 def test_generate_custom_auto_resolves_colocated_target_yaml(tmp_path: Path) -> None:
     """generate without --target-file picks up target.yaml from the scan dir."""
     import yaml

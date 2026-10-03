@@ -283,6 +283,20 @@
       "name": "gate",
       "params": [
         {
+          "default": "False",
+          "envvar": null,
+          "help": "Gate a custom target that declares an indirect-injection weakness class (e.g. W2) without a seed_arm. Those seeds will report NOT TESTED rather than block the gate -- same meaning as `scan`'s flag of the same name. Unlike `scan`, `gate` never auto-wires a seed_arm from the live tool surface, so this is the only way to gate such a target; run `scan --target-file <file> --authorize <family>` first if you want the seed_arm auto-wired instead.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "allow_no_seed_arm",
+          "opts": [
+            "--allow-no-seed-arm"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
+        },
+        {
           "default": "None",
           "envvar": null,
           "help": "Must equal the target's scope, or its family when it declares no scope. Asserts you own the target; see SECURITY.md.",

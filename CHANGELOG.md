@@ -33,6 +33,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **CLI messages: no more duplicated warnings, raw tracebacks, or unnamed
+  launch failures.** Five on-ramp fixes:
+  - A mismatched `--authorize` on a target needing the seed-arm auto-wire
+    printed its own refusal twice, with a confusing "(Exit)" exception name
+    in between — the auto-wire probe's own adapter build could already
+    raise and print the refusal, and its generic "describe failed"
+    fallback then swallowed and repeated it. It now surfaces once.
+  - `check reference:vulnerable` without the optional reference package
+    installed printed a raw `ModuleNotFoundError`, instead of the same
+    "run `pip install mcp-kitchen-sink`" hint `scan`/`validate` already
+    give for the same cause.
+  - `check` showed a bare exception class name
+    (`AdapterDescribeFailed: ...`) ahead of an already operator-ready
+    message; it now shows the message alone.
+  - A target that prints non-JSON to stdout (a common server
+    misconfiguration) made the MCP SDK log a full Python traceback per
+    garbage line; that logger is now quiet, and the real connection
+    failure still reaches the operator as one clear line.
+  - A target launch failure (a typo'd `command:`, a binary not on `PATH`,
+    a server that exits immediately) now names the command and args that
+    failed to start, redacted — never a credential value or a bare,
+    unnamed exception.
+  - `gate` gained `--allow-no-seed-arm`, matching `scan`'s flag: a custom
+    target declaring an indirect-injection class like W2 with no
+    `seed_arm` can now be gated (those seeds report NOT TESTED) instead of
+    only being gate-able after first running `scan` to auto-wire one.
+  (#195, #210)
+
 - **The gate PR's kill matrix no longer shows an untested seed as a miss.**
   A committed test's differential drives only its own seed; every other
   seed in the bank was never run by that test. The PR body's kill matrix now
