@@ -28,6 +28,7 @@ Pure data/logic — no CLI concerns. Must not import ``typer`` or
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -36,7 +37,7 @@ from typing import Final, get_args
 from mylonite import reason_codes
 from mylonite._redaction import redact
 from mylonite.contracts import AbortReason as AbortReason
-from mylonite.contracts import ScanAttemptOutcome, ScanReport
+from mylonite.contracts import ScanAttempt, ScanAttemptOutcome, ScanReport
 from mylonite.exit_codes import EXIT_BUDGET, EXIT_CONFIG, EXIT_PROVIDER, EXIT_SUCCESS
 
 # --- Abort reasons -------------------------------------------------------------
@@ -669,6 +670,58 @@ def reason_code_for_attempt(attempt: object) -> str | None:
     if bucket is None:
         return None
     return reason_codes.NT_CODE_BY_BUCKET[bucket]
+
+
+#: Loose enough to match any ``MYL-<prefix>-<digits>`` text, bracketed or not
+#: -- the same shape campaign scoring's own
+#: ``scripts/score_third_party.py::_unexplained_attempts`` looks for across
+#: ``verdict_reason``/``not_applicable_reason``/``error_detail``. Used only to
+#: decide whether :func:`stamp_reason_codes` has already run (or an
+#: engine-made row already called ``reason_codes.tag()`` itself) -- never to
+#: validate a code is real; :func:`reason_codes.get` is the registry for that.
+_ANY_REASON_CODE_RE: Final = re.compile(r"MYL-[A-Z]+-\d+")
+
+
+def _attempt_already_explained(attempt: ScanAttempt) -> bool:
+    texts = (attempt.verdict_reason, attempt.not_applicable_reason, attempt.error_detail)
+    return any(isinstance(t, str) and _ANY_REASON_CODE_RE.search(t) for t in texts)
+
+
+def stamp_reason_codes(attempts: Sequence[ScanAttempt]) -> list[ScanAttempt]:
+    """Give every NOT_TESTED attempt with no ``MYL-*`` code anywhere in its
+    OWN text fields the code :func:`reason_code_for_attempt` derives for it,
+    as a ``[MYL-NT-0xx] `` prefix on ``verdict_reason``.
+
+    The code has always been computable from the outcome -- this module
+    derives it for the coverage summary line and the per-class verdict -- but
+    a plain runtime skip/error (``skipped_no_seed_arm``, the ordinary
+    ``skipped_planner_failure``/``error`` outcomes) never had it written onto
+    its OWN record; only the handful of rows the engine synthesizes itself
+    (module-load-failed, no-attack-emitted, synthesis-capped, ...) call
+    ``reason_codes.tag()`` on their own ``verdict_reason``. Campaign scoring's
+    ``_unexplained_attempts`` reads exactly these three fields per attempt --
+    never the coverage summary -- so a NOT_TESTED attempt with no code of its
+    own scored as an unexplained outcome (a product defect) even though the
+    coverage line right above it in the same report named the code.
+
+    No new field: ``ScanAttempt`` lives in ``contracts/_types.py``, a public
+    extension contract, and adding one is a ``CONTRACT_VERSION``-bumping
+    change this fix does not need -- the code folds into the existing
+    ``verdict_reason`` text, exactly how the engine-made rows already carry
+    theirs. Idempotent and FOUND/RESISTED-safe: ``reason_code_for_attempt``
+    returns ``None`` for anything that isn't NOT_TESTED (a ``finding``, a
+    ``no_finding``, a dry run), and an attempt already carrying a code in any
+    of the three fields is returned unchanged.
+    """
+    out: list[ScanAttempt] = []
+    for attempt in attempts:
+        code = reason_code_for_attempt(attempt)
+        if code is None or _attempt_already_explained(attempt):
+            out.append(attempt)
+            continue
+        tagged = reason_codes.tag(code, attempt.verdict_reason or "")
+        out.append(attempt.model_copy(update={"verdict_reason": tagged}))
+    return out
 
 
 def _incomplete_coverage_no_abort_message(report: ScanReport) -> str:
