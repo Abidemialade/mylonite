@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A test `generate` writes from a scan now says it is unproven.** Its first
+  line is `# mylonite: unvalidated`, followed by a short UNVALIDATED header,
+  and the command prints a line naming the `validate` run to do next.
+  `validate` removes the header when the verdict is KEPT; STABLE, NOT PROVEN
+  and REJECTED leave it, so a candidate never reads as a gate test. When the
+  input exploit has a `validation_report.json` beside it that is REJECTED,
+  STABLE, NOT PROVEN or unreadable, `generate` now writes nothing and exits
+  `5`; pass the new `--unvalidated` flag to write the test anyway, with the
+  header. A KEPT report gives a test without it. `gate` is unchanged. The new
+  flag changed the command-tree snapshot.
+
 - **`validate --iteration-timeout` now bounds the reference differential too.**
   It used to reach only the provider check and custom targets, so a slow
   model could stall a reference `validate` run past the limit you set. Each

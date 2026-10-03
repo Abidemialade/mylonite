@@ -1,0 +1,236 @@
+"""`generate` never passes a candidate test off as a proven one.
+
+A test written straight from a scan is a candidate until `mylonite validate`
+keeps it, so it carries an UNVALIDATED header. Generating from a validation
+that did not keep the test (rejected, or stable but not proven) is refused
+unless `--unvalidated` is passed, and the result is stamped. `validate` removes
+the header only on a KEPT verdict.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+from typer.testing import CliRunner
+
+from mylonite.cli import app
+from mylonite.contracts import (
+    AdapterResponse,
+    ComplianceTags,
+    ExploitRecord,
+    Payload,
+    ValidationOutcome,
+    ValidationReport,
+)
+from mylonite.exit_codes import EXIT_NOT_KEPT, EXIT_SUCCESS
+from mylonite.generate import provenance
+from mylonite.generate.provenance import (
+    UNVALIDATED_MARKER,
+    clear_stamp_if_kept,
+    input_verdict,
+    is_unvalidated,
+    stamp_unvalidated,
+    strip_unvalidated,
+)
+
+runner = CliRunner()
+
+_PID = "indirect-injection-note-body-direct"
+
+
+def _exploit() -> ExploitRecord:
+    return ExploitRecord(
+        target_id="reference:vulnerable",
+        pattern_id=_PID,
+        payload=Payload(pattern_id=_PID, channel="tool-result", body="x"),
+        response=AdapterResponse(payload_pattern_id=_PID, raw_response="ok"),
+        success_reason="called the tool",
+        compliance=ComplianceTags(owasp_llm=["LLM01"]),
+    )
+
+
+def _write_exploit(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(_exploit().model_dump(mode="json"), indent=2), encoding="utf-8")
+    return path
+
+
+def _report(*, kept: bool, build_ran: bool = True) -> ValidationReport:
+    return ValidationReport(
+        test_filename="t.py",
+        kept=kept,
+        outcomes=[
+            ValidationOutcome(
+                stage="build", passed=build_ran, report_only=not build_ran, detail=""
+            ),
+            ValidationOutcome(stage="differential", passed=kept, detail=""),
+        ],
+    )
+
+
+def _write_report(dir_path: Path, report: ValidationReport) -> None:
+    (dir_path / "validation_report.json").write_text(report.model_dump_json(), encoding="utf-8")
+
+
+def _emitted_source(out_dir: Path) -> str:
+    (test_file,) = out_dir.glob("test_security_*.py")
+    return test_file.read_text(encoding="utf-8")
+
+
+# --- the stamp itself --------------------------------------------------------
+
+
+def test_stamp_is_a_leading_header_that_strips_back_to_the_original() -> None:
+    source = '"""doc"""\n\nimport pytest\n'
+    stamped = stamp_unvalidated(source)
+    assert stamped.startswith(UNVALIDATED_MARKER)
+    assert "UNVALIDATED" in stamped
+    assert "mylonite validate" in stamped
+    assert is_unvalidated(stamped)
+    assert not is_unvalidated(source)
+    assert stamp_unvalidated(stamped) == stamped  # idempotent
+    assert strip_unvalidated(stamped) == source
+    assert strip_unvalidated(source) == source
+
+
+def test_stamped_source_still_compiles() -> None:
+    compile(stamp_unvalidated('"""doc"""\nX = 1\n'), "t.py", "exec")
+
+
+# --- what counts as validated --------------------------------------------------
+
+
+def test_input_verdict_reads_the_sibling_validation_report(tmp_path: Path) -> None:
+    exploit = _write_exploit(tmp_path / "exploit_a.json")
+    assert input_verdict(exploit) is None
+    _write_report(tmp_path, _report(kept=True))
+    assert input_verdict(exploit) == "KEPT"
+    _write_report(tmp_path, _report(kept=True, build_ran=False))
+    assert input_verdict(exploit) == "STABLE, NOT PROVEN"
+    _write_report(tmp_path, _report(kept=False))
+    assert input_verdict(exploit) == "REJECTED"
+    (tmp_path / "validation_report.json").write_text("{not json", encoding="utf-8")
+    assert input_verdict(exploit) == provenance.UNREADABLE
+
+
+# --- the generate command ------------------------------------------------------
+
+
+def test_generate_from_a_scan_stamps_the_test_and_says_so(tmp_path: Path) -> None:
+    """The documented first run (scan, then generate, then validate) still works."""
+    exploit = _write_exploit(tmp_path / "scans" / "s1" / "exploit_a.json")
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(app, ["generate", str(exploit), "--out", str(out_dir)])
+
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert is_unvalidated(_emitted_source(out_dir))
+    assert "UNVALIDATED" in result.output
+    assert f"mylonite validate {out_dir}" in result.output
+
+
+def test_generate_from_a_kept_validation_writes_an_unstamped_test(tmp_path: Path) -> None:
+    src = tmp_path / "validated"
+    exploit = _write_exploit(src / "exploit_a.json")
+    _write_report(src, _report(kept=True))
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(app, ["generate", str(exploit), "--out", str(out_dir)])
+
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert not is_unvalidated(_emitted_source(out_dir))
+    assert "UNVALIDATED" not in result.output
+
+
+@pytest.mark.parametrize(
+    ("report", "label"),
+    [
+        (_report(kept=False), "REJECTED"),
+        (_report(kept=True, build_ran=False), "STABLE, NOT PROVEN"),
+    ],
+)
+def test_generate_refuses_a_validation_that_did_not_keep_the_test(
+    tmp_path: Path, report: ValidationReport, label: str
+) -> None:
+    src = tmp_path / "validated"
+    exploit = _write_exploit(src / "exploit_a.json")
+    _write_report(src, report)
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(app, ["generate", str(src), "--out", str(out_dir)])
+
+    assert result.exit_code == EXIT_NOT_KEPT, result.output
+    assert label in result.output
+    assert "--unvalidated" in result.output
+    assert not out_dir.exists()  # refused before anything was written
+    assert exploit.is_file()
+
+
+def test_generate_unvalidated_flag_writes_the_candidate_stamped(tmp_path: Path) -> None:
+    src = tmp_path / "validated"
+    _write_exploit(src / "exploit_a.json")
+    _write_report(src, _report(kept=True, build_ran=False))
+    out_dir = tmp_path / "gen"
+
+    result = runner.invoke(app, ["generate", str(src), "--out", str(out_dir), "--unvalidated"])
+
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert is_unvalidated(_emitted_source(out_dir))
+    assert "UNVALIDATED" in result.output
+
+
+def test_generate_refuses_an_unreadable_validation_report(tmp_path: Path) -> None:
+    src = tmp_path / "validated"
+    _write_exploit(src / "exploit_a.json")
+    (src / "validation_report.json").write_text("{not json", encoding="utf-8")
+
+    result = runner.invoke(app, ["generate", str(src), "--out", str(tmp_path / "gen")])
+
+    assert result.exit_code == EXIT_NOT_KEPT, result.output
+
+
+# --- validate clears the stamp only on KEPT ------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("report", "cleared"),
+    [
+        (_report(kept=True), True),
+        (_report(kept=True, build_ran=False), False),
+        (_report(kept=False), False),
+    ],
+)
+def test_clear_stamp_only_on_a_kept_verdict(
+    tmp_path: Path, report: ValidationReport, cleared: bool
+) -> None:
+    test_path = tmp_path / "test_security_x.py"
+    test_path.write_text(stamp_unvalidated('"""doc"""\n'), encoding="utf-8")
+
+    clear_stamp_if_kept(test_path, report)
+
+    assert is_unvalidated(test_path.read_text(encoding="utf-8")) is not cleared
+
+
+def test_clear_stamp_leaves_an_unstamped_file_untouched(tmp_path: Path) -> None:
+    test_path = tmp_path / "test_security_x.py"
+    test_path.write_text('"""doc"""\n', encoding="utf-8")
+    before = test_path.stat().st_mtime_ns
+
+    clear_stamp_if_kept(test_path, _report(kept=True))
+
+    assert test_path.read_text(encoding="utf-8") == '"""doc"""\n'
+    assert test_path.stat().st_mtime_ns == before
+
+
+# --- gate builds its tests through its own path --------------------------------
+
+
+def test_gate_generate_fn_never_stamps() -> None:
+    """gate writes, then validates, then commits only what was kept: its tests
+    never pass through the stamp."""
+    from mylonite.gate.wiring import generate_fn
+
+    generated = generate_fn(_exploit())
+    assert not is_unvalidated(generated.source)

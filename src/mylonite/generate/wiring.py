@@ -219,6 +219,7 @@ def _emit_generated_test(
     validated_target_files: set[Path] | None = None,
     scan_report_cache: dict[Path, dict[str, str] | None] | None = None,
     redacted_target_cache: dict[Path, str] | None = None,
+    unvalidated: bool = False,
 ) -> None:
     """Emit one regression test (+ co-located exploit/fixtures/target) for one
     exploit, echoing the per-test ``Wrote …`` lines and next-step guidance.
@@ -246,9 +247,13 @@ def _emit_generated_test(
     multi-finding scan dir sharing one target file. Absent (``None``), every
     call reads+redacts independently — the original, always-correct
     behaviour.
+
+    ``unvalidated`` puts the UNVALIDATED header on the test and prints a line
+    saying so (see :mod:`mylonite.generate.provenance`).
     """
     from mylonite._redaction import redact_target_yaml, redact_value
     from mylonite._target_env import echo_env_notice
+    from mylonite.generate.provenance import announce_unvalidated, stamp_unvalidated
     from mylonite.plugins._reference.reference_pytest_generator import (
         ReferencePytestGenerator,
     )
@@ -269,7 +274,8 @@ def _emit_generated_test(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     test_path = out_dir / generated.filename
-    test_path.write_text(generated.source, encoding="utf-8")
+    source = stamp_unvalidated(generated.source) if unvalidated else generated.source
+    test_path.write_text(source, encoding="utf-8")
 
     # Co-locate the exploit under the exact name the emitted test loads
     # (`load_exploit(here / "exploit_<pattern_id>.json")`).
@@ -375,6 +381,8 @@ def _emit_generated_test(
         echo(f"  mylonite validate {out_dir}")
     else:
         echo(f"Next: mylonite validate {out_dir}")
+    if unvalidated:
+        announce_unvalidated(out_dir)
 
 
 def _tag_control_for_generate(exploit: Any) -> Any:

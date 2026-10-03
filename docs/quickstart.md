@@ -149,6 +149,7 @@ mylonite validate .mylonite\generated\indirect_injection_note_body_direct
 - `mylonite generate --latest` — **offline and deterministic** (no LLM call).
   Reads the newest scan's exploit, emits a testkit-based pytest regression
   test, and prints the exact `mylonite validate <dir>` command to run next.
+  The test is stamped UNVALIDATED until `validate` keeps it.
   `--latest` picks the newest scan; pass an explicit `exploit_*.json` or scan
   dir instead if you prefer.
 - `mylonite validate <dir>` — runs the `DifferentialValidator` (the

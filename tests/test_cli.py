@@ -2914,6 +2914,42 @@ def test_validate_stable_not_proven_does_not_say_commit_to_gate(
     assert "gates reproduction only" in result.output
 
 
+def test_validate_kept_removes_the_unvalidated_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`generate` stamps a test from a scan; a KEPT verdict removes the stamp."""
+    from mylonite.generate.provenance import is_unvalidated
+
+    out_dir = _generated_dir(tmp_path)
+    (test_file,) = out_dir.glob("test_security_*.py")
+    assert is_unvalidated(test_file.read_text(encoding="utf-8"))
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+    _patch_validator(monkeypatch, kept=True, mutation_score=1.0)
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert not is_unvalidated(test_file.read_text(encoding="utf-8"))
+    assert "Removed the UNVALIDATED header" in result.output
+
+
+def test_validate_stable_not_proven_keeps_the_unvalidated_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A STABLE, NOT PROVEN keep is still a candidate: the stamp stays."""
+    from mylonite.generate.provenance import is_unvalidated
+
+    out_dir = _generated_dir(tmp_path)
+    (test_file,) = out_dir.glob("test_security_*.py")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+    _patch_validator(monkeypatch, kept=True, build_skipped=True)
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    assert is_unvalidated(test_file.read_text(encoding="utf-8"))
+
+
 def test_validate_stamps_the_planner_model_it_was_proved_against(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

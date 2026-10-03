@@ -657,6 +657,20 @@
           "required": false,
           "secondary_opts": [],
           "type": "TyperPath"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Write the test even when the validation next to the input did not keep it (REJECTED, or STABLE, NOT PROVEN). The test is stamped UNVALIDATED.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "unvalidated",
+          "opts": [
+            "--unvalidated"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "BoolParamType"
         }
       ]
     },

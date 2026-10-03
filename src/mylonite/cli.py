@@ -73,6 +73,7 @@ from mylonite.gate.wiring import (
     resolve_gate_out_dir_or_exit,
     validation_cost_note,
 )
+from mylonite.generate.provenance import UNVALIDATED_HELP, clear_stamp_if_kept, stamps_for
 from mylonite.generate.wiring import (
     _dispatch_emit as _dispatch_emit,  # re-export (tests import from cli)
 )
@@ -1568,6 +1569,7 @@ def generate(
             ),
         ),
     ] = False,
+    unvalidated: Annotated[bool, typer.Option("--unvalidated", help=UNVALIDATED_HELP)] = False,
 ) -> None:
     """Emit a pytest regression test from a confirmed exploit.
 
@@ -1611,6 +1613,7 @@ def generate(
     layout = _layout_for(ctx, config_root=config_root)
     scans_root = scans_dir if scans_dir is not None else layout.scans
     exploit_paths = _resolve_exploit_paths(scan_path, latest, scans_root)
+    stamps = stamps_for(exploit_paths, allow_unvalidated=unvalidated)  # refuses up front
     multi = len(exploit_paths) > 1
 
     if multi:
@@ -1675,6 +1678,7 @@ def generate(
                 validated_target_files=validated_target_files,
                 scan_report_cache=scan_report_cache,
                 redacted_target_cache=redacted_target_cache,
+                unvalidated=stamps[index],
             )
         except UnsafeExploitRecord as exc:
             echo_exc(f"could not generate a test for {exploit_path}", exc)
@@ -2320,6 +2324,7 @@ def validate(
     )
     report_path = test_path.parent / "validation_report.json"
     report_path.write_text(sanitized_report.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    clear_stamp_if_kept(test_path, report)
 
     _render_validation_report(report)
     echo(spend_summary(spend_tally.spend(), time.monotonic() - spend_started))
