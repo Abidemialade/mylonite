@@ -10,7 +10,10 @@ repository on disk by the time ``open_or_print_pr`` prints its summary, and
 the printed notice says so instead of claiming nothing was modified. With
 ``open_pr=True`` the branch is created, the artifacts committed, and the PR
 opened via ``gh`` -- degrading to printing the last two commands when ``gh``
-is missing or unauthenticated.
+is missing or unauthenticated. A gate branch that already exists locally
+(a re-run that re-found the same finding) is never deleted or overwritten:
+nothing new is committed, and the run reports it as already proposed
+instead of failing.
 """
 
 from __future__ import annotations
@@ -71,6 +74,12 @@ class PrResult:
     #: The gate commit, when one was made. The run returns to the original
     #: branch afterwards, so HEAD is no longer this commit.
     commit_sha: str | None = None
+    #: True iff this run skipped the whole commit/push/PR flow because
+    #: ``branch`` already existed locally — most often an earlier run's
+    #: branch for the same finding, left in place on purpose (this module
+    #: never deletes a branch it didn't create). ``opened`` is False
+    #: alongside this: no new commit, push or PR happened.
+    already_proposed: bool = False
 
 
 def resolve_repo_root(*, cwd: Path | None = None, _run: Runner = _default_run) -> Path:
@@ -166,6 +175,17 @@ def _rollback(
             f"warning: rollback failed to delete half-created branch '{branch}' after a "
             f"gate PR error — retrying may fail with 'branch already exists': {stderr}"
         )
+
+
+def _local_branch_exists(branch: str, *, cwd: Path, _run: Runner) -> bool:
+    """True iff a LOCAL branch named ``branch`` already exists.
+
+    Raw ``_run`` (not :func:`_git`): called only to disambiguate a
+    ``checkout -b`` failure that already happened, so a non-zero/missing
+    result here must never raise and replace that original error.
+    """
+    cp = _run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=str(cwd))
+    return getattr(cp, "returncode", 1) == 0
 
 
 _STAGED_MESSAGE = (
@@ -364,6 +384,21 @@ def open_or_print_pr(
         _git(["add", *rels], cwd=cwd, _run=_run)
         _git(["commit", "-m", pr_title], cwd=cwd, _run=_run)
     except GatePrError:
+        # `checkout -b` itself is what can fail this way (created is still
+        # False): most often a re-run on the SAME finding, whose branch an
+        # earlier run already created and deliberately kept. That branch is
+        # not a failure to roll back from -- it's this run's own earlier
+        # output, already proposed. Report it and return cleanly, touching
+        # nothing: no checkout, no delete, no re-raise. A failure after
+        # `checkout -b` succeeded (created is True — add/commit) is a real
+        # PR-flow error and still rolls back below.
+        if not created and _local_branch_exists(branch, cwd=cwd, _run=_run):
+            echo(
+                f"\nBranch '{branch}' already exists -- this finding was already "
+                "proposed in an earlier run; nothing new to commit. See that "
+                "branch (or its pull request) instead of opening a new one.\n"
+            )
+            return PrResult(branch=branch, opened=False, already_proposed=True)
         # Best-effort rollback: leave the repo back on the branch it started
         # on and delete the branch this run created, so a retry with the same
         # deterministic branch name doesn't immediately fail (DCR-0017). Never
