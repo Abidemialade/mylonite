@@ -445,8 +445,8 @@ _INCONCLUSIVE: Final[tuple[ReasonCode, ...]] = (
         "needs to count as a finding, so the attempt proved neither a finding nor "
         "resistance.",
         "Read the attempt's judge rationale and tool trace to decide it yourself, then "
-        "re-run with a stronger judge model (--judge-model), or declare an effect_probe "
-        "so the result rests on observed state.",
+        "re-run with a stronger judge model (--judge-model), or, on an MCP target, "
+        "declare an effect_probe so the result rests on observed state.",
     ),
     _rc(
         INC_UNCHECKED_DEFERRAL,

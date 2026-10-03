@@ -384,8 +384,8 @@ The LLM judge leaned toward the attack landing, but below the confidence it need
 count as a finding, so the attempt proved neither a finding nor resistance.
 
 **Fix:** Read the attempt's judge rationale and tool trace to decide it yourself, then
-re-run with a stronger judge model (`--judge-model`), or declare an `effect_probe` so the
-result rests on observed state.
+re-run with a stronger judge model (`--judge-model`), or, on an MCP target, declare an
+`effect_probe` so the result rests on observed state.
 
 ## MYL-INC-012
 
