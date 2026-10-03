@@ -58,12 +58,6 @@ from release_version import (
     version_module_path,
 )
 
-#: Windows caps a whole command line at 32,767 characters. The tracked-file list
-#: is ~12k today, so a single call is fine -- but the scan MUST be one call:
-#: ``detect-secrets scan --baseline`` trims the baseline against the files it was
-#: given, so chunking would silently drop every entry outside the last chunk.
-_MAX_CMDLINE = 30_000
-
 
 @dataclass(frozen=True)
 class ReleasePin:
@@ -334,27 +328,33 @@ def refresh_secrets_baseline(root: Path) -> None:
     jobs. This is the step that kept being skipped -- partly because the command
     CONTRIBUTING.md documented piped filenames to stdin, where an argparse
     *positional* never saw them, so it scanned nothing and exited 0.
+
+    An earlier version of this function passed every tracked file as its own
+    command-line argument, to make the scan explicit about what it covers.
+    That list grows with the repository and eventually crosses Windows's
+    ~32,767-character command-line limit (it already has, at 736 tracked
+    files), so the subprocess never ran. Chunking is NOT a safe fix either:
+    ``detect-secrets scan --baseline`` trims the baseline against the files
+    it is given, so a chunked run would drop every entry outside the final
+    chunk.
+
+    The fix is to not put the file list on the command line at all. With no
+    path argument, ``detect-secrets scan`` defaults to scanning ``.`` --
+    which, for a directory, means "every git-tracked file under here"
+    (``detect_secrets.core.scan.get_files_to_scan``), the same set
+    ``git ls-files`` would have produced. The exclusions
+    ``.pre-commit-config.yaml`` applies to the pre-commit hook's own file
+    list are instead baked into the baseline itself, as the
+    ``should_exclude_file`` and ``is_baseline_file`` entries under
+    ``filters_used`` -- so a plain ``--baseline`` scan already honours them.
     """
     baseline = root / ".secrets.baseline"
     if not baseline.exists():
         print("no .secrets.baseline; skipping refresh")
         return
 
-    listing = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=root, capture_output=True, text=True, check=True
-    )
-    files = [name for name in listing.stdout.split("\0") if name]
-    budget = sum(len(name) + 3 for name in files)
-    if budget > _MAX_CMDLINE:
-        raise SystemExit(
-            f"tracked-file list is {budget} chars, over the {_MAX_CMDLINE} command-line "
-            "budget. Chunking is NOT a safe fix: `detect-secrets scan --baseline` trims "
-            "the baseline against the files it is given, so a chunked run would drop "
-            "every entry outside the final chunk."
-        )
-
     result = subprocess.run(
-        [sys.executable, "-m", "detect_secrets", "scan", "--baseline", str(baseline), *files],
+        [sys.executable, "-m", "detect_secrets", "scan", "--baseline", str(baseline)],
         cwd=root,
     )
     if result.returncode != 0:
