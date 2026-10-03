@@ -198,12 +198,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   outputs. This changed the discovery workflow's golden render.
 - **A re-run that re-finds an already-gated finding no longer fails on exit
   `8`.** `gate --open-pr` names its branch after the finding's pattern id, so
-  re-finding the same one on a later run (most often a self-hosted runner
-  with a persistent workspace) hit the same branch name and `git checkout -b`
-  refused it. `gate` now checks for exactly that case — the branch already
-  exists locally — and reports it as already proposed instead: no checkout,
-  no commit, no delete, and the run exits `9` like a freshly kept finding. A
-  `checkout -b` failure for any other reason still stops `gate` on exit `8`,
+  re-finding the same one on a later run hit the same branch name. On a
+  persistent workspace (a self-hosted runner) that branch already existed
+  LOCALLY and `git checkout -b` refused it; on a nightly discovery job's
+  usual fresh clone, the branch instead already exists only on `origin`, from
+  the earlier run's push, and used to fail later at `git push`. `gate` now
+  checks both — `origin` first, via `git ls-remote --exit-code --heads`,
+  before anything is created; the local branch check still catches the
+  persistent-workspace case — and reports either as already proposed: no
+  checkout, no commit, no push, no delete, and the run exits `9` like a
+  freshly kept finding. A missing `origin` or an unreachable remote is never
+  read as "already proposed"; it falls through to the previous behaviour.
+  Any other `checkout -b` or `push` failure still stops `gate` on exit `8`,
   unchanged.
 - **`validate --iteration-timeout` now bounds the reference differential too.**
   It used to reach only the provider check and custom targets, so a slow

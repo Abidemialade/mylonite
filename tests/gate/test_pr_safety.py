@@ -87,6 +87,102 @@ def test_rerun_over_an_existing_branch_reports_already_proposed(tmp_path: Path) 
     assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
 
 
+def test_branch_only_on_origin_reports_already_proposed(tmp_path: Path) -> None:
+    """A nightly discovery job is almost always a FRESH clone: a re-found
+    finding then has no LOCAL branch to collide with at all -- only
+    `origin` has it, from an earlier run's push. `gate` must recognize that
+    BEFORE creating a new local branch, committing, or pushing -- not only
+    the local-branch-collision shape the test above covers.
+    """
+    repo = _init_repo(tmp_path / "repo")
+    _with_local_origin(tmp_path, repo)
+    # An earlier run: proposed, pushed, and the local branch is gone --
+    # exactly what a fresh clone on a later night sees.
+    _git(repo, "checkout", "-b", "mylonite/gate-x")
+    (repo / "work.txt").write_text("proposed earlier\n", encoding="utf-8")
+    _git(repo, "add", "work.txt")
+    _git(repo, "commit", "-m", "proposed earlier")
+    origin_sha = _git(repo, "rev-parse", "mylonite/gate-x")
+    _git(repo, "push", "origin", "mylonite/gate-x")
+    _git(repo, "checkout", "main")
+    _git(repo, "branch", "-D", "mylonite/gate-x")
+
+    calls: list[list[str]] = []
+
+    def run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        return subprocess.run(cmd, text=True, capture_output=True, check=False, **kwargs)
+
+    result = open_or_print_pr(
+        _gate_paths(repo),
+        branch="mylonite/gate-x",
+        pr_title="t",
+        pr_body="x",
+        open_pr=True,
+        base="main",
+        _run=run,
+    )
+
+    assert result.opened is False
+    assert result.already_proposed is True
+    # Nothing destructive ran at all -- not even a local checkout -b, let
+    # alone an add, commit or push.
+    assert not any(c[:3] == ["git", "checkout", "-b"] for c in calls)
+    assert not any(c[:2] == ["git", "add"] for c in calls)
+    assert not any(c[:2] == ["git", "commit"] for c in calls)
+    assert not any(c[:2] == ["git", "push"] for c in calls)
+    # The repo stays exactly where it started: on `main`, with no local
+    # branch of this name ever created.
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    absent = subprocess.run(
+        ["git", "rev-parse", "--verify", "--quiet", "refs/heads/mylonite/gate-x"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+    )
+    assert absent.returncode != 0
+    # origin's branch is untouched.
+    assert _git(tmp_path / "origin.git", "rev-parse", "mylonite/gate-x") == origin_sha
+
+
+def test_missing_origin_falls_through_honestly_instead_of_claiming_proposed(
+    tmp_path: Path,
+) -> None:
+    """No `origin` remote at all (the shape a network failure or a
+    never-configured remote also produces for `ls-remote`) must never be
+    read as "already proposed" -- that's a guess this check has no
+    business making. `gate` falls through to the normal flow, which here
+    means `checkout -b` succeeds (no local collision either) and the run
+    fails later, honestly, when `git push` has nothing to push to."""
+    repo = _init_repo(tmp_path / "repo")  # no `origin` remote configured
+
+    calls: list[list[str]] = []
+
+    def run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(list(cmd))
+        return subprocess.run(cmd, text=True, capture_output=True, check=False, **kwargs)
+
+    with pytest.raises(GatePrError, match="git push"):
+        open_or_print_pr(
+            _gate_paths(repo),
+            branch="mylonite/gate-x",
+            pr_title="t",
+            pr_body="x",
+            open_pr=True,
+            base="main",
+            _run=run,
+        )
+
+    # It did NOT stop at the remote check with a false "already proposed" --
+    # it proceeded exactly as if there were no remote to ask at all.
+    assert ["git", "checkout", "-b", "mylonite/gate-x"] in calls
+    assert ["git", "commit", "-m", "t"] in calls
+    assert _git(repo, "rev-parse", "--abbrev-ref", "HEAD") == "main"
+    # The gate branch and its commit are still kept (DCR-0017's rule),
+    # exactly as a push failure for any other reason already behaves.
+    assert _git(repo, "log", "-1", "--format=%s", "mylonite/gate-x") == "t"
+
+
 def test_failed_commit_still_deletes_the_branch_this_run_created(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path / "repo")
     paths = _gate_paths(repo)

@@ -492,12 +492,18 @@ satisfy automatically but a local or non-GitHub run must provide itself:
   the gate branch is cut from the commit you have checked out, so against the
   default branch the PR also carries your feature branch's unmerged commits.
 - **A gate branch from an earlier run.** If the gate branch (`mylonite/gate-…`)
-  already exists locally — a re-run that re-found the same finding, most often
-  on a self-hosted runner with a persistent workspace — `gate` does not touch
-  it: no checkout, no new commit, no delete. It reports the finding as already
-  proposed and exits `9`, the same as a freshly kept one; see that branch (or
-  its PR) instead of opening a new one. A `checkout -b` failure for any OTHER
-  reason (a locked ref, a hook) still stops `gate` on exit code `8`.
+  already exists — a re-run that re-found the same finding — `gate` does not
+  touch it: no checkout, no new commit, no push, no delete. It checks `origin`
+  first (`git ls-remote --exit-code --heads`), before creating anything: a
+  nightly discovery job is almost always a fresh clone, so the branch from an
+  earlier run usually lives only there. It also still checks for the branch
+  locally, for a persistent workspace (a self-hosted runner) that already has
+  it. Either way it reports the finding as already proposed and exits `9`,
+  the same as a freshly kept one; see that branch (or its PR) instead of
+  opening a new one. A missing `origin` or an unreachable remote is never
+  read as "already proposed" — it falls through to the normal flow. A
+  `checkout -b` or `push` failure for any OTHER reason (a locked ref, a hook,
+  a real conflict) still stops `gate` on exit code `8`.
 - **`.mylonite/gate/` (or your configured `--out`) must actually be
   committed.** `gate` writes the test, the exploit, and your `target.yaml`
   there, then commits and pushes them as part of the PR — but if *your* repo's
