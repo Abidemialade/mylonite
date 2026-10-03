@@ -514,3 +514,173 @@ def test_control_finding_is_not_pending():
     from mylonite.gate.mitigation import commits_as_pending
 
     assert not commits_as_pending(_control_finding())
+
+
+def test_pr_body_follows_the_verdict_impact_fix_proof_order():
+    """A3/SV3/RP2: one result template, verdict -> impact -> fix -> proof, so
+    the facts a reviewer needs most read top to bottom instead of landing at
+    the bottom of the PR or not appearing at all."""
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")
+    body = build_pr_body(ex, _report())
+    verdict_at = body.index("**Verdict: KEPT:**")
+    impact_at = body.index("**Impact:**")
+    fix_at = body.index("## Suggested mitigation")
+    proof_at = body.index("## Proof")
+    assert verdict_at < impact_at < fix_at < proof_at
+
+
+def test_pr_body_shows_severity_and_a_deterministic_impact_sentence():
+    """SV1 (severity shown) + SV3 (a deterministic, plain-language impact
+    sentence per weakness class)."""
+    from mylonite.gate.mitigation import impact_sentence
+
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")  # W4
+    body = build_pr_body(ex, _report())
+    assert "**Severity:** High" in body
+    assert f"**Impact:** {impact_sentence('W4')}" in body
+    # Deterministic and attacker-focused: the sentence names what the
+    # attacker gets, and is identical for any W4 finding.
+    assert impact_sentence("W4") == impact_sentence("W4")
+    for wc in ("W1", "W2", "W3", "W4"):
+        assert impact_sentence(wc).strip()
+    assert impact_sentence("not-a-class") == impact_sentence("generic-anything-else")
+
+
+def test_pr_body_recommend_shown_under_a_kept_finding():
+    """A3: the deterministic fix must not be exclusive to a validated
+    directory or an export -- it is already rendered under every KEPT gate
+    PR finding, proven or control-efficacy, via recommend()/render_markdown()."""
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")
+    body = build_pr_body(ex, _report())
+    assert "Recommended fix" in body or "Proven fix" in body
+    assert "confirmation_required" in body  # the W4 recommend() sketch rendered
+
+
+def test_pr_body_has_a_reviewer_checklist():
+    """T5: a short reviewer checklist naming the proof level, the planner
+    model, the prompt used, and the runs/rates -- for the reviewer to
+    confirm against their own app, not a claim Mylonite makes for them."""
+    ex = _exploit_for("indirect-injection-note-body-direct")
+    body = build_pr_body(
+        ex, _report(), model="claude-haiku-4-5-20251001", system_prompt="be helpful"
+    )
+    checklist = body.split("## Reviewer checklist", 1)[1]
+    assert "Proof level" in checklist
+    assert "Planner model" in checklist
+    assert "claude-haiku-4-5-20251001" in checklist
+    assert "Prompt used" in checklist
+    assert "the system prompt supplied to this run" in checklist
+    assert "Runs and rates" in checklist
+
+
+def test_pr_body_checklist_names_the_default_prompt_and_missing_model():
+    ex = _exploit_for("indirect-injection-note-body-direct")
+    body = build_pr_body(ex, _report())
+    checklist = body.split("## Reviewer checklist", 1)[1]
+    assert "`not recorded`" in checklist
+    assert "Mylonite's generic default" in checklist
+
+
+def test_pr_body_checklist_never_claims_the_safeguard_for_a_boundary_proof():
+    """ "your safeguard stops it" (or any equivalent claim) is said only when
+    the guarded side was a real control_env, never for Mylonite's boundary
+    stand-in."""
+    ex = _control_finding()
+    body = build_pr_body(ex, _report())  # no server-layer marker -> boundary
+    checklist = body.split("## Reviewer checklist", 1)[1]
+    assert "your own control" not in checklist
+    assert "stand-in" in checklist
+
+
+def test_pr_body_kill_matrix_marks_unrun_seeds_and_carries_a_legend():
+    """Carried from the validator track: the PR-body kill matrix must show a
+    seed the differential never ran as "not run", not as an indistinguishable
+    miss, and a legend explains what each mark means."""
+    from mylonite.contracts import SeedKill
+    from mylonite.plugins._reference.reference_pytest_generator import _slugify
+
+    own_id = "indirect-injection-note-body-direct"
+    report = ValidationReport(
+        test_filename=f"test_security_{_slugify(own_id)}.py",
+        outcomes=[ValidationOutcome(stage="build", passed=True, detail="collected")],
+        kept=True,
+        mutation_matrix=[
+            SeedKill(pattern_id=own_id, weakness="W2", killed=True),
+            SeedKill(
+                pattern_id="excessive-agency-fetch-attacker-url-direct",
+                weakness="W3",
+                killed=False,
+            ),
+        ],
+    )
+    body = build_pr_body(_exploit_for(own_id), report)
+    assert "this test's own seed; 1/2 not run" in body
+    assert f"W2:{own_id} ✓" in body
+    assert "W3:excessive-agency-fetch-attacker-url-direct -" in body
+    assert "legend:" in body
+    assert "not run by this test" in body
+
+
+def test_pr_body_kill_matrix_falls_back_when_the_own_seed_is_unknown():
+    """A report whose test file doesn't match any bank seed's slug (a hand-
+    built report, or an older report shape) keeps the plain killed/not-killed
+    rendering -- it never guesses which seed is "its own"."""
+    from mylonite.contracts import SeedKill
+
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[ValidationOutcome(stage="build", passed=True, detail="collected")],
+        kept=True,
+        mutation_matrix=[
+            SeedKill(pattern_id="indirect-injection-note-body-direct", weakness="W2", killed=True),
+            SeedKill(
+                pattern_id="excessive-agency-fetch-attacker-url-direct",
+                weakness="W3",
+                killed=False,
+            ),
+        ],
+    )
+    body = build_pr_body(_exploit_for("indirect-injection-note-body-direct"), report)
+    assert "this test's own seed" not in body
+    assert "W3:excessive-agency-fetch-attacker-url-direct ✗" in body
+    assert "legend:" in body
+
+
+def test_severity_sort_kept_orders_most_severe_first_and_keeps_dirs_parallel():
+    from pathlib import Path
+
+    from mylonite.gate.mitigation import severity_sort_kept
+
+    w1 = _exploit_for("tool-description-summary-smuggle")  # Medium (W1)
+    w4 = _exploit_for("excessive-agency-send-email-direct-unconfirmed")  # High (W4)
+    kept = [(w1, _report()), (w4, _report())]
+    kept_dirs = [Path("a"), Path("b")]
+    new_kept, new_dirs = severity_sort_kept(kept, kept_dirs)
+    assert [e.pattern_id for e, _ in new_kept] == [
+        "excessive-agency-send-email-direct-unconfirmed",
+        "tool-description-summary-smuggle",
+    ]
+    assert new_dirs == [Path("b"), Path("a")]
+
+
+def test_severity_sort_kept_is_stable_for_equal_severity():
+    from pathlib import Path
+
+    from mylonite.gate.mitigation import severity_sort_kept
+
+    a = _exploit_for("indirect-injection-note-body-direct")
+    b = _exploit_for("indirect-injection-note-body-roleplay")
+    kept = [(a, _report()), (b, _report())]
+    kept_dirs = [Path("a"), Path("b")]
+    new_kept, _ = severity_sort_kept(kept, kept_dirs)
+    # Both W2 -> same (High) severity -> tie-broken by pattern_id, alphabetical.
+    assert [e.pattern_id for e, _ in new_kept] == [
+        "indirect-injection-note-body-direct",
+        "indirect-injection-note-body-roleplay",
+    ]
+
+
+def test_severity_sort_kept_handles_empty_input():
+    from mylonite.gate.mitigation import severity_sort_kept
+
+    assert severity_sort_kept([], []) == ([], [])

@@ -37,6 +37,7 @@ from mylonite.exit_codes import (
 from mylonite.gate.mitigation import (
     build_gate_pr_body,
     commits_as_pending,
+    severity_sort_kept,
     weakness_class_for,
 )
 from mylonite.scan.coverage import AbortReason, Coverage, ScanOutcome
@@ -771,6 +772,11 @@ def run_gate(
         for outcome, finding_id in zip(outcomes, finding_ids, strict=True)
         if outcome.stage == "kept"
     ]
+    # Most-severe-first (ties broken by pattern_id): a reviewer with several
+    # kept findings in one gate PR sees the one that matters most first. The
+    # same permutation is applied to both lists, so the PR body, the
+    # per-finding layout table below and the git-add list all agree on order.
+    kept, kept_dirs = severity_sort_kept(kept, kept_dirs)
     candidates = [(o.exploit, o.reason) for o in outcomes if o.stage == "candidate"]
     rejected = [(o.exploit, o.reason) for o in outcomes if o.stage not in ("kept", "candidate")]
 
