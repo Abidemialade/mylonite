@@ -295,6 +295,14 @@ Starting or describing the server failed while `scan` was inferring a `seed_arm`
 **Fix:** Fix the cause printed after the code. It names the failing step, usually the
 target file's `command`, `args` or `timeout_s`. Then re-run.
 
+## MYL-PRE-006
+
+`--weakness-class` named none of the target's declared `weakness_classes`, so nothing
+would be scanned, and the run was refused before any LLM call.
+
+**Fix:** Pass a class the target file declares in `weakness_classes`, or drop
+`--weakness-class` to run every declared class.
+
 ## MYL-INC-001
 
 A consequential tool call went through, but it could not be tied to this attempt.

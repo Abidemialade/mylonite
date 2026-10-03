@@ -115,6 +115,10 @@
     "category": "pre-flight",
     "summary": "Starting or describing the server failed while inferring a seed_arm."
   },
+  "MYL-PRE-006": {
+    "category": "pre-flight",
+    "summary": "--weakness-class named none of the target's declared weakness_classes, so nothing would be scanned, and the run was refused before any LLM call."
+  },
   "MYL-INC-001": {
     "category": "inconclusive",
     "summary": "A consequential tool call went through, but it could not be tied to this attempt."
