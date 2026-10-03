@@ -606,6 +606,70 @@ def test_env_value_already_referencing_a_var_is_preserved_even_with_a_secret_key
     assert tf.env["GITHUB_TOKEN"] == fake_token
 
 
+#: Fake-only values for the mixed literal-plus-reference regression below —
+#: never real secrets.
+_FAKE_DB_PASSWORD = "FAKEPASSWORD123"  # pragma: allowlist secret
+_FAKE_SK_PREFIX_MIXED = "sk-FAKE1234567890123456"  # pragma: allowlist secret
+_FAKE_SESSION = "FAKESESSION999"  # pragma: allowlist secret
+_FAKE_HEADER_KEY_MIXED = "FAKEKEY1234567890123456"  # pragma: allowlist secret
+
+
+def test_mixed_literal_and_var_ref_env_value_is_still_masked() -> None:
+    """Critical review fix: a value that CONTAINS a ``${VAR}`` reference
+    alongside a literal secret (not PURELY a reference) must be masked
+    exactly as on a value with no reference at all. An earlier version of
+    the #183 preservation fix matched with ``search`` instead of requiring
+    the whole value to be only a reference, so this leaked to disk
+    verbatim."""
+    src = (
+        "family: app\ncommand: python\nenv:\n"
+        f"  DATABASE_URL: postgres://admin:{_FAKE_DB_PASSWORD}@${{DB_HOST}}:5432/db\n"
+    )
+    out = redact_target_yaml(src)
+    assert _FAKE_DB_PASSWORD not in out
+    assert "${DB_HOST}" not in out  # the whole value was replaced, not patched in place
+    assert "MYLONITE_TARGET_ENV_DATABASE_URL" in out
+
+
+def test_mixed_literal_and_var_ref_env_token_is_still_masked() -> None:
+    """Same shape, a provider-key-prefixed literal next to a reference."""
+    src = f"family: app\ncommand: python\nenv:\n  API_TOKEN: {_FAKE_SK_PREFIX_MIXED}${{SUFFIX}}\n"
+    out = redact_target_yaml(src)
+    assert _FAKE_SK_PREFIX_MIXED not in out
+    assert "${SUFFIX}" not in out
+    assert "MYLONITE_TARGET_ENV_API_TOKEN" in out
+
+
+def test_mixed_literal_and_var_ref_header_value_is_still_masked() -> None:
+    """Same shape in ``headers`` -- a cookie with a literal session value and
+    a reference, e.g. a CSRF token the operator wants from the environment."""
+    src = (
+        "family: app\ncommand: python\nheaders:\n"
+        f"  Cookie: session={_FAKE_SESSION}; csrf=${{CSRF}}\n"
+    )
+    out = redact_target_yaml(src)
+    assert _FAKE_SESSION not in out
+    assert "${CSRF}" not in out
+    assert "MYLONITE_TARGET_HEADERS_COOKIE" in out
+
+
+def test_mixed_literal_and_var_ref_header_key_is_still_masked() -> None:
+    src = f"family: app\ncommand: python\nheaders:\n  X-Api-Key: {_FAKE_HEADER_KEY_MIXED}${{X}}\n"
+    out = redact_target_yaml(src)
+    assert _FAKE_HEADER_KEY_MIXED not in out
+    assert "${X}" not in out
+    assert "MYLONITE_TARGET_HEADERS_X_API_KEY" in out
+
+
+def test_mixed_literal_and_var_ref_is_still_masked_in_redact_env() -> None:
+    """Same fix, through :func:`redact_env` directly (the ``scan --scaffold``
+    starter-renderer path, not only :func:`redact_target_yaml`)."""
+    out = redact_env({"DATABASE_URL": f"postgres://admin:{_FAKE_DB_PASSWORD}@${{DB_HOST}}/db"})
+    rendered = str(out)
+    assert _FAKE_DB_PASSWORD not in rendered
+    assert "${DB_HOST}" not in rendered
+
+
 def test_redact_target_yaml_never_resolves_an_existing_var_ref_to_its_live_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

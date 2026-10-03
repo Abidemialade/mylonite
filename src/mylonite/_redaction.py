@@ -48,6 +48,7 @@ __all__ = [
     "redact_value",
     "register_masked_value",
     "target_env_refs",
+    "target_file_var_names",
     "target_masked_fields",
     "target_yaml_env_ref_name",
 ]
@@ -640,29 +641,86 @@ CREDENTIAL_TOP_LEVEL_SECTIONS: Final[tuple[str, ...]] = ("headers",)
 CREDENTIAL_NESTED_SECTIONS: Final[tuple[tuple[str, str], ...]] = (("request", "headers"),)
 CREDENTIAL_ENV_FIELD: Final[str] = "env"
 
-#: ``${VAR_NAME}`` anywhere inside a string — the same shell-style indirection
-#: syntax ``load_target_file``'s ``_expand_env_refs`` expands and
-#: ``docs/http-agent.md`` documents an operator can hand-write directly (e.g.
-#: ``Authorization: Bearer ${MY_TOKEN}``). A value that already contains one of
-#: these is already safely indirected: writing it to disk never puts a live
-#: secret there, so there is nothing for :func:`redact_target_yaml`/
-#: :func:`redact_env` to mask. Masking it ANYWAY used to re-wrap it into a NEW
-#: ``${MYLONITE_TARGET_...}`` placeholder, discarding the variable name the
-#: operator already exported (#183): ``Authorization: Bearer ${MY_TOKEN}``
-#: became ``Authorization: ${MYLONITE_TARGET_HEADERS_AUTHORIZATION}``, silently
-#: breaking the export the operator already had in their shell.
-_VAR_REF_PATTERN: Final = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
+#: ``${VAR_NAME}`` anywhere inside a string, NAME captured — the same
+#: shell-style indirection syntax ``load_target_file``'s ``_expand_env_refs``
+#: expands and ``docs/http-agent.md`` documents an operator can hand-write
+#: directly (e.g. ``Authorization: Bearer ${MY_TOKEN}``).
+_VAR_REF_PATTERN: Final = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+#: A value safe to leave UNMASKED: exactly one ``${VAR}`` reference, optionally
+#: preceded by a single auth-scheme word and a space, and nothing else.
+#: Anything else that merely CONTAINS ``${...}`` — a literal secret alongside a
+#: reference, e.g. ``postgres://admin:FAKEPW@${DB_HOST}/db``  # pragma: allowlist secret
+#: or ``session=FAKE; csrf=${X}`` — is NOT this shape and must still be masked
+#: (review fix: an earlier version of :func:`_is_pure_var_ref` matched with
+#: ``search`` instead of requiring the WHOLE value to be only this, so a
+#: literal secret riding alongside an unrelated reference was written to disk
+#: verbatim).
+_AUTH_SCHEME_VAR_REF: Final = re.compile(
+    r"^\s*(?:(?:Bearer|Basic|Token)\s+)?\$\{[A-Za-z_][A-Za-z0-9_]*\}\s*$", re.IGNORECASE
+)
 
 
-def _contains_var_ref(value: object) -> bool:
-    """True when ``value`` is a string already carrying a ``${VAR}`` reference.
+def _is_pure_var_ref(value: object) -> bool:
+    """True when ``value`` is a string that is PURELY a ``${VAR}`` reference
+    (optionally preceded by one ``Bearer``/``Basic``/``Token`` auth-scheme word
+    and a space) — the only shape safe to leave unmasked.
 
     Shared by :func:`redact_env` and :func:`redact_target_yaml`'s
-    header-section masking: both skip replacing a value that already
-    references an environment variable, instead of re-wrapping it into a
-    second, disconnected placeholder (#183).
+    header-section masking: both skip replacing a value of exactly this shape,
+    instead of re-wrapping it into a second, disconnected placeholder (#183).
+    Anything ELSE containing ``${...}`` — a literal secret next to a
+    reference — is masked exactly as it always was; this is deliberately NOT
+    an anywhere-in-the-string check.
     """
-    return isinstance(value, str) and _VAR_REF_PATTERN.search(value) is not None
+    return isinstance(value, str) and _AUTH_SCHEME_VAR_REF.match(value) is not None
+
+
+def target_file_var_names(text: str) -> list[str]:
+    """Every ``${VAR}`` NAME a target file's ``headers``/``request.headers``/
+    ``env`` sections reference, in file order, each name once — user-named
+    tokens included, not only the ``${MYLONITE_TARGET_...}`` placeholders
+    Mylonite itself writes (see :func:`target_env_refs` for those).
+
+    ``--env-file`` (``mylonite.cli._load_env_file``) additionally recognises
+    these names (#183): a hand-written target file's own
+    ``Authorization: Bearer ${MY_TOKEN}`` can then have ``MY_TOKEN`` set from
+    a ``.env`` file too, not only from the shell. Deliberately scoped to the
+    same three sections :func:`redact_target_yaml`/``_expand_env_refs``
+    already treat as credential-bearing — never ``system_prompt``,
+    ``purpose``, ``args`` or ``url``, which legitimately hold literal
+    ``${IDENTIFIER}``-shaped SSTI/template-injection test payloads.
+
+    Text that does not parse as a YAML mapping yields ``[]``.
+    """
+    import yaml
+
+    try:
+        data = yaml.safe_load(text)
+    except yaml.YAMLError:
+        return []
+    if not isinstance(data, dict):
+        return []
+    names: list[str] = []
+
+    def _collect(block: object) -> None:
+        if not isinstance(block, dict):
+            return
+        for value in block.values():
+            if isinstance(value, str):
+                for match in _VAR_REF_PATTERN.finditer(value):
+                    name = match.group(1)
+                    if name not in names:
+                        names.append(name)
+
+    for section in CREDENTIAL_TOP_LEVEL_SECTIONS:
+        _collect(data.get(section))
+    for parent_key, child_key in CREDENTIAL_NESTED_SECTIONS:
+        parent = data.get(parent_key)
+        if isinstance(parent, dict):
+            _collect(parent.get(child_key))
+    _collect(data.get(CREDENTIAL_ENV_FIELD))
+    return names
 
 
 def is_unresolved_var_placeholder(value: str) -> bool:
@@ -678,8 +736,7 @@ def is_unresolved_var_placeholder(value: str) -> bool:
     parse) it's silently wrong. ``--env-file`` (``mylonite.cli._load_env_file``)
     refuses it with a clear, named error instead of setting it.
 
-    Deliberately a WHOLE-value match, not :func:`_contains_var_ref`'s
-    anywhere-in-the-string search: an operator-chosen value that merely
+    Deliberately a WHOLE-value match: an operator-chosen value that merely
     CONTAINS ``${`` text (vanishingly rare for a provider key, but not
     impossible) is not this specific, well-understood footgun.
     """
@@ -703,7 +760,7 @@ def looks_like_credential_arg(value: str) -> bool:
 
     Used only to WARN (never mask or block): ``args`` is an unstructured
     string list with no key name to replace a value by (see
-    ``docs/target-file.md#a-credential-in-args-is-written-in-plain-text``), so
+    ``docs/target-file.md#a-credential-in-args-is-written-in-plain-text-and-now-warns``), so
     the caller names the position and withholds the value — never prints it,
     even redacted — and points the operator at ``env:``/``--env-file`` instead.
     """
@@ -798,13 +855,17 @@ def _is_secret_env(key: str, value: object) -> bool:
     signals a credential — otherwise the raw value is written unmasked into
     the persisted ``target.yaml`` copy.
 
-    A value that already contains a ``${VAR}`` reference (:func:`_contains_var_ref`)
-    is never masked, whatever its key name: it is already safely indirected,
-    and masking it anyway would re-wrap it into a second, disconnected
+    A value that is PURELY a ``${VAR}`` reference (:func:`_is_pure_var_ref`,
+    optionally preceded by a single auth-scheme word) is never masked,
+    whatever its key name: it is already safely indirected, and masking it
+    anyway would re-wrap it into a second, disconnected
     ``${MYLONITE_TARGET_...}`` placeholder, discarding the variable name the
-    operator already set (#183).
+    operator already set (#183). A value that merely CONTAINS one of these
+    references alongside a literal secret — a DB URL with a real password and
+    a ``${HOST}`` reference — is not this shape and is masked exactly as
+    before.
     """
-    if _contains_var_ref(value):
+    if _is_pure_var_ref(value):
         return False
     if _key_looks_secret(key):
         return True
@@ -853,17 +914,23 @@ def redact_target_yaml(text: str) -> str:
     ``${VAR}`` references and fails loudly (never with an empty/broken
     credential) if one is unset.
 
-    A value that ALREADY contains a ``${VAR}`` reference (:func:`_contains_var_ref`)
-    is left exactly as written instead — never re-wrapped into a second,
+    A value that is PURELY a ``${VAR}`` reference (:func:`_is_pure_var_ref`,
+    optionally preceded by a single auth-scheme word such as ``Bearer``) is
+    left exactly as written instead — never re-wrapped into a second,
     disconnected ``${MYLONITE_TARGET_...}`` placeholder (#183). Before this, an
     operator's own ``Authorization: Bearer ${MY_TOKEN}`` became
     ``Authorization: ${MYLONITE_TARGET_HEADERS_AUTHORIZATION}``, silently
     orphaning the ``MY_TOKEN`` export they already had in their shell, and
     requiring that new variable to hold the WHOLE header value (``Bearer
-    ...``), not just the token. This function never resolves a ``${VAR}``
-    reference from the live environment either way: writing never expands,
-    only loading does, so no live secret value can reach the written file
-    through this path.
+    ...``), not just the token. A value that merely CONTAINS a reference
+    alongside a literal secret (a cookie with a real session value and a
+    ``${X}`` reference, a DB URL with a real password and a ``${HOST}``
+    reference) is NOT this shape and is masked whole, exactly as on a value
+    with no reference at all — the check is purely-this-shape, never
+    anywhere-in-the-string. This function never
+    resolves a ``${VAR}`` reference from the live environment either way:
+    writing never expands, only loading does, so no live secret value can
+    reach the written file through this path.
 
     A document that does not parse as a YAML mapping falls back to
     :func:`redact` over the raw text — a malformed file is never persisted
@@ -897,7 +964,7 @@ def redact_target_yaml(text: str) -> str:
     for section in CREDENTIAL_TOP_LEVEL_SECTIONS:
         block = data.get(section)
         if isinstance(block, dict):
-            to_mask = [k for k, v in block.items() if not _contains_var_ref(v)]
+            to_mask = [k for k, v in block.items() if not _is_pure_var_ref(v)]
             ref_names = _dedupe_ref_names((section,), to_mask)
             data[section] = {
                 k: (f"${{{ref_names[k]}}}" if k in ref_names else v) for k, v in block.items()
@@ -910,7 +977,7 @@ def redact_target_yaml(text: str) -> str:
         if isinstance(parent, dict):
             block = parent.get(child_key)
             if isinstance(block, dict):
-                to_mask = [k for k, v in block.items() if not _contains_var_ref(v)]
+                to_mask = [k for k, v in block.items() if not _is_pure_var_ref(v)]
                 ref_names = _dedupe_ref_names((parent_key, child_key), to_mask)
                 parent[child_key] = {
                     k: (f"${{{ref_names[k]}}}" if k in ref_names else v) for k, v in block.items()

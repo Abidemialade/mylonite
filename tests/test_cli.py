@@ -275,6 +275,29 @@ def test_scan_refuses_command_alone_combined_with_target_file(tmp_path: Path) ->
     assert "--arg" not in err
 
 
+def test_scan_refusal_names_mylonite_yaml_when_target_file_came_from_there(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Minor review fix: when target_file is filled in from an
+    auto-discovered mylonite.yaml rather than typed on the command line, the
+    refusal must say so -- telling the operator to "drop --target-file" when
+    they never passed that flag points them at the wrong fix."""
+    monkeypatch.chdir(tmp_path)
+    target_file = tmp_path / "app.yaml"
+    target_file.write_text(
+        "family: custom\ncommand: python\nargs: [server.py]\nweakness_classes: []\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "mylonite.yaml").write_text(
+        f"target_file: {target_file.as_posix()}\nauthorize: custom\n", encoding="utf-8"
+    )
+    result = runner.invoke(app, ["scan", "--env", "FOO=bar"])
+    assert result.exit_code == EXIT_CONFIG, result.output
+    err = result.stderr or result.output
+    assert "mylonite.yaml" in err
+    assert "drop --target-file" not in err
+
+
 def test_classify_tools_happy_path() -> None:
     """A remember/recall/send_email/list_sent surface yields a usable seed_arm,
     an id-free retrieval path, an effect verify tool, and the W4 sink."""
@@ -1230,6 +1253,84 @@ def test_env_file_accepts_a_real_value_shaped_differently_from_a_placeholder(
         assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-test-1234567890"
     finally:
         os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def test_env_file_loads_mylonite_target_prefixed_vars(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#183 bullet 1: --env-file additionally recognises every
+    MYLONITE_TARGET_* name -- the placeholders Mylonite itself writes into a
+    redacted target file -- not only provider-key-shaped names."""
+    monkeypatch.delenv("MYLONITE_TARGET_ENV_GITHUB_TOKEN", raising=False)
+    env_file = tmp_path / ".env"
+    fake_value = "fake-gh-token-not-a-real-secret"
+    env_file.write_text(f"MYLONITE_TARGET_ENV_GITHUB_TOKEN={fake_value}\n", encoding="utf-8")
+    result = runner.invoke(app, ["--env-file", str(env_file), "version"])
+    assert result.exit_code == 0, result.output
+    try:
+        assert os.environ.get("MYLONITE_TARGET_ENV_GITHUB_TOKEN") == fake_value
+        assert "ignored MYLONITE_TARGET_ENV_GITHUB_TOKEN" not in (result.stderr or result.output)
+        # Loaded, but the value itself is never echoed.
+        assert fake_value not in (result.stderr or result.output)
+    finally:
+        os.environ.pop("MYLONITE_TARGET_ENV_GITHUB_TOKEN", None)
+
+
+def test_env_file_loads_a_name_the_targeted_file_itself_references(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#183 bullet 1: --env-file additionally recognises a USER-NAMED token
+    (not MYLONITE_TARGET_*-prefixed, not provider-key-shaped) when the
+    --target-file this run is about to load references it as ${NAME}. The
+    loaded value must never appear in stdout/stderr."""
+    monkeypatch.delenv("MY_TOKEN", raising=False)
+    fake_value = "fake-token-value-not-a-real-secret"
+    target_file = tmp_path / "app.yaml"
+    target_file.write_text(
+        "family: custom\ncommand: python\nargs: [server.py]\nweakness_classes: []\n"
+        "headers:\n  Authorization: Bearer ${MY_TOKEN}\n",
+        encoding="utf-8",
+    )
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"MY_TOKEN={fake_value}\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "--env-file",
+            str(env_file),
+            "scan",
+            "--target-file",
+            str(target_file),
+            "--authorize",
+            "custom",
+            "--dry-run",
+            "--model",
+            "ollama_chat/llama3.2:3b",
+        ],
+    )
+    try:
+        combined = (result.stderr or "") + (result.stdout or result.output or "")
+        assert fake_value not in combined
+        assert os.environ.get("MY_TOKEN") == fake_value
+        assert "loaded MY_TOKEN" in combined
+    finally:
+        os.environ.pop("MY_TOKEN", None)
+
+
+def test_env_file_does_not_load_an_unrelated_users_var_with_no_target_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guard the guard: with no --target-file referencing it, a bare
+    user-named token is still dropped -- #183's fix is scoped to names the
+    run's OWN target file declares a need for, not an open allowlist."""
+    monkeypatch.delenv("MY_TOKEN", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("MY_TOKEN=fake-token-value\n", encoding="utf-8")
+    result = runner.invoke(app, ["--env-file", str(env_file), "version"])
+    assert result.exit_code == 0, result.output
+    assert os.environ.get("MY_TOKEN") is None
+    assert "ignored MY_TOKEN" in (result.stderr or result.output)
 
 
 def test_scan_refuses_non_reference_without_authorize() -> None:
