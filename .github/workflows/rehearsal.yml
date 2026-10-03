@@ -1,0 +1,429 @@
+# Rehearsal: times and records a first-time user's path through the
+# published journey docs (try it, point it at a server, find a weakness),
+# on a clean install of the checked-out package, across operating systems,
+# the two bundled example servers and every supported model provider.
+#
+# `verification/rehearsal/journey.sh` is not written by hand here. A fresh
+# agent holding only the journey docs generates it, and this workflow runs
+# that script VERBATIM, in a scratch git repository, never the checkout
+# itself. Any place the script's actual behaviour diverges from what the
+# docs promise is a docs bug to fix, not a workflow bug to route around. See
+# verification/rehearsal/README.md.
+#
+# Manual dispatch only, with `providers`, `oses` and `servers` each a
+# comma-separated subset of a fixed vocabulary (workflow_dispatch has no
+# multi-select input type). The `plan` job validates and clamps every
+# input, then cross-products the chosen subsets into two matrices -- one
+# per OS -- that the two `rehearse-*` jobs below run.
+#
+# Two cell shapes are dropped from the cross-product, not substituted for
+# free -- cost and feasibility, not oversight:
+#   - every Windows + ollama cell: GitHub-hosted Windows runners cannot
+#     host the service container this workflow uses for Ollama on Linux
+#     (service containers need a Linux runner), so Windows only ever runs
+#     the two hosted providers;
+#   - Windows + kitchen-sink + a hosted provider (anthropic or openai): the
+#     budgeted hosted cells are server-memory on both OSes plus the
+#     kitchen sink on Linux only -- a Windows kitchen-sink cell against a
+#     hosted provider is not in that budget and is excluded rather than
+#     run uncounted.
+# Every Ollama cell, and the two dropped Windows shapes above, cost
+# nothing.
+#
+# A hosted cell maps exactly one provider key, scoped only to the step that
+# runs the journey script -- never job-wide -- using the same two repo
+# secrets third-party-campaign.yml uses (MYLONITE_LLM_KEY for Anthropic,
+# MYLONITE_OPENAI_KEY for OpenAI). A dispatch with the matching key unset
+# skips that cell with a notice rather than failing the job. Ollama needs
+# no key.
+name: rehearsal
+
+on:
+  workflow_dispatch:
+    inputs:
+      providers:
+        description: "Comma-separated subset of: anthropic, openai, ollama"
+        default: "anthropic,openai,ollama"
+      oses:
+        description: "Comma-separated subset of: ubuntu-latest, windows-latest"
+        default: "ubuntu-latest,windows-latest"
+      servers:
+        description: "Comma-separated subset of: server-memory, kitchen-sink"
+        default: "server-memory,kitchen-sink"
+      max_llm_calls:
+        description: >-
+          Per-process --max-llm-calls cap for a hosted cell, 1-150. The
+          default (80) keeps a hosted cell at or under about $0.40 at
+          roughly $0.005 a call.
+        default: "80"
+      ref:
+        description: "branch, tag or sha to check out and rehearse"
+        default: "main"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rehearsal
+  cancel-in-progress: false
+
+jobs:
+  # Builds the two OS-specific (server x provider) matrices from the
+  # dispatch inputs and clamps max_llm_calls, in one place, so the two
+  # rehearse-* jobs below only ever see validated values.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix_linux: ${{ steps.build.outputs.matrix_linux }}
+      matrix_windows: ${{ steps.build.outputs.matrix_windows }}
+      max_llm_calls: ${{ steps.build.outputs.max_llm_calls }}
+    steps:
+      - name: Validate the subsets, clamp max_llm_calls, build both matrices
+        id: build
+        shell: bash
+        env:
+          REH_PROVIDERS: ${{ inputs.providers }}
+          REH_OSES: ${{ inputs.oses }}
+          REH_SERVERS: ${{ inputs.servers }}
+          REH_MAX_LLM_CALLS_RAW: ${{ inputs.max_llm_calls }}
+        run: |
+          cat > "$RUNNER_TEMP/build_matrix.py" <<'PY'
+          import json
+          import os
+          import sys
+
+          def parse(name, allowed):
+              raw = os.environ[name]
+              seen = []
+              for item in raw.split(","):
+                  item = item.strip()
+                  if not item or item in seen:
+                      continue
+                  if item not in allowed:
+                      print(
+                          f"::error::{name} has an unknown value '{item}'; "
+                          f"allowed values are {sorted(allowed)}",
+                          file=sys.stderr,
+                      )
+                      sys.exit(1)
+                  seen.append(item)
+              if not seen:
+                  print(f"::error::{name} must name at least one value", file=sys.stderr)
+                  sys.exit(1)
+              return seen
+
+          providers = parse("REH_PROVIDERS", {"anthropic", "openai", "ollama"})
+          oses = parse("REH_OSES", {"ubuntu-latest", "windows-latest"})
+          servers = parse("REH_SERVERS", {"server-memory", "kitchen-sink"})
+
+          raw_calls = os.environ["REH_MAX_LLM_CALLS_RAW"].strip()
+          if not raw_calls.isdigit():
+              print(f"::error::max_llm_calls must be a positive integer, got '{raw_calls}'", file=sys.stderr)
+              sys.exit(1)
+          max_llm_calls = max(1, min(int(raw_calls), 150))
+          if str(max_llm_calls) != raw_calls:
+              print(f"::notice::max_llm_calls clamped from {raw_calls} to {max_llm_calls} (range 1-150)")
+
+          linux_cells = []
+          windows_cells = []
+          dropped = []
+
+          if "ubuntu-latest" in oses:
+              for server in servers:
+                  for provider in providers:
+                      linux_cells.append({"server": server, "provider": provider})
+
+          if "windows-latest" in oses:
+              for server in servers:
+                  for provider in providers:
+                      if provider == "ollama":
+                          dropped.append(("windows-latest", server, provider, "no Windows service containers"))
+                          continue
+                      if server == "kitchen-sink":
+                          dropped.append(("windows-latest", server, provider, "not a budgeted hosted cell"))
+                          continue
+                      windows_cells.append({"server": server, "provider": provider})
+
+          for os_name, server, provider, why in dropped:
+              print(f"::notice::dropped {os_name}/{server}/{provider}: {why}")
+
+          if not linux_cells and not windows_cells:
+              print("::warning::every requested cell was dropped; both rehearse jobs will be skipped")
+
+          github_output = os.environ["GITHUB_OUTPUT"]
+          with open(github_output, "a", encoding="utf-8") as fh:
+              fh.write(f"matrix_linux={json.dumps(linux_cells)}\n")
+              fh.write(f"matrix_windows={json.dumps(windows_cells)}\n")
+              fh.write(f"max_llm_calls={max_llm_calls}\n")
+          PY
+          python3 "$RUNNER_TEMP/build_matrix.py"
+
+  rehearse-linux:
+    needs: plan
+    if: needs.plan.outputs.matrix_linux != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix_linux) }}
+    # Pinned by digest, started as a service container rather than an
+    # unpinned `curl ... | sh` install script -- same choice
+    # third-party-campaign.yml makes, for the same reason. Always started,
+    # even for a cell that doesn't need it (an anthropic or openai cell):
+    # simpler than a conditional service, and the extra container costs
+    # only a few seconds of job time.
+    services:
+      ollama:
+        image: ollama/ollama:0.35.0@sha256:9c1dc45ea758396139ec0adfa52947714c61f8d1e4537a6e2daef8138e7a64a9
+        ports:
+          - 11434:11434
+    env:
+      REH_SERVER: ${{ matrix.server }}
+      REH_PROVIDER: ${{ matrix.provider }}
+    steps:
+      # No `secrets.*` in an `if:` (GitHub rejects that outright) -- both
+      # keys are read into this step's OWN env, purely to test
+      # non-emptiness, following the same pattern third-party-campaign.yml
+      # uses.
+      - name: "Guard: skip this cell if its provider key is unset (ollama needs none)"
+        id: guard
+        shell: bash
+        env:
+          REH_ANTHROPIC_KEY_PRESENT: ${{ secrets.MYLONITE_LLM_KEY }}
+          REH_OPENAI_KEY_PRESENT: ${{ secrets.MYLONITE_OPENAI_KEY }}
+        run: |
+          case "$REH_PROVIDER" in
+            anthropic)
+              if [ -z "$REH_ANTHROPIC_KEY_PRESENT" ]; then
+                echo "::notice::MYLONITE_LLM_KEY is not set; skipping this cell."
+                echo "run=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              ;;
+            openai)
+              if [ -z "$REH_OPENAI_KEY_PRESENT" ]; then
+                echo "::notice::MYLONITE_OPENAI_KEY is not set; skipping this cell."
+                echo "run=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              ;;
+            ollama)
+              : # no key needed
+              ;;
+          esac
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.guard.outputs.run == 'true'
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.guard.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+
+      # Node only for the bundled memory server (an @modelcontextprotocol
+      # package run through npx); the kitchen sink is a pip package.
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        if: steps.guard.outputs.run == 'true' && env.REH_SERVER == 'server-memory'
+        with:
+          node-version: "22"
+
+      - name: Resolve this cell's model (no override)
+        if: steps.guard.outputs.run == 'true'
+        id: model
+        shell: bash
+        run: |
+          case "$REH_PROVIDER" in
+            anthropic) echo "model=anthropic/claude-haiku-4-5-20251001" >> "$GITHUB_OUTPUT" ;;
+            openai)    echo "model=openai/gpt-4o-mini" >> "$GITHUB_OUTPUT" ;;
+            ollama)    echo "model=ollama_chat/llama3.2:3b" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::unknown provider $REH_PROVIDER"; exit 1 ;;
+          esac
+
+      # Installs the checked-out `ref` the way the quickstart docs install a
+      # release -- `pip install` of the package -- rather than an editable
+      # dev install, so this measures what a first-time user actually gets.
+      - name: Install Mylonite from the checked-out ref
+        if: steps.guard.outputs.run == 'true'
+        shell: bash
+        run: python -m pip install "$GITHUB_WORKSPACE"
+
+      - name: Install the kitchen-sink reference app from PyPI
+        if: steps.guard.outputs.run == 'true' && env.REH_SERVER == 'kitchen-sink'
+        shell: bash
+        run: python -m pip install mcp-kitchen-sink
+
+      - name: "Ollama cell: pull the small local model"
+        if: steps.guard.outputs.run == 'true' && env.REH_PROVIDER == 'ollama'
+        shell: bash
+        run: |
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 2; done
+          curl -sf http://127.0.0.1:11434/api/pull -d '{"name":"llama3.2:3b","stream":false}'
+
+      # The journey script's gate step commits and opens a branch -- it
+      # must never do that in this checkout. Everything the script touches
+      # happens in this throwaway repo instead.
+      - name: Create a fresh scratch git repo for the journey
+        if: steps.guard.outputs.run == 'true'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/rehearsal-scratch"
+          cd "$RUNNER_TEMP/rehearsal-scratch"
+          git init -q
+          git config user.email "rehearsal@example.invalid"
+          git config user.name "Mylonite Rehearsal"
+          echo "REH_SCRATCH=$RUNNER_TEMP/rehearsal-scratch" >> "$GITHUB_ENV"
+
+      - name: Run the journey script end to end
+        if: steps.guard.outputs.run == 'true'
+        id: journey
+        shell: bash
+        env:
+          # The only step in this job whose env carries a real provider
+          # key used to drive a live call; the guard step above only
+          # checks presence, never the value.
+          ANTHROPIC_API_KEY: ${{ env.REH_PROVIDER == 'anthropic' && secrets.MYLONITE_LLM_KEY || '' }}
+          OPENAI_API_KEY: ${{ env.REH_PROVIDER == 'openai' && secrets.MYLONITE_OPENAI_KEY || '' }}
+          OLLAMA_API_BASE: http://127.0.0.1:11434
+          REH_MODEL: ${{ steps.model.outputs.model }}
+          REH_MAX_LLM_CALLS: ${{ needs.plan.outputs.max_llm_calls }}
+        run: |
+          cd "$REH_SCRATCH"
+          set +e
+          bash "$GITHUB_WORKSPACE/verification/rehearsal/journey.sh" 2>&1 | tee "$RUNNER_TEMP/rehearsal-console.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "journey.sh exited $rc" >> "$RUNNER_TEMP/rehearsal-console.log"
+
+      - name: Upload this cell's artefacts
+        if: always() && steps.guard.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rehearsal-ubuntu-latest-${{ matrix.server }}-${{ matrix.provider }}
+          path: |
+            ${{ runner.temp }}/rehearsal-console.log
+            ${{ runner.temp }}/rehearsal-scratch/reh_timing.csv
+            ${{ runner.temp }}/rehearsal-scratch/.mylonite/**
+          if-no-files-found: warn
+
+  # No ollama cell ever reaches this job (the plan job drops every
+  # Windows + ollama combination), so there is no service container and no
+  # model-pull step here at all.
+  rehearse-windows:
+    needs: plan
+    if: needs.plan.outputs.matrix_windows != '[]'
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.plan.outputs.matrix_windows) }}
+    env:
+      REH_SERVER: ${{ matrix.server }}
+      REH_PROVIDER: ${{ matrix.provider }}
+    steps:
+      - name: "Guard: skip this cell if its provider key is unset"
+        id: guard
+        shell: bash
+        env:
+          REH_ANTHROPIC_KEY_PRESENT: ${{ secrets.MYLONITE_LLM_KEY }}
+          REH_OPENAI_KEY_PRESENT: ${{ secrets.MYLONITE_OPENAI_KEY }}
+        run: |
+          case "$REH_PROVIDER" in
+            anthropic)
+              if [ -z "$REH_ANTHROPIC_KEY_PRESENT" ]; then
+                echo "::notice::MYLONITE_LLM_KEY is not set; skipping this cell."
+                echo "run=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              ;;
+            openai)
+              if [ -z "$REH_OPENAI_KEY_PRESENT" ]; then
+                echo "::notice::MYLONITE_OPENAI_KEY is not set; skipping this cell."
+                echo "run=false" >> "$GITHUB_OUTPUT"
+                exit 0
+              fi
+              ;;
+          esac
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.guard.outputs.run == 'true'
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.guard.outputs.run == 'true'
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        if: steps.guard.outputs.run == 'true' && env.REH_SERVER == 'server-memory'
+        with:
+          node-version: "22"
+
+      - name: Resolve this cell's model (no override)
+        if: steps.guard.outputs.run == 'true'
+        id: model
+        shell: bash
+        run: |
+          case "$REH_PROVIDER" in
+            anthropic) echo "model=anthropic/claude-haiku-4-5-20251001" >> "$GITHUB_OUTPUT" ;;
+            openai)    echo "model=openai/gpt-4o-mini" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::unknown provider $REH_PROVIDER"; exit 1 ;;
+          esac
+
+      - name: Install Mylonite from the checked-out ref
+        if: steps.guard.outputs.run == 'true'
+        shell: bash
+        run: python -m pip install "$GITHUB_WORKSPACE"
+
+      - name: Install the kitchen-sink reference app from PyPI
+        if: steps.guard.outputs.run == 'true' && env.REH_SERVER == 'kitchen-sink'
+        shell: bash
+        run: python -m pip install mcp-kitchen-sink
+
+      - name: Create a fresh scratch git repo for the journey
+        if: steps.guard.outputs.run == 'true'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/rehearsal-scratch"
+          cd "$RUNNER_TEMP/rehearsal-scratch"
+          git init -q
+          git config user.email "rehearsal@example.invalid"
+          git config user.name "Mylonite Rehearsal"
+          echo "REH_SCRATCH=$RUNNER_TEMP/rehearsal-scratch" >> "$GITHUB_ENV"
+
+      - name: Run the journey script end to end
+        if: steps.guard.outputs.run == 'true'
+        id: journey
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY: ${{ env.REH_PROVIDER == 'anthropic' && secrets.MYLONITE_LLM_KEY || '' }}
+          OPENAI_API_KEY: ${{ env.REH_PROVIDER == 'openai' && secrets.MYLONITE_OPENAI_KEY || '' }}
+          REH_MODEL: ${{ steps.model.outputs.model }}
+          REH_MAX_LLM_CALLS: ${{ needs.plan.outputs.max_llm_calls }}
+        run: |
+          cd "$REH_SCRATCH"
+          set +e
+          bash "$GITHUB_WORKSPACE/verification/rehearsal/journey.sh" 2>&1 | tee "$RUNNER_TEMP/rehearsal-console.log"
+          rc=${PIPESTATUS[0]}
+          set -e
+          echo "journey.sh exited $rc" >> "$RUNNER_TEMP/rehearsal-console.log"
+
+      - name: Upload this cell's artefacts
+        if: always() && steps.guard.outputs.run == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rehearsal-windows-latest-${{ matrix.server }}-${{ matrix.provider }}
+          path: |
+            ${{ runner.temp }}/rehearsal-console.log
+            ${{ runner.temp }}/rehearsal-scratch/reh_timing.csv
+            ${{ runner.temp }}/rehearsal-scratch/.mylonite/**
+          if-no-files-found: warn
