@@ -256,7 +256,8 @@ for a `vulnerable_launch` twin.
   otherwise it is a commented hint. Check that it reads back what an attack would change.
   With no `effect_probe` in effect, a W3 or W4 class on a custom target reads NOT TESTED
   ([`MYL-NT-017`](reason-codes.md#myl-nt-017)) unless an attempt in it fires.
-  Not available on a `transport: rest` target, where W3 and W4 read NOT
+  Not available on a `transport: rest` target: declaring one there is refused on load
+  with exit `2`, before any model call, and W3 and W4 read NOT
   TESTED ([`MYL-NT-016`](reason-codes.md#myl-nt-016)). `expect_marker` proves it fired; `deferred_markers` mean the action
   was *defended* (e.g. queued for approval), not a success. List in `deferred_markers` only
   words that mark a held item in the verify tool's output, never a word that also shows for

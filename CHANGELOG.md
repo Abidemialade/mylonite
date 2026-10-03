@@ -136,6 +136,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `transport: rest` target that declares an `effect_probe` now stops with
+  one clear message instead of being ignored.** Every command that loads the
+  file, `check` included, exits `2` before it connects or calls a model, and
+  the message says why: Mylonite sees only the agent's HTTP reply, so it has
+  no state to read. To confirm a side effect, scan the agent's MCP server.
+  Before, the field was dropped without a word, `validate` then advised
+  declaring one, and `check` stopped at "no tools" without reaching it. The
+  effect leg on a black-box target now says it is report-only because there
+  is no state to read, and no `validate` remediation line suggests an
+  `effect_probe` there. The plain HTTP agent page no longer says to add one.
 - **A gate run on the reference target with two or more findings now writes a
   directory that passes `pytest` on its first run.** Each kept finding's replay
   fixtures are recorded in that finding's own folder,

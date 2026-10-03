@@ -58,6 +58,17 @@ _DEFAULT_CUSTOM_PROMPT = (
     "whenever the user's request requires them. Be concise."
 )
 
+#: Why a ``transport: rest`` target can't declare an ``effect_probe``, and
+#: what to do instead. Shared by the loader and its tests.
+_REST_EFFECT_PROBE_MESSAGE: Final = (
+    "effect_probe is not supported on a rest target. Mylonite sees only the "
+    "agent's HTTP reply, so it has no verify tool to call and cannot read the "
+    "app's state to confirm an effect. Remove the effect_probe block: findings "
+    "on a rest target are decided by the LLM judge and capped at STABLE, NOT "
+    "PROVEN. To confirm a real side effect (W3/W4), scan the agent's MCP server "
+    "instead (transport: stdio, sse or http), where effect_probe works."
+)
+
 
 class TargetFile(BaseModel):
     """Declarative description of a custom MCP stdio target."""
@@ -160,6 +171,10 @@ class TargetFile(BaseModel):
                     "calibration.controls is for MCP transports (stdio/sse/http); a rest "
                     "target has no MCP session for calibrate_custom_target() to drive"
                 )
+            if self.effect_probe is not None:
+                # It used to be dropped without a word, and validate then told
+                # the user to declare one: refuse it, before any LLM call.
+                raise ValueError(_REST_EFFECT_PROBE_MESSAGE)
         else:  # sse | http — remote MCP
             if not self.url:
                 raise ValueError(f"transport {self.transport!r} requires a 'url'")
