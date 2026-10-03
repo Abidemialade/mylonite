@@ -416,6 +416,21 @@ the action in an issue first and it can be added to the allowlist.
 guards.** If you spot a way around any of the above, that is a security report,
 not a pull request — see [SECURITY.md](./SECURITY.md).
 
+## Issue triage
+
+For the four weeks after a launch, every new issue gets a first response —
+even a short one acknowledging it and setting expectations — within 48 hours.
+Outside that window, triage is best-effort: a maintainer labels and prioritizes
+issues as time allows, but there's no response-time commitment.
+
+Use the [bug report](.github/ISSUE_TEMPLATE/bug_report.yml) template for
+something that doesn't work, and the
+[false result](.github/ISSUE_TEMPLATE/false_result.yml) template specifically
+for a kept finding, a clean result, or a NOT TESTED row that doesn't match
+reality — it asks for the `scan_report.json` or `validation_report.json`
+behind the result, with secrets removed, since reproducing a wrong verdict
+needs the exact report that produced it.
+
 ## Cutting a release
 
 ```bash

@@ -35,6 +35,15 @@ body:
     validations:
       required: true
 
+  - type: input
+    id: command
+    attributes:
+      label: Exact command
+      description: The full `mylonite ...` command that triggered the bug, flags included.
+      placeholder: "mylonite scan --target-file app.yaml --authorize my-app"
+    validations:
+      required: true
+
   - type: textarea
     id: what-happened
     attributes:
@@ -58,6 +67,17 @@ body:
       render: shell
     validations:
       required: true
+
+  - type: input
+    id: reason-codes
+    attributes:
+      label: Reason codes
+      description: >-
+        Any `MYL-...` codes in the output (for example `MYL-NT-017`, `MYL-ABT-001`).
+        See `docs/reason-codes.md`. Leave blank if the output showed none.
+      placeholder: "MYL-NT-017"
+    validations:
+      required: false
 
   - type: textarea
     id: logs
