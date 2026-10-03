@@ -865,10 +865,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scan`, `generate` and `validate`, unmodified, ran live in CI against six
   MCP and agent systems Mylonite had never run against before. Two —
   `@modelcontextprotocol/server-memory` and `redis/mcp-redis` — kept a
-  reproducible W4 finding across three independent re-drives, on every
-  provider tried, including a 3B model running locally at zero cost. Full
-  numbers, caveats, and the three product bugs it surfaced:
-  `verification/results/0.12.0/third-party/README.md`, with
+  reproducible W4 finding across three independent re-drives, on both Haiku
+  4.5 and gpt-4o-mini (the finding is proven at the dispatched-tool-linked
+  level, not confirmed by a state read-back, since the effect probe failed to
+  calibrate on both targets). `server-memory` also kept once on a third
+  model, `llama3.2:3b`, run inside the CI runner as an informational cell.
+  Full numbers, caveats, and the two product bugs it surfaced (both since
+  fixed): `verification/results/0.12.0/third-party/README.md`, with
   `verification/CAPABILITY_MATRIX.md`, `verification/FINDINGS.md` and
   `verification/TRENDS.md` (now carrying a third-party section alongside the
   academic one) updated to match.

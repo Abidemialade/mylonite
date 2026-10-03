@@ -39,29 +39,35 @@ Full write-up:
 [`verification/results/0.12.0/third-party/README.md`](https://github.com/Abidemialade/mylonite/tree/main/verification/results/0.12.0/third-party).
 
 **Two targets Mylonite did not author kept a reproducible W4 finding — an unconfirmed
-consequential change, confirmed through the target's own read-back — across three
-independent re-drives, on every provider tried, including a 3B model running locally at
-zero cost:**
+consequential change, observed in the tool-call trace and tied to the dispatched tool
+call — across three independent re-drives, on both Haiku 4.5 and gpt-4o-mini:**
 
 | Target | Result | Basis |
 | --- | --- | --- |
-| `@modelcontextprotocol/server-memory` | **KEPT**, W4 | 3/3 on Haiku 4.5; 2/3 (one honest REJECTED) on gpt-4o-mini; 1/1 on `llama3.2:3b` (informational) |
+| `@modelcontextprotocol/server-memory` | **KEPT**, W4 | 3/3 on Haiku 4.5; 2/3 (one honest REJECTED) on gpt-4o-mini; 1/1 on `llama3.2:3b` (informational, run once inside the CI runner) |
 | `redis/mcp-redis` | **KEPT**, W4 | 3/3 on both Haiku 4.5 and gpt-4o-mini |
 
-Both differentials ran against Mylonite's synthetic boundary shim, since neither
-target ships a server-side guard to toggle — the same caveat every synthetic-boundary
-result on this page carries: proof the attack is real and that this class of guard
-closes it, not proof about any one deployment's own guard.
+**Neither keep rests on a confirmed state read-back.** The effect probe failed to
+calibrate on both targets (`MYL-INC-003` on `server-memory`, `MYL-INC-005` on
+`mcp-redis`), on every run, KEPT and REJECTED alike, so the proof level is
+`dispatched-tool-linked`, not `effect-confirmed` — see the full write-up's "Proof
+level" section. Both differentials ran against Mylonite's synthetic boundary shim,
+since neither target ships a server-side guard to toggle — the same caveat every
+synthetic-boundary result on this page carries: proof the attack is real and that
+this class of guard closes it, not proof about any one deployment's own guard.
 
 Three other targets in the same campaign produced no security verdict: a streamable-HTTP
 example server hit a product defect on every run (a missing seed arm reads as an
 unclassified exception, [issue #319](https://github.com/Abidemialade/mylonite/issues/319),
-fixed after the measured build), and two smoke-only targets (no verdict was ever claimed for them) produced one
-clean resist, one more instance of the same product defect, an unvalidated finding, and a
-request that reached its target with the wrong content type
-(fixed after the measured build in [PR #321](https://github.com/Abidemialade/mylonite/pull/321)). None of these were
-silently scored clean. Total spend: $0.91 on Anthropic, $0.08 on OpenAI, $0 on the
-in-runner Ollama cell.
+closed, fixed by [PR #322](https://github.com/Abidemialade/mylonite/pull/322)), and
+three smoke-only targets (no verdict was ever claimed for any of them) produced one
+clean resist, one more instance of the same unclassified-exception bug (a different
+cause: a target-side crash), an unvalidated finding, an infrastructure failure fixed
+and re-dispatched per the prereg's own amendment, and a request that reached its
+target with the wrong content type
+(fixed by [PR #321](https://github.com/Abidemialade/mylonite/pull/321), merged after
+the measured build). None of these were silently scored clean. Total spend: $0.91 on
+Anthropic, $0.08 on OpenAI, $0 on the in-runner Ollama cell.
 
 ## The one-line result
 

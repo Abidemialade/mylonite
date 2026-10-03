@@ -112,29 +112,36 @@ write-up: [`results/0.12.0/third-party/README.md`](results/0.12.0/third-party/RE
 
 | Target | Result | Basis |
 | --- | --- | --- |
-| `@modelcontextprotocol/server-memory` | **KEPT**, W4 | 3/3 re-drives on Haiku 4.5; 2/3 (one honest REJECTED) on gpt-4o-mini; 1/1 on `llama3.2:3b` (informational) |
+| `@modelcontextprotocol/server-memory` | **KEPT**, W4 | 3/3 re-drives on Haiku 4.5; 2/3 (one honest REJECTED) on gpt-4o-mini; 1/1 on `llama3.2:3b` (informational, in the CI runner) |
 | `redis/mcp-redis` | **KEPT**, W4 | 3/3 on both Haiku 4.5 and gpt-4o-mini |
-| `simple-streamablehttp` (MCP Python SDK example) | product defect, not a verdict | 3/3 on both providers — a missing seed arm reads as an unclassified exception (issue #319, fixed after the measured build in #322), not a false clean |
-| `@modelcontextprotocol/server-everything` (smoke) | 1 clean resist, 1 product defect | the Haiku run hit a target-side transport crash, same root cause as issue #319 |
+| `simple-streamablehttp` (MCP Python SDK example) | product defect, not a verdict | 3/3 on both providers — a missing seed arm reads as an unclassified exception (issue #319, closed, fixed by PR #322), not a false clean |
+| `@modelcontextprotocol/server-everything` (smoke) | 1 clean resist, 1 product defect | the Haiku run hit a target-side transport crash — the same unclassified-exception bug as issue #319, a different cause |
 | MCP Go SDK memory example (smoke) | finding, unvalidated | W4 fired on both providers; effect-probe calibration failed, so it is a candidate under never-keep-unproven, never a verdict |
-| OpenAI Agents SDK agent on Ollama (smoke) | product defect, two causes | a harness install conflict (fixed, PR #320), then a request missing its JSON content type (fixed after the measured build in PR #321) |
+| OpenAI Agents SDK agent on Ollama (smoke) | product defect (PR #321); an earlier harness failure re-run per amendment | a shim install conflict (infrastructure, not a product defect; fixed, PR #320, re-dispatched per the prereg), then on the re-run a request missing its JSON content type (fixed by PR #321, merged after the measured build) |
 
 **Two targets Mylonite did not author kept a reproducible W4 finding — an
-unconfirmed consequential change, confirmed through the target's own
-read-back — across three independent re-drives, on every provider tried,
-including a 3B model running locally at zero cost.** Both differentials ran
-against Mylonite's synthetic boundary shim, since neither target ships a
-server-side guard to toggle — the same caveat every synthetic-boundary result
-on this page carries: proof the attack is real and that this class of guard
-closes it, not proof about any one deployment's own guard.
+unconfirmed consequential change, observed in the tool-call trace and tied to
+the dispatched tool call — across three independent re-drives, on both Haiku
+4.5 and gpt-4o-mini.** `server-memory` also kept on a third model, `llama3.2:3b`,
+run once inside the CI runner as an informational cell (the prereg permits
+Ollama on that one target only). **Neither keep rests on a confirmed state
+read-back:** the effect probe failed to calibrate on both targets
+(`MYL-INC-003` on `server-memory`, `MYL-INC-005` on `mcp-redis`), on every run,
+KEPT and REJECTED alike — see the full write-up's "Proof level" section. Both
+differentials ran against Mylonite's synthetic boundary shim, since neither
+target ships a server-side guard to toggle — the same caveat every
+synthetic-boundary result on this page carries: proof the attack is real and
+that this class of guard closes it, not proof about any one deployment's own
+guard.
 
 **The campaign's own failure mode was honesty about coverage, not a missed
-attack.** Three product defects trace to the same underlying gap: an attempt's
+attack.** Two product bugs trace to the same underlying gap: an attempt's
 stored record can lack the reason code its own printed console line already
 names, so a harness scoring strictly from the record reads a correctly-named
-skip as an unexplained one. No run this surfaced was silently scored clean.
-Total spend: $0.91 on Anthropic, $0.08 on OpenAI, $0 on the in-runner Ollama
-cell — both inside the campaign's $4.50/$5.00 budget.
+skip as an unexplained one. No run this surfaced was silently scored clean,
+and both bugs are fixed (PR #322, PR #321), after the measured build. Total
+spend: $0.91 on Anthropic, $0.08 on OpenAI, $0 on the in-runner Ollama cell —
+both inside the campaign's $4.50/$5.00 budget.
 
 ## The one-line result
 

@@ -115,6 +115,21 @@ _THIRD_PARTY_HEADER = (
 )
 _THIRD_PARTY_SEPARATOR = "| --- | --- | --- | --- | --- |"
 
+#: The committed prereg, target files and workflow already use these `tpv-`
+#: family names in public `--authorize` values, so they are not a new leak --
+#: but the upstream project name reads better in a trend table meant for a
+#: reader skimming release history. Unknown ids fall back to the raw name
+#: (see the `.get` call below), so a future target that forgets to register
+#: here never disappears from the table.
+_THIRD_PARTY_DISPLAY_NAMES: dict[str, str] = {
+    "tpv-server-memory": "server-memory",
+    "tpv-mcp-redis": "mcp-redis",
+    "tpv-streamablehttp": "simple-streamablehttp",
+    "tpv-server-everything": "server-everything",
+    "tpv-go-memory": "go-sdk memory",
+    "tpv-agents-sdk-ollama": "agents-sdk-ollama",
+}
+
 
 def _third_party_summary(results_path: Path) -> dict[str, Any] | None:
     """The fields :func:`_render_third_party_row` needs, or ``None`` if the file
@@ -141,7 +156,11 @@ def _render_third_party_row(version: str, data: dict[str, Any]) -> str:
             if isinstance(r, dict) and r.get("result") == "KEPT" and r.get("met_bar")
         }
     )
-    kept_cell = ", ".join(f"`{name}`" for name in kept) if kept else "none"
+    kept_cell = (
+        ", ".join(f"`{_THIRD_PARTY_DISPLAY_NAMES.get(name, name)}`" for name in kept)
+        if kept
+        else "none"
+    )
 
     issues = data.get("product_issues", [])
     open_issues = [i for i in issues if isinstance(i, dict) and i.get("state") == "open"]

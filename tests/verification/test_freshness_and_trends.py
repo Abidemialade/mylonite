@@ -480,11 +480,28 @@ def test_third_party_section_renders_kept_targets_and_spend(tmp_path: Path) -> N
 
     assert "## Third-party verification campaigns" in table
     row = next(line for line in table.splitlines() if line.startswith("| 0.12.0"))
-    assert "`tpv-server-memory`" in row
-    assert "`tpv-streamablehttp`" not in row  # PRODUCT_DEFECT, not a KEPT bar
+    assert "`server-memory`" in row  # display name, not the raw `tpv-` id
+    assert "`simple-streamablehttp`" not in row  # PRODUCT_DEFECT, not a KEPT bar
     assert "1 (1 open)" in row
     assert "anthropic $0.91" in row
     assert "openai $0.08" in row
+
+
+def test_third_party_unknown_target_id_falls_back_to_raw_name(tmp_path: Path) -> None:
+    """A target id not in ``_THIRD_PARTY_DISPLAY_NAMES`` must still appear in the
+    table under its raw id, rather than vanishing -- the mapping is cosmetic,
+    never a filter."""
+    results_root = tmp_path / "results"
+    _write_third_party_results(
+        results_root,
+        "0.12.0",
+        rollups={"tpv-some-future-target/anthropic": {"result": "KEPT", "met_bar": True}},
+    )
+
+    table = render_trends(results_root)
+
+    row = next(line for line in table.splitlines() if line.startswith("| 0.12.0"))
+    assert "`tpv-some-future-target`" in row
 
 
 def test_third_party_only_version_is_not_reported_as_skipped(tmp_path: Path) -> None:
