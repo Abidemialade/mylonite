@@ -301,6 +301,12 @@ jobs:
           rc=${PIPESTATUS[0]}
           set -e
           echo "journey.sh exited $rc" >> "$RUNNER_TEMP/rehearsal-console.log"
+          # `tee` is the pipeline's LAST command and always exits 0, so without
+          # this the step itself always succeeded regardless of journey.sh's
+          # own exit code -- the artefacts (captured via `if: always()` below)
+          # still upload either way, but the cell must actually fail when the
+          # journey did.
+          exit "$rc"
 
       - name: Upload this cell's artefacts
         if: always() && steps.guard.outputs.run == 'true'
@@ -419,6 +425,12 @@ jobs:
           rc=${PIPESTATUS[0]}
           set -e
           echo "journey.sh exited $rc" >> "$RUNNER_TEMP/rehearsal-console.log"
+          # `tee` is the pipeline's LAST command and always exits 0, so without
+          # this the step itself always succeeded regardless of journey.sh's
+          # own exit code -- the artefacts (captured via `if: always()` below)
+          # still upload either way, but the cell must actually fail when the
+          # journey did.
+          exit "$rc"
 
       - name: Upload this cell's artefacts
         if: always() && steps.guard.outputs.run == 'true'

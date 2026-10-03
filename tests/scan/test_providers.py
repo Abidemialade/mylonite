@@ -31,6 +31,7 @@ import pytest
 from mylonite.providers.registry import PROVIDERS
 from mylonite.scan import providers as providers_module
 from mylonite.scan.providers import (
+    api_key_hint,
     looks_like_provider_env_var,
     provider_from_model,
     required_env_vars,
@@ -269,3 +270,20 @@ def test_approved_providers_help_text_never_calls_vertex_self_hosted() -> None:
     # appear THERE -- only the credential description itself must avoid it.
     need_description = clause.split(" -- see docs", 1)[0]
     assert "self-hosted" not in need_description, need_description
+
+
+# --- api_key_hint: shared by `unreachable_hint` and `generate`'s "Next"
+# guidance so neither hardcodes one provider's key var (there is no default
+# provider). ---
+
+
+def test_api_key_hint_names_the_known_providers_own_key_var() -> None:
+    assert api_key_hint("anthropic") == "ANTHROPIC_API_KEY"
+    assert api_key_hint("openai") == "OPENAI_API_KEY"
+
+
+def test_api_key_hint_is_vendor_neutral_for_an_unknown_provider() -> None:
+    assert api_key_hint(None) == "your provider's API key"
+    assert api_key_hint("not-a-real-provider") == "your provider's API key"
+    for vendor in PROVIDERS:
+        assert vendor not in api_key_hint(None)

@@ -123,6 +123,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can raise. Stores that echo the
   query, readbacks that never change, and reads that error, come back empty
   or raise stay `failed` with their codes. See [Calibration](docs/target-file.md#calibration).
+- **`generate`'s printed `validate` command now runs as printed, for a
+  custom target.** A CI rehearsal of the documented journey caught it: the
+  line `generate` tells you to run next was missing `--authorize`, so
+  running it literally was refused ("`--authorize` must equal the scope for
+  'custom' ... got None", exit `2`). The line now carries the target's
+  required `--authorize` value (its declared `scope`, or its family when it
+  declares none) — and so does the `UNVALIDATED` candidate notice under it,
+  which names the same command. Every printed path in these two commands,
+  and in `scan`'s `Next: mylonite generate ...` hint, now renders with `/`
+  and is quoted on top of that if it still needs it (a space, say), so it
+  runs as printed on every platform. The "set your provider key" line next
+  to it now names the actual env var
+  for the provider the finding was scanned with (`ANTHROPIC_API_KEY`,
+  `OPENAI_API_KEY`, ...) instead of a fixed Anthropic example, and falls
+  back to "your provider's API key" — naming no vendor — when the provider
+  is unknown. The rehearsal workflow itself had a second bug in the same
+  area: its journey-runner step piped the script through `tee` and never
+  checked the script's own exit code, so this cell had been reporting green
+  throughout. `scan --scaffold`'s own two next-step hints (the MCP and
+  HTTP-agent paths), and the `git add`/`--body-file` paths `gate` prints,
+  all follow the same two rules now. Every path renders with `/`, on
+  Windows too — Windows, Python and `git` all accept that form, and it's
+  what lets the line parse the same way in cmd, PowerShell or bash (a
+  native Windows backslash path does not survive a POSIX `eval`, which
+  silently eats each unquoted backslash). A non-path value (the
+  `--authorize` scope/family) is quoted only when it still needs it:
+  Windows wraps a value with a space in double quotes, which cmd,
+  PowerShell and Git Bash all parse correctly, falling back to POSIX
+  quoting — with a short note on that one line — only when the value
+  itself contains `"`, `$` or a backtick; everywhere else it's the POSIX
+  form `shlex.quote` and `journey.sh` already assumed.
 
 - **CLI messages: no more duplicated warnings, raw tracebacks, or unnamed
   launch failures.** Five on-ramp fixes:

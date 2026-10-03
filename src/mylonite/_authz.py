@@ -21,6 +21,7 @@ __all__ = [
     "AuthorizationRefused",
     "authorize_fix",
     "authorize_hint",
+    "authorize_value_for_target_file",
     "bundled_authorize_fix",
     "bundled_authorize_value",
     "check_authorization",
@@ -79,13 +80,17 @@ def authorize_fix(value: str) -> str:
     return f"Pass --authorize {value}."
 
 
-def authorize_hint(target_file: Path) -> str | None:
-    """The ``--authorize`` fix sentence for a custom target file, or ``None``.
+def authorize_value_for_target_file(target_file: Path) -> str | None:
+    """The exact ``--authorize`` value ``target_file`` requires, or ``None``.
 
-    Uses the same chain as the scaffold's "next:" line (load the file, build
-    its spec, derive the required value), so the hint cannot drift from the
-    check that later enforces it. Returns ``None`` when the file is missing or
-    does not load: the caller reports that case on its own.
+    Loads the file, builds its spec, and derives the required value the same
+    way :func:`check_authorization` will later check it -- the one chain
+    behind every "what do I pass to ``--authorize``" hint (the scaffold's
+    "next:" line via :func:`authorize_hint`, and ``generate``'s printed
+    "Next" guidance for a LIVE custom-target test), so none of them can drift
+    from the check that actually enforces the value. Returns ``None`` when
+    the file is missing or does not load: the caller reports that case on its
+    own, or simply omits the hint.
     """
     # Imported lazily: the target-file loader pulls in pydantic/yaml and the
     # MCP registry, which the authorization rule itself does not need.
@@ -96,7 +101,19 @@ def authorize_hint(target_file: Path) -> str | None:
         spec = build_target_spec(tf)
     except Exception:
         return None
-    return authorize_fix(required_authorization(family=spec.family, scope=tf.scope))
+    return required_authorization(family=spec.family, scope=tf.scope)
+
+
+def authorize_hint(target_file: Path) -> str | None:
+    """The ``--authorize`` fix sentence for a custom target file, or ``None``.
+
+    Returns ``None`` when the file is missing or does not load: the caller
+    reports that case on its own.
+    """
+    value = authorize_value_for_target_file(target_file)
+    if value is None:
+        return None
+    return authorize_fix(value)
 
 
 def bundled_authorize_value(target: str) -> str:

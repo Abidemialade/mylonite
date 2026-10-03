@@ -159,6 +159,22 @@ def env_vars_for(provider: str | None, override: str | None = None) -> tuple[str
     return PROVIDER_ENV_VARS.get(p, ())
 
 
+def api_key_hint(provider: str | None) -> str:
+    """The credential phrase for a printed "set your provider's key" hint.
+
+    Names ``provider``'s own key env var(s) (joined with "or") when
+    ``provider`` resolves to an approved row; otherwise the neutral "your
+    provider's API key", naming no vendor -- there is no default provider
+    (``mylonite.providers.registry``), so a hint that can't resolve one must
+    never fall back to assuming Anthropic's. Shared by every printed hint
+    that needs this phrase (:func:`mylonite.scan.preflight.unreachable_hint`,
+    ``generate``'s "Next" guidance) so the wording and the fallback rule
+    can't drift between them.
+    """
+    env_vars = env_vars_for(provider)
+    return " or ".join(env_vars) if env_vars else "your provider's API key"
+
+
 #: Providers this process has already warned about via the unlisted-provider
 #: fallback below -- printed once per provider id, not once per
 #: `required_env_vars` call (which runs per role model, e.g. once each for

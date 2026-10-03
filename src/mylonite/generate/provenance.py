@@ -231,11 +231,24 @@ def source_is_proven(source: str, proving_test: Path | None) -> bool:
     return strip_unvalidated(proved) == source
 
 
-def announce_unvalidated(out_dir: Path) -> None:
-    """The output line ``generate`` prints under a stamped test."""
+def announce_unvalidated(out_dir: Path, *, authorize: str | None = None) -> None:
+    """The output line ``generate`` prints under a stamped test.
+
+    Names the exact ``mylonite validate`` command the "Next"/"Then:" block
+    above also prints — rendered the same way (:func:`mylonite._paths.
+    path_for_shell`) and, for a custom target, carrying the same
+    ``--authorize`` value (``authorize``, the target's required scope/family;
+    ``None`` for a reference target, which needs none) — so this line is
+    never a second, stale copy of a command the real gate would refuse.
+    """
+    from mylonite._paths import path_for_shell, quote_for_shell
+
+    command = f"mylonite validate {path_for_shell(out_dir)}"
+    if authorize:
+        command += f" --authorize {quote_for_shell(authorize)}"
     echo(
-        "UNVALIDATED: this test is a candidate until `mylonite validate "
-        f"{out_dir}` keeps it as KEPT. Do not commit it as a gate test before then."
+        f"UNVALIDATED: this test is a candidate until `{command}` keeps it as "
+        "KEPT. Do not commit it as a gate test before then."
     )
 
 

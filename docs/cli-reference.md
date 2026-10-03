@@ -309,7 +309,9 @@ attacker gets from that weakness class, and a suggested fix — the same facts t
 [gate PR body](ci-gating.md) opens with, reused rather than re-derived, so the fix is
 never exclusive to a committed test or a validated directory. It is always introduced
 as a suggestion; `scan` proves and gates a weakness, it does not patch your code. The
-`Next: mylonite generate …` hint follows the last block.
+`Next: mylonite generate …` hint follows the last block, with the scan directory's
+path rendered with forward slashes on every platform (so it needs no quoting on its
+own, and parses the same way in cmd, PowerShell or bash).
 
 ## `generate` — emit the regression test
 
@@ -331,7 +333,13 @@ mylonite generate --latest --out .mylonite/generated/my-finding
 
 A test written from a scan is a candidate until `validate` keeps it, so its first
 line reads `# mylonite: unvalidated` and a short UNVALIDATED header follows. The
-command prints an UNVALIDATED line with the `validate` command to run. When
+command prints an UNVALIDATED line with the `validate` command to run, literally —
+for a custom target it carries the `--authorize` value that target's `scope` (or
+family, if it declares none) requires, and every printed path renders with forward
+slashes on every platform (quoted too, only if it still needs it — a space, say).
+The "set your provider key" line next to it names that finding's
+own provider's env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, ...), or "your
+provider's API key" — naming no vendor — when the provider isn't known. When
 `validate` returns **KEPT** it removes the header; a **STABLE, NOT PROVEN** or
 **REJECTED** verdict adds it back, also to a test that was kept before or written
 without one. The header always matches the latest verdict.
