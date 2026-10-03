@@ -3,7 +3,7 @@
 A target file is how you point Mylonite at a custom MCP server (`--target-file`). One
 YAML declares how to launch the server, which weakness classes it exposes, and how to
 plant and verify attacks. `mylonite scan --scaffold app.yaml` scaffolds one for you; this
-page is the full field reference. Source: `mylonite.plugins._mcp.target_file.TargetFile`.
+page is the full field reference.
 
 The scaffold writes a file that runs as written. What it detects goes in live,
 each block tagged `# auto-detected`:
@@ -510,15 +510,26 @@ expansion for its own fixed variable, `GITHUB_PERSONAL_ACCESS_TOKEN` — see
 
 Set each variable to the real value in the shell that runs Mylonite, then use the file:
 
+On Linux / macOS (bash):
+
 ```bash
 export MYLONITE_TARGET_ENV_GITHUB_TOKEN='ghp_...'
 mylonite scan --target-file app.yaml --dry-run
 ```
 
+On Windows (PowerShell):
+
+```powershell
+$env:MYLONITE_TARGET_ENV_GITHUB_TOKEN = 'ghp_...'
+mylonite scan --target-file app.yaml --dry-run
+```
+
 To keep the values in a `.env` file instead, load it into your shell first
 (`set -a; . ./.env; set +a` in bash or zsh). Mylonite's own `--env-file` flag reads only
-provider API-key names, so it does not pick these up. In CI, set them as secrets on the
-job.
+recognised provider credential/config names (see [Choose a model](choose-a-model.md)) —
+not a `MYLONITE_TARGET_...` placeholder or a user-named token, both of which it drops
+with a warning rather than loading. In CI, set the target's own variables as secrets on
+the job.
 
 If a variable is unset, loading the file stops with exit code 2 and names the variable,
 the key it holds and the `export` line to run. Mylonite never starts your server with an
@@ -614,3 +625,52 @@ filesystem path, and both are contained, not just shape-checked:
 Both checks fail loud (`PathEscapesBase` / `InvalidTargetScope`) rather than silently
 reading or sandboxing the wrong thing. See `SECURITY.md` for what a `target.yaml` you
 received from someone else can and cannot do.
+
+### `command` and `args` resolve against your shell, not the target file
+
+Unlike `system_prompt_file` above, a relative `command` or a relative path inside `args`
+is **not** resolved against the target YAML's own directory. It resolves against
+whatever directory the process running `mylonite` is in when it launches — there is no
+`cwd` field to pin it to the file's own location. A target file with `command: python`,
+`args: [server.py]` only finds `server.py` when you run `mylonite` from the directory that
+file lives in; `mylonite scan --target-file configs/app.yaml` from the repo root, where
+`server.py` sits next to `configs/app.yaml`, will not. The same file can work for one
+command run from one directory and fail for another (`mylonite scan` from your project
+root, `mylonite gate` from CI's checkout root) with no warning that the launch directory
+changed — track this as [#187](https://github.com/Abidemialade/mylonite/issues/187). Give
+`command`/`args` an absolute path, or a path relative to wherever you always invoke
+Mylonite from, until a `cwd` field exists.
+
+The scaffold's own relative-path check only looks at `env` values shaped like a SQLite
+database path (`#18` — a relative SQLite path can silently open a different or empty
+database on Windows); it does not check `args`, and it only runs when `scan --scaffold`
+writes the file, not on a later `check` or `scan` against a file you hand-edited.
+Similarly, the scaffold writes `system_prompt_file` as a path relative to *your current
+directory at scaffold time*, while loading the file later resolves that same value
+relative to *the target YAML's own directory* (see above) — scaffold from one directory
+and the written reference can point at the wrong file once you run `scan` from another.
+Until this is fixed, write `system_prompt_file` as an absolute path, or re-check it by
+hand after scaffolding.
+
+### A credential in `args` is written in plain text
+
+`headers`, `request.headers` and `env` are the only credential-bearing fields Mylonite
+masks (see [Secrets stay out of the file](#secrets-stay-out-of-the-file) below) — `args` is
+an unstructured string list with no key name to mask by, so a value embedded there (for
+example `args: [--api-key, sk-live-...]`, or a URL with `?access_token=...`) survives
+byte-for-byte into every copy Mylonite writes: the scan directory, `generate`'s co-located
+copy, and the `gate` PR. `scan --scaffold`'s own "secrets were kept out of the file"
+message does not mention this, so the message can read as a stronger guarantee than it
+is. See [`SECURITY.md`](https://github.com/Abidemialade/mylonite/blob/main/SECURITY.md)
+for the full policy. If a target's launch needs a credential, pass it via `env` (most
+subprocess CLIs also accept the value from an environment variable) or, for a remote
+server, `headers` — never as a literal `args` entry.
+
+### `--env`, `--command` and `--arg` are ignored once `--target-file` is set
+
+`scan`, `generate`, `validate` and `gate` all accept `--target-file` alongside the
+`mcp:custom` flags (`--command`, `--arg`, `--env`) that build an inline target spec, but
+once `--target-file` is given, those three flags are silently ignored rather than
+rejected — the file's own `command`/`args`/`env` always win, with no warning that the
+flags you passed had no effect. Put any launch override in the target file's `env:`
+block instead of trying to pass it on the command line alongside `--target-file`.
