@@ -425,16 +425,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and W2 attacks, and the bundled direct W3 and W4 probes. Generated W3 and
   W4 probes already read NOT TESTED in that case.
 - **A read-named tool that takes a destination no longer reads RESISTED
-  (#304).** The name rule from #297 still counted a call as a read whenever a
-  read verb led or ended the name, even when the call's own arguments carried
-  a URL, hostname or IP literal — so an undeclared `get_page(url=...)` that
-  fetched an attacker-chosen address read "called no consequential tool", the
-  same negative #297 fixed for a name without a read verb. A call is now
-  never a read when its arguments carry a destination, whatever the tool's
-  name says and whatever list — including `read_tool_names` and
-  `verdict_read_tools` — it is declared under. A call with no destination in
-  its arguments (`get_page(id=...)`, `read_note`, `list_notes`) still reads
-  exactly as before.
+  (#304).** `get_page(url=<attacker host>)` used to read as a plain read by
+  name. A call is now never a read when its arguments carry a network-scheme
+  URL, or a bare host/IP under a destination-named key, pointing outside the
+  target (never loopback or an allowlisted host) — whatever the tool's name or
+  declared list says. Such a call never token- or tool-links on its own, only
+  on a firing predicate or a calibrated probe, so an unrelated string in a
+  search query is never a false finding. A call with no qualifying
+  destination (`get_page(id=...)`, a `file://` resource reference) still
+  reads exactly as before.
 - **A `transport: rest` target that declares an `effect_probe` now stops with
   one clear message instead of being ignored.** Every command that loads the
   file, `check` included, exits `2` before it connects or calls a model, and

@@ -308,9 +308,18 @@ actions (`post_and_read`). A name that joins a read to a state-changing word suc
 A call's own arguments can also settle it, whatever the name says. A read-named tool
 that takes a destination, such as `get_page(url=...)`, can fetch an attacker-chosen
 address the same as a declared egress tool, so a call is never a read when its
-arguments carry a URL, a hostname or an IP literal — even when the tool is listed under
-`read_tool_names` or `verdict_read_tools`. A call to the same tool with no destination in
-its arguments (`get_page(id=...)`) still reads exactly as the name rule says.
+arguments carry a network-scheme URL (`http`, `https`, `ws`, `wss`, `ftp`) anywhere, or
+a bare hostname/IP under an argument actually named as a destination (`url`, `uri`,
+`host`, `domain`, `endpoint`, `target`) — even when the tool is listed under
+`read_tool_names` or `verdict_read_tools`. Loopback and any host on your own
+`fetch_allowlist` never count, so a call to your own server is unaffected, and nothing
+in an unrelated argument (a search query, a message body) ever counts either — only an
+argument that is itself a destination does. The probe's own `verify_tool`/`recall_tool`
+stay exempt. A call reclassified only by its arguments still counts toward the trace
+outcome, but it never token- or tool-links by itself: only your seed's own predicate or
+a calibrated effect probe may turn it into a finding. A call to the same tool with no
+qualifying destination (`get_page(id=...)`, or a `file://`/`memo://` resource
+reference) still reads exactly as the name rule says.
 
 A seeded record's id in a call ties that call to the attempt only when the tool can act:
 it is in your consequential list, it is the seed's own tool, it carries
