@@ -10,10 +10,10 @@ repository on disk by the time ``open_or_print_pr`` prints its summary, and
 the printed notice says so instead of claiming nothing was modified. With
 ``open_pr=True`` the branch is created, the artifacts committed, and the PR
 opened via ``gh`` -- degrading to printing the last two commands when ``gh``
-is missing or unauthenticated. A gate branch that already exists locally
-(a re-run that re-found the same finding) is never deleted or overwritten:
-nothing new is committed, and the run reports it as already proposed
-instead of failing.
+is missing or unauthenticated. A gate branch that already exists -- locally,
+or (the common case on a fresh CI clone) only on ``origin`` -- is never
+deleted or overwritten: nothing new is committed or pushed, and the run
+reports it as already proposed instead of failing.
 """
 
 from __future__ import annotations
@@ -186,6 +186,40 @@ def _local_branch_exists(branch: str, *, cwd: Path, _run: Runner) -> bool:
     """
     cp = _run(["git", "rev-parse", "--verify", "--quiet", f"refs/heads/{branch}"], cwd=str(cwd))
     return getattr(cp, "returncode", 1) == 0
+
+
+def _remote_branch_exists(branch: str, *, cwd: Path, _run: Runner) -> bool | None:
+    """True/False iff it can be determined whether ``origin`` already has a
+    branch named ``branch``; ``None`` when that can't be told at all.
+
+    A nightly discovery job is almost always a FRESH clone (``actions/
+    checkout``'s default): a re-found finding then has no LOCAL branch
+    collision at all (``_local_branch_exists`` is false, ``checkout -b``
+    succeeds), and the already-proposed branch only shows up on ``origin``
+    -- this is the common case, not the persistent-self-hosted-workspace one
+    :func:`_local_branch_exists` covers. Checked here, before ``checkout -b``
+    is even attempted, so a hit never creates a branch, commits, or pushes.
+
+    ``git ls-remote --exit-code --heads origin <branch>`` is run as a plain
+    list-argument subprocess (no shell) and exits ``0`` with a matching ref
+    printed on a hit, ``2`` with nothing printed when ``origin`` is reachable
+    but has no such branch, and anything else -- a missing ``origin`` remote,
+    a network failure, a timeout -- otherwise. Only ``0`` and ``2`` are
+    answers; every other outcome returns ``None`` so the caller falls through
+    to the existing local-only behaviour rather than reporting "already
+    proposed" on a guess, or failing a run over a flaky remote this check was
+    never meant to require.
+    """
+    try:
+        cp = _run(["git", "ls-remote", "--exit-code", "--heads", "origin", branch], cwd=str(cwd))
+    except OSError:
+        return None
+    rc = getattr(cp, "returncode", None)
+    if rc == 0:
+        return bool((getattr(cp, "stdout", "") or "").strip())
+    if rc == 2:
+        return False
+    return None
 
 
 _STAGED_MESSAGE = (
@@ -373,6 +407,21 @@ def open_or_print_pr(
     if staged_rc != 0:
         stderr = redact((getattr(staged_cp, "stderr", "") or "").strip())
         raise GatePrError(f"git diff --cached --quiet failed (rc={staged_rc}): {stderr}")
+
+    # A nightly discovery job is almost always a FRESH clone, so a re-found
+    # finding usually has no local branch to collide with at all -- the
+    # already-proposed branch lives only on `origin`. Checked before
+    # `checkout -b` is even attempted: a hit here means no checkout, no
+    # commit, no push, and `original_branch` is never left. Indeterminate
+    # (no `origin`, a network failure) falls through to the local-only
+    # path below rather than guessing.
+    if _remote_branch_exists(branch, cwd=cwd, _run=_run):
+        echo(
+            f"\nBranch '{branch}' already exists on origin -- this finding was "
+            "already proposed in an earlier run; nothing new to commit or push. "
+            "See that branch (or its pull request) instead of opening a new one.\n"
+        )
+        return PrResult(branch=branch, opened=False, already_proposed=True)
 
     # Only a branch THIS run created may be deleted on rollback: when
     # `checkout -b` fails because the branch already exists (a re-run), that

