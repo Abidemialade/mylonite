@@ -725,12 +725,14 @@ def _scaffold_target_file(
             f"[{reason_codes.NT_EFFECT_UNCONFIRMABLE}] unless an attempt fires."
         )
     from mylonite._authz import required_authorization
+    from mylonite._paths import path_for_shell, quote_for_shell
     from mylonite._target_env import echo_env_notice
 
     echo_env_notice(yaml_text, output)
+    authorize_value = required_authorization(family=spec.family, scope=tf.scope)
     run = (
-        f"`mylonite scan --target-file {output} "
-        f"--authorize {required_authorization(family=spec.family, scope=tf.scope)}`"
+        f"`mylonite scan --target-file {path_for_shell(output)} "
+        f"--authorize {quote_for_shell(authorize_value)}`"
     )
     if needs_hand_edit:
         echo_err(f"  next: fill in the commented effect_probe, then run {run}.")
@@ -839,10 +841,14 @@ def _scaffold_rest_target_file(
         "# on the reply. This file is runnable as-is; edit the request block to match your\n"
         "# endpoint (auth goes in request.headers — never logged). See docs/http-agent.md.\n\n"
     )
+    from mylonite._paths import path_for_shell, quote_for_shell
     from mylonite._target_env import echo_env_notice
 
     text = header + dump_target_file(tf)
     _atomic_write_text(output, text)
     echo(f"wrote runnable HTTP-agent target -> {output}")
     echo_env_notice(text, output)
-    echo_err(f"next: mylonite scan --target-file {output} --authorize {family}")
+    echo_err(
+        f"next: mylonite scan --target-file {path_for_shell(output)} "
+        f"--authorize {quote_for_shell(family)}"
+    )

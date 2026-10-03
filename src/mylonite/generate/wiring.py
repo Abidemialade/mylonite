@@ -16,7 +16,7 @@ from typing import Any
 import typer
 
 from mylonite._cli_io import _exit_if_missing_target_file, echo, echo_err, echo_exc
-from mylonite._paths import safe_slug
+from mylonite._paths import path_for_shell, quote_for_shell, safe_slug
 from mylonite.contracts.exec_context import ExecContext
 from mylonite.exit_codes import EXIT_CONFIG
 
@@ -375,21 +375,37 @@ def _emit_generated_test(
         )
 
     echo("")
+    authorize_value: str | None = None
     if is_custom:
+        from mylonite._authz import authorize_value_for_target_file
+        from mylonite.scan.providers import api_key_hint
+
+        # validate auto-resolves the co-located target.yaml — no --target-file
+        # needed, but the LIVE authorize gate (DCR-0009) still requires the
+        # exact scope this target.yaml declares: --authorize must be in the
+        # printed command, not just in the docs, or it is refused as printed
+        # (`mylonite validate` would otherwise exit 2: "--authorize must
+        # equal ... got None").
+        authorize_value = (
+            authorize_value_for_target_file(target_file) if target_file is not None else None
+        )
+        authorize_flag = (
+            f" --authorize {quote_for_shell(authorize_value)}" if authorize_value else ""
+        )
+
         # The custom test is LIVE (gated behind MYLONITE_LIVE_TARGET=1): it needs
         # pytest, a provider key, a runnable MCP server, and the co-located YAML.
         echo("Next - this is a LIVE custom-target test. To run it you need:")
         echo("  - pytest + mylonite installed in the consuming environment")
-        echo("  - your provider API key set (e.g. ANTHROPIC_API_KEY)")  # allow-literal: example
+        echo(f"  - {api_key_hint(exec_ctx.provider if exec_ctx is not None else None)} set")
         echo("  - your target's MCP server runnable, and target.yaml co-located")
         echo("Then:")
-        echo(f"  MYLONITE_LIVE_TARGET=1 pytest {out_dir}")
-        # validate auto-resolves the co-located target.yaml — no --target-file needed.
-        echo(f"  mylonite validate {out_dir}")
+        echo(f"  MYLONITE_LIVE_TARGET=1 pytest {path_for_shell(out_dir)}")
+        echo(f"  mylonite validate {path_for_shell(out_dir)}{authorize_flag}")
     else:
-        echo(f"Next: mylonite validate {out_dir}")
+        echo(f"Next: mylonite validate {path_for_shell(out_dir)}")
     if unvalidated:
-        announce_unvalidated(out_dir)
+        announce_unvalidated(out_dir, authorize=authorize_value)
 
 
 def _tag_control_for_generate(exploit: Any) -> Any:

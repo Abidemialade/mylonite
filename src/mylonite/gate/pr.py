@@ -321,7 +321,14 @@ def open_or_print_pr(
     # gate_dir raises GatePrError here instead of a bare ValueError AFTER the
     # branch switch (DCR-0016). Nothing below this block is a git subprocess.
     try:
-        rels = [str(_relative(p, cwd)) for p in paths.all_paths()]
+        # .as_posix(), not str(): every path in a printed git/gh command
+        # renders with forward slashes on every platform (Windows included)
+        # -- Python/git both accept that on Windows, and it keeps the
+        # printed command parseable by a POSIX shell's `eval`
+        # (`verification/rehearsal/journey.sh`, which also runs on Windows
+        # via Git Bash) without needing to quote a bare value just for
+        # having backslashes.
+        rels = [_relative(p, cwd).as_posix() for p in paths.all_paths()]
         rel_body = _relative(body_path, cwd)
     except ValueError as exc:
         raise GatePrError(f"gate paths must live inside the repo root {cwd}: {exc}") from exc
@@ -338,7 +345,7 @@ def open_or_print_pr(
 
     gh_cmd = (
         f"gh pr create --base {shlex.quote(base)} --head {shlex.quote(branch)} "
-        f"--title {shlex.quote(pr_title)} --body-file {shlex.quote(str(rel_body))}"
+        f"--title {shlex.quote(pr_title)} --body-file {shlex.quote(rel_body.as_posix())}"
     )
 
     if not open_pr:
@@ -348,7 +355,7 @@ def open_or_print_pr(
         # running plain `mylonite gate` to see what it finds got a branch and a
         # commit they never asked for. Read-only is the default; the artifacts
         # are on disk and the exact command sequence is printed instead.
-        add_cmd = " ".join(shlex.quote(str(r)) for r in rels)
+        add_cmd = " ".join(shlex.quote(r) for r in rels)
         manual = (
             f"git checkout -b {shlex.quote(branch)}\n"
             f"  git add {add_cmd}\n"
@@ -362,7 +369,7 @@ def open_or_print_pr(
         # thing that changed. List what was written instead of asserting
         # nothing was, and only make the stronger claim when it's true.
         if paths.workflow_files:
-            wf_lines = "\n".join(f"  {_relative(p, cwd)}" for p in paths.workflow_files)
+            wf_lines = "\n".join(f"  {_relative(p, cwd).as_posix()}" for p in paths.workflow_files)
             modified_note = (
                 f"Gate artifacts written to '{paths.gate_dir}'. Also wrote the CI workflow "
                 f"file(s) requested by --workflows:\n{wf_lines}\n"

@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
+import shlex
 import sys
 from collections.abc import Iterator
 from dataclasses import replace
@@ -19,6 +21,7 @@ from tests.gate._proven import proven_legs
 from typer.testing import CliRunner
 
 import mylonite
+from mylonite._paths import path_for_shell, quote_for_shell
 from mylonite.cli import (
     EXIT_CONFIG,
     EXIT_NOT_KEPT,
@@ -206,6 +209,47 @@ def test_scan_scaffold_writes_valid_yaml(tmp_path: Path, monkeypatch: pytest.Mon
     assert "web_fetch" in tf.primary_tools
     # W2 baseline + W3 (url-shaped) + W4 (consequential) suggested from the surface.
     assert {"W2", "W3", "W4"}.issubset(set(tf.weakness_classes))
+    # The printed next-step command must work exactly as printed: the path
+    # renders with forward slashes, and the --authorize value is quoted.
+    out_text = result.stderr or result.output
+    assert f"`mylonite scan --target-file {path_for_shell(out)} --authorize custom`" in out_text
+
+
+def test_scan_scaffold_next_step_hint_quotes_a_space_in_the_path_and_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A path or --scope containing a space must still be a runnable command,
+    not just the usual bare-value case the happy-path test above covers."""
+    _patch_fake_adapter(monkeypatch)
+    out_dir = tmp_path / "My Target"
+    out_dir.mkdir()
+    out = out_dir / "target.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--command",
+            "python",
+            "--arg",
+            "-m",
+            "--arg",
+            "my_server",
+            "--scaffold",
+            str(out),
+            "--scope",
+            "my app",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    out_text = result.stderr or result.output
+    assert (
+        f"`mylonite scan --target-file {path_for_shell(out)} "
+        f"--authorize {quote_for_shell('my app')}`"
+    ) in out_text
+    # Neither value is the bare, unquoted string: a space in either would
+    # otherwise split the printed command into extra shell words.
+    assert path_for_shell(out) != str(out)
+    assert quote_for_shell("my app") != "my app"
 
 
 def test_scan_scaffold_requires_command(tmp_path: Path) -> None:
@@ -2929,7 +2973,7 @@ def test_generate_happy_path(tmp_path: Path) -> None:
     assert colocated.is_file()
     assert (out_dir / "fixtures").is_dir()
     # The emitted test loads the co-located exploit by the same name.
-    assert f"mylonite validate {out_dir}" in result.output
+    assert f"mylonite validate {path_for_shell(out_dir)}" in result.output
 
 
 def test_generate_colocated_exploit_json_is_redacted(tmp_path: Path) -> None:
@@ -3114,11 +3158,88 @@ def test_generate_custom_target_file_colocates_yaml(tmp_path: Path) -> None:
     assert TargetFile.model_validate(yaml.safe_load(colocated_text)) == TargetFile.model_validate(
         yaml.safe_load(_MINIMAL_TARGET_YAML)
     )
-    # Prereq block (N5) for the live custom test.
+    # Prereq block (N5) for the live custom test. No exec-context metadata was
+    # stamped on this exploit (a hand-built fixture, not a real scan), so the
+    # provider is unknown and the hint names no vendor's key var.
     out = result.output
     assert "MYLONITE_LIVE_TARGET=1 pytest" in out
-    assert "ANTHROPIC_API_KEY" in out  # example provider key
+    assert "your provider's API key" in out
     assert "target.yaml" in out
+    # The printed `mylonite validate` line must work exactly as printed: a
+    # custom target needs --authorize, naming the exact scope `myapp`'s
+    # target.yaml requires (its own family, since it declares no scope).
+    assert f"mylonite validate {path_for_shell(out_dir)} --authorize myapp" in out
+
+
+def test_generate_prints_a_validate_line_that_passes_the_authorize_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The printed `mylonite validate ...` line must work exactly as printed.
+
+    The reported bug: a custom target's printed line omitted `--authorize`,
+    so running it verbatim was refused with exit 2 ("--authorize must equal
+    ... got None"). This parses the REAL printed line (shlex, the same way
+    `verification/rehearsal/journey.sh` greps and feeds it to a real bash
+    `eval`) and feeds it to `validate` through CliRunner, so it exercises
+    the real `_enforce_custom_authorize` gate against the value the real
+    CLI parser extracted -- not a hand-derived guess of what `--authorize`
+    should be.
+
+    `out_dir` is a real (Windows, on this machine) absolute path, printed
+    via `path_for_shell` -- forward slashes on every platform, so
+    `shlex.split` (bash's own tokenising rule) parses it intact instead of
+    eating the backslashes a native Windows path would otherwise print, and
+    Python/the CLI still accept the forward-slash form on Windows. No
+    monkeypatching needed: this is the real, shipped behaviour.
+    """
+    exploit_json = tmp_path / "scans" / "s" / "exploit_pid.json"
+    _write_custom_exploit_json(exploit_json)
+    target_yaml = tmp_path / "scoped.yaml"
+    target_yaml.write_text(
+        "family: myapp\ncommand: python\nargs: [-m, my_server]\n"
+        "weakness_classes: [W2]\nscope: my-app-scope\nrequires_scope: true\n",
+        encoding="utf-8",
+    )
+    out_dir = tmp_path / "gen"
+
+    gen_result = runner.invoke(
+        app,
+        ["generate", str(exploit_json), "--out", str(out_dir), "--target-file", str(target_yaml)],
+    )
+    assert gen_result.exit_code == EXIT_SUCCESS, gen_result.output
+
+    match = re.search(r"^ {2}mylonite validate .*$", gen_result.output, re.MULTILINE)
+    assert match, gen_result.output
+    printed_args = shlex.split(match.group(0))
+    assert printed_args[:2] == ["mylonite", "validate"]
+    assert "--authorize" in printed_args  # the reported bug: this was missing
+
+    captured: dict[str, Any] = {}
+
+    def _fake_validate_custom(generated: Any, target_file: Any, *_a: Any, **kwargs: Any) -> Any:
+        from mylonite.contracts import ValidationReport
+        from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+        from mylonite.plugins.cli_targets import _enforce_custom_authorize
+
+        tf = load_target_file(target_file)
+        spec = build_target_spec(tf)
+        # The exact gate the reported bug tripped on -- raises/exits here if
+        # the printed line's --authorize value doesn't satisfy it.
+        _enforce_custom_authorize(
+            spec.family,
+            tf.scope,
+            spec.requires_scope,
+            kwargs.get("authorize"),
+            command="validate",
+        )
+        captured["authorize"] = kwargs.get("authorize")
+        return ValidationReport(test_filename="t.py", outcomes=[], kept=True)
+
+    monkeypatch.setattr("mylonite.cli._validate_custom", _fake_validate_custom)
+
+    validate_result = runner.invoke(app, printed_args[1:])
+    assert validate_result.exit_code == EXIT_SUCCESS, validate_result.output
+    assert captured["authorize"] == "my-app-scope"
 
 
 def test_generate_multi_finding_reads_and_redacts_shared_target_file_once(
@@ -7099,6 +7220,12 @@ def test_scan_scaffold_rest_writes_runnable_http_target(tmp_path: Path) -> None:
     assert tf.request.response_path == "reply"
     assert "{prompt}" in tf.request.body
     assert tf.family == "myagent"
+    # The printed next-step command must work exactly as printed: the path
+    # renders with forward slashes, and the --authorize value is quoted.
+    assert (
+        f"next: mylonite scan --target-file {path_for_shell(out)} "
+        f"--authorize {quote_for_shell(tf.family)}"
+    ) in result.output
 
 
 def test_scan_scaffold_rest_redacts_credential_shaped_query_param(tmp_path: Path) -> None:

@@ -63,10 +63,9 @@ def unreachable_hint(provider: str | None, model: str) -> str:
     and stays neutral otherwise; never assumes one provider's key.
     """
     from mylonite._redaction import redact
-    from mylonite.scan.providers import env_vars_for, provider_from_model
+    from mylonite.scan.providers import api_key_hint, provider_from_model
 
-    env_vars = env_vars_for(provider_from_model(model) or provider)
-    key = " or ".join(env_vars) if env_vars else "your provider's API key"
+    key = api_key_hint(provider_from_model(model) or provider)
     return redact(
         f"no provider reachable for --model {model}: check that {key} is set and valid, "
         "or pass --model provider/modelname for another LiteLLM provider "

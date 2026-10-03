@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from mylonite._paths import path_for_shell
 from mylonite.cli import app
 from mylonite.contracts import (
     AdapterResponse,
@@ -129,7 +130,7 @@ def test_generate_from_a_scan_stamps_the_test_and_says_so(tmp_path: Path) -> Non
     assert result.exit_code == EXIT_SUCCESS, result.output
     assert is_unvalidated(_emitted_source(out_dir))
     assert "UNVALIDATED" in result.output
-    assert f"mylonite validate {out_dir}" in result.output
+    assert f"mylonite validate {path_for_shell(out_dir)}" in result.output
 
 
 def _kept_dir(tmp_path: Path) -> Path:

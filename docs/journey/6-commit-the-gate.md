@@ -26,17 +26,18 @@ copy-pasteable output for a single kept W2 finding (the pattern id
 `indirect-injection-note-body-direct` from the kitchen-sink example in
 [step 3](3-point-at-your-app.md)) — a different finding writes different
 filenames (the hash after `w2-`/`w4-`/etc. is `sha256(pattern_id)`, so it's
-the same every time for the same finding, never random), and on Linux/macOS
-the paths use `/` instead of `\`:
+the same every time for the same finding, never random). Every path in the
+printed commands uses `/`, on Windows too (Windows, Python and `git` all
+accept that form) — the same output either way:
 
 ```text
 Gate artifacts written to '.mylonite\gate'. Your repository was not modified.
 To commit them and open the gating PR, run:
   git checkout -b mylonite/gate-indirect-injection-note-body-direct
-  git add '.mylonite\gate\test_w2-494b28.py' '.mylonite\gate\exploit_w2-494b28.json' '.mylonite\gate\validation_report.json' '.mylonite\gate\target.yaml' '.mylonite\gate\fixtures' '.mylonite\gate\PR_BODY.md'
+  git add .mylonite/gate/test_w2-494b28.py .mylonite/gate/exploit_w2-494b28.json .mylonite/gate/validation_report.json .mylonite/gate/target.yaml .mylonite/gate/fixtures .mylonite/gate/PR_BODY.md
   git commit -m 'Mylonite gate: indirect-injection-note-body-direct'
   git push -u origin mylonite/gate-indirect-injection-note-body-direct
-  gh pr create --base main --head mylonite/gate-indirect-injection-note-body-direct --title 'Mylonite gate: indirect-injection-note-body-direct' --body-file '.mylonite\gate\PR_BODY.md'
+  gh pr create --base main --head mylonite/gate-indirect-injection-note-body-direct --title 'Mylonite gate: indirect-injection-note-body-direct' --body-file .mylonite/gate/PR_BODY.md
 ```
 
 **To commit the gate without opening a PR,** run the plain command above

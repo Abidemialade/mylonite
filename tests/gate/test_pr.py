@@ -94,6 +94,34 @@ def test_no_git_mutation_at_all_without_open_pr(tmp_path, capsys):
     assert "gh pr create" in printed
 
 
+def test_printed_git_commands_use_forward_slash_paths(tmp_path, capsys):
+    """Every path in the printed `git add`/`gh ... --body-file` commands
+    renders with `/`, on Windows too (where `tmp_path` is a real backslash-
+    bearing absolute path) -- `git`, like Python, accepts that form on
+    Windows, and it's what lets the printed command parse the same way in
+    cmd, PowerShell or bash (including the real bash `eval` in
+    `verification/rehearsal/journey.sh`, which a native backslash path does
+    not survive unquoted)."""
+    paths = _make_artifacts(tmp_path)
+    result = open_or_print_pr(
+        paths,
+        branch="mylonite/gate-x",
+        pr_title="Gate: x",
+        pr_body="body",
+        open_pr=False,
+        base="main",
+        _run=_fake_runner_recording(),
+    )
+    assert result.printed_command is not None
+    assert "\\" not in result.printed_command
+    add_line = next(line for line in result.printed_command.splitlines() if "git add" in line)
+    assert "/" in add_line
+    body_file_line = next(
+        line for line in result.printed_command.splitlines() if "--body-file" in line
+    )
+    assert "/" in body_file_line
+
+
 def test_print_path_warns_against_git_add_on_the_bare_gate_dir(tmp_path, capsys):
     """The gate output directory can still hold artefacts from an earlier
     run (a rejected finding's leftovers live in a SIBLING directory, but a

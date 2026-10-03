@@ -152,6 +152,37 @@ def test_authorize_hint_routes_through_authorize_fix(tmp_path: Path) -> None:
     assert authorize_hint(p) == authorize_fix("my-app")
 
 
+# --- authorize_value_for_target_file: the bare value `authorize_hint` and
+# `generate`'s "Next" guidance both build their text from (0.11.x). ---
+
+
+def test_authorize_value_for_target_file_names_the_scope(tmp_path: Path) -> None:
+    from mylonite._authz import authorize_value_for_target_file
+
+    p = tmp_path / "t.yaml"
+    p.write_text("family: acme\nscope: my-app\ncommand: python\nargs: []\n", encoding="utf-8")
+    assert authorize_value_for_target_file(p) == "my-app"
+
+
+def test_authorize_value_for_target_file_falls_back_to_family(tmp_path: Path) -> None:
+    from mylonite._authz import authorize_value_for_target_file
+
+    p = tmp_path / "t.yaml"
+    p.write_text("family: acme\ncommand: python\nargs: []\n", encoding="utf-8")
+    assert authorize_value_for_target_file(p) == "acme"
+
+
+def test_authorize_value_for_target_file_is_none_for_missing_or_invalid_file(
+    tmp_path: Path,
+) -> None:
+    from mylonite._authz import authorize_value_for_target_file
+
+    assert authorize_value_for_target_file(tmp_path / "missing.yaml") is None
+    bad = tmp_path / "bad.yaml"
+    bad.write_text("not: [valid\n", encoding="utf-8")
+    assert authorize_value_for_target_file(bad) is None
+
+
 @pytest.mark.parametrize(
     "target,expected",
     [

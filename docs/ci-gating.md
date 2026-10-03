@@ -252,8 +252,10 @@ uncalibrated probe reads as.
 **By default, nothing outside its own output directory.** `gate` writes
 `.mylonite/gate/` — the generated test, the exploit JSON, the validation report,
 your `target.yaml` and `PR_BODY.md` — and then prints the exact `git` and `gh`
-commands to commit and open the PR yourself. With neither flag below, your
-repository is not modified: no branch, no commit, no workflow files.
+commands to commit and open the PR yourself, with every path rendered using `/`
+(on Windows too) so the printed `git add`/`--body-file` paths run as printed in
+cmd, PowerShell or bash alike. With neither flag below, your repository is not
+modified: no branch, no commit, no workflow files.
 
 Each finding gets a short, stable id: its weakness class and six hex digits
 of a hash of its pattern id, for example `w2-1a2b3c`. Its test is

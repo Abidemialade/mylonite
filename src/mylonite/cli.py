@@ -42,6 +42,7 @@ from mylonite._cli_io import (
     missing_target_file_message,
 )
 from mylonite._experimental import hidden_command as _hidden_experimental_command
+from mylonite._paths import path_for_shell
 from mylonite.commands.check import check
 from mylonite.commands.llm_ceiling import CeilingGuardGroup, apply_request_ceiling
 from mylonite.commands.llm_headers import LLMHeaderOption, apply_llm_headers
@@ -1596,7 +1597,7 @@ def scan(
                 echo("")
         # "Next:" hint — point at the very next command so the flow is self-guiding.
         if result.report.findings_count > 0:
-            echo(f"Next: mylonite generate {scan_dir}")
+            echo(f"Next: mylonite generate {path_for_shell(scan_dir)}")
     else:
         # Dry-run: render summary without writing files.
         from mylonite.scan.artefacts import render_summary

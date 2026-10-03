@@ -27,18 +27,31 @@ Wrote target:  <dir>/generated/indirect_injection_note_body_direct/target.yaml
 
 Next - this is a LIVE custom-target test. To run it you need:
   - pytest + mylonite installed in the consuming environment
-  - your provider API key set (e.g. ANTHROPIC_API_KEY)
+  - ANTHROPIC_API_KEY set
   - your target's MCP server runnable, and target.yaml co-located
 Then:
   MYLONITE_LIVE_TARGET=1 pytest <dir>/generated/indirect_injection_note_body_direct
-  mylonite validate <dir>/generated/indirect_injection_note_body_direct
-UNVALIDATED: this test is a candidate until `mylonite validate <dir>/generated/indirect_injection_note_body_direct` keeps it as KEPT. Do not commit it as a gate test before then.
+  mylonite validate <dir>/generated/indirect_injection_note_body_direct --authorize kitchen-sink
+UNVALIDATED: this test is a candidate until `mylonite validate <dir>/generated/indirect_injection_note_body_direct --authorize kitchen-sink` keeps it as KEPT. Do not commit it as a gate test before then.
 ```
 
 The line after "Then:" that starts with `mylonite validate` is the exact
-command to run next — take it literally, paths and all. (A reference-target
-finding, not a custom one, skips the LIVE block above and prints only
-`Next: mylonite validate <dir>`.)
+command to run next — take it literally, paths and all, including
+`--authorize`: a custom target carries its required value straight into
+this line, so it runs as printed instead of being refused for a missing
+`--authorize`. That value is the target's declared `scope` — `kitchen-sink`
+above is this branch, the same `--scope` [step 3](3-point-at-your-app.md)
+scaffolded with — or its family when it declares no scope at all. (A
+reference-target finding, not a custom one, needs no `--authorize` at
+all — it skips the LIVE block above and prints only
+`Next: mylonite validate <dir>`.) The second credential line names the env
+var for whichever provider you chose in [step 2](2-choose-a-model.md)
+(`ANTHROPIC_API_KEY` here); with no provider resolved it reads "your
+provider's API key" instead, naming no vendor. Every path always prints with
+forward slashes, on Windows too — Windows itself, Python and the paths above
+all accept that form — and still gets quoted on top of that if it contains a
+space (or anything else a shell would split on). Copy either line verbatim
+either way.
 
 **Exit codes.** `0` once the test is written. `2` is a config/usage error —
 no scan found (run `mylonite scan` first), or an invalid `--target-file`.
