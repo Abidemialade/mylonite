@@ -60,7 +60,8 @@ from mylonite.contracts._types import (
     ToolSpec,
 )
 from mylonite.gate.mitigation import _llm_suggestion
-from mylonite.scan._llm import llm_scope
+from mylonite.scan import auth_preflight
+from mylonite.scan._llm import active_policy, llm_scope
 from mylonite.scan.customiser import PayloadCustomiser
 from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.llm_planner import LLMPlanner
@@ -212,6 +213,14 @@ async def _invoke_mitigation(stub: Callable[..., Any]) -> None:
     _llm_suggestion(_mitigation_exploit(), completion_fn=stub, model=_MODEL)
 
 
+async def _invoke_preflight(stub: Callable[..., Any]) -> None:
+    # The key preflight narrows the active policy (see preflight_policy) and
+    # scopes the result, exactly as auth_preflight_or_exit does.
+    with llm_scope(policy=auth_preflight.preflight_policy(active_policy())):
+        error = await auth_preflight.ping(_MODEL, completion_fn=stub)
+    assert error is None
+
+
 @dataclass(frozen=True)
 class _CallSiteCase:
     name: str
@@ -225,6 +234,10 @@ class _CallSiteCase:
     is_async_stub: bool
     response: SimpleNamespace
     invoke: Callable[[Callable[..., Any]], Awaitable[None]]
+    #: Policy kwargs this call site deliberately makes SMALLER than the active
+    #: policy's (the key preflight: fewer tokens, no retries). Asserted to be
+    #: no larger than the policy's value, instead of equal to it.
+    narrowed: tuple[str, ...] = ()
 
 
 CASES: tuple[_CallSiteCase, ...] = (
@@ -256,6 +269,14 @@ CASES: tuple[_CallSiteCase, ...] = (
         response=_stub_response("a mitigation suggestion"),
         invoke=_invoke_mitigation,
     ),
+    _CallSiteCase(
+        name="key_preflight",
+        caller="preflight",
+        is_async_stub=True,
+        response=_stub_response("ok", tool_calls=None),
+        invoke=_invoke_preflight,
+        narrowed=("max_tokens", "num_retries"),
+    ),
 )
 
 _KNOWN_CALLER_LABELS = frozenset(c.caller for c in CASES)
@@ -264,7 +285,9 @@ _KNOWN_CALLER_LABELS = frozenset(c.caller for c in CASES)
 # --- the contract assertion -----------------------------------------------------
 
 
-def _assert_policy_kwargs_present(kwargs: dict[str, Any], policy: LLMPolicy) -> None:
+def _assert_policy_kwargs_present(
+    kwargs: dict[str, Any], policy: LLMPolicy, narrowed: tuple[str, ...] = ()
+) -> None:
     """The 6 kwargs every ``scan._llm`` chokepoint function merges STRAIGHT
     from the active :class:`LLMPolicy` with no per-call override — see
     ``litellm_json_call``/``_async``/``litellm_tool_call_async``/
@@ -284,8 +307,12 @@ def _assert_policy_kwargs_present(kwargs: dict[str, Any], policy: LLMPolicy) -> 
     them, not a stronger check.
     """
     assert kwargs.get("temperature") == policy.temperature, kwargs
-    assert kwargs.get("max_tokens") == policy.max_tokens, kwargs
-    assert kwargs.get("num_retries") == policy.num_retries, kwargs
+    for name in ("max_tokens", "num_retries"):
+        if name in narrowed:
+            assert kwargs.get(name) is not None, kwargs
+            assert kwargs[name] <= getattr(policy, name), kwargs
+        else:
+            assert kwargs.get(name) == getattr(policy, name), kwargs
     assert kwargs.get("drop_params") == policy.drop_params, kwargs
     assert kwargs.get("seed") == policy.seed, kwargs
     assert kwargs.get("api_base") == policy.api_base, kwargs
@@ -315,7 +342,7 @@ async def test_call_site_carries_active_llm_policy_kwargs(case: _CallSiteCase) -
     with llm_scope(policy=policy):
         await case.invoke(stub)
     assert seen, f"{case.name}: completion_fn was never invoked"
-    _assert_policy_kwargs_present(seen[0], policy)
+    _assert_policy_kwargs_present(seen[0], policy, case.narrowed)
 
 
 # --- structural safety net: every literal caller= label is represented --------

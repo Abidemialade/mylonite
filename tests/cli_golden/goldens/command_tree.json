@@ -1370,6 +1370,20 @@
       {
         "default": "None",
         "envvar": null,
+        "help": "Extra HTTP header on every LLM request, e.g. a workspace id (repeatable; also MYLONITE_LLM_HEADERS). Values are never logged.",
+        "is_flag": false,
+        "multiple": true,
+        "name": "llm_header",
+        "opts": [
+          "--llm-header"
+        ],
+        "required": false,
+        "secondary_opts": [],
+        "type": "StringParamType"
+      },
+      {
+        "default": "None",
+        "envvar": null,
         "help": "Hard ceiling on LLM requests for this whole run, retries included (also MYLONITE_MAX_LLM_REQUESTS). Hitting it stops the run: exit 3, NOT TESTED. Default: no ceiling.",
         "is_flag": false,
         "multiple": false,

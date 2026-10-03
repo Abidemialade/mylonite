@@ -418,6 +418,22 @@ shows one line: what failed, the exception type, and its message with secrets ma
 raw traceback for these errors, even at DEBUG level, because a provider's error text can
 carry the key or the request URL.
 
+### When the provider refuses the key
+
+Before any target work, a live command sends one tiny request per role model. When the
+provider refuses it, the run stops with exit `4` and one line, and no target is
+launched:
+
+```text
+error: --model anthropic/claude-haiku-4-5: Authentication failed (HTTP 401: the key is
+invalid or expired) -- set a valid key in ANTHROPIC_API_KEY for provider 'anthropic'.
+```
+
+A key that needs a header the run did not send (an unscoped key without its workspace
+id) reads `The provider needs the anthropic-workspace-id header with this key (HTTP 400)`
+and names `--llm-header` and `MYLONITE_LLM_HEADERS`. See the
+[CLI reference](cli-reference.md) for both.
+
 ### When the provider rate-limits or drops the run
 
 When provider calls fail three times in a row, `scan` and `gate` stop early and exit `4`

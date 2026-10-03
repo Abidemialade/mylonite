@@ -23,7 +23,7 @@ your own docs either.
 
 | Provider | Status | LiteLLM prefix | Key env var(s) | Other required vars | Extra headers | Example model |
 |---|---|---|---|---|---|---|
-| anthropic | measured | `anthropic/` | `ANTHROPIC_API_KEY` | — | none yet | `anthropic/claude-haiku-4-5-20251001` |
+| anthropic | measured | `anthropic/` | `ANTHROPIC_API_KEY` | — | `anthropic-workspace-id` | `anthropic/claude-haiku-4-5-20251001` |
 | ollama | measured | `ollama_chat/` | none — local, no key | — | none yet | `ollama_chat/llama3.2:3b` |
 | azure | supported | `azure/` | `AZURE_API_KEY` | `AZURE_API_BASE`, `AZURE_API_VERSION` | none yet | not published yet |
 | bedrock | supported | `bedrock/` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | — | none yet | not published yet |
@@ -94,6 +94,12 @@ shell's ambient environment, printing a warning on stderr each time they
 override something. Pass only the one you mean to use if you want to avoid
 reading that warning.
 
+**A key that needs a header.** If your key needs a header on every request,
+such as the workspace id an unscoped Anthropic key needs (the "Extra headers"
+column above), pass it with the global `--llm-header NAME=VALUE` option or the
+`MYLONITE_LLM_HEADERS` variable. Mylonite never logs or saves the value. See
+the [CLI reference](cli-reference.md) for details.
+
 ## Does this command need a key?
 
 | Command | Needs a model and key? |
@@ -111,7 +117,9 @@ reading that warning.
 Every command that needs a model checks every role it will call (planner,
 customiser, judge) **before** doing any work and names the missing
 environment variable, rather than spending a call and failing partway
-through. With nothing configured anywhere — no `--model`, no `model:` in
+through. It then sends one tiny request per remote role model, so a key the
+provider refuses (invalid, expired, or missing a required header) stops the
+run in one line, exit `4`, before the target starts. With nothing configured anywhere — no `--model`, no `model:` in
 `mylonite.yaml`, no `MYLONITE_MODEL` — Mylonite refuses to run and lists the
 approved providers from the table above, each with its key variable and an
 example model string, plus the no-key local option (a self-hosted Ollama

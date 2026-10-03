@@ -38,6 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   narrower set than before. A target file with no `weakness_classes` declared
   at all is unaffected: the flag still declares them, as it already did for
   inline `mcp:custom` targets.
+- **A wrong key now stops the run in one line, before the target starts.**
+  `scan`, `validate`, `gate` and `ablate` send one tiny request per distinct
+  role model first (a few tokens, no retries, counted against
+  `--max-llm-requests`). An invalid or expired key (HTTP 401) exits `4` with a
+  line naming the key variable; a key that needs an extra header (HTTP 400,
+  such as a missing workspace id) exits `4` with a line naming `--llm-header`
+  and `MYLONITE_LLM_HEADERS`. Neither launches the target or prints a
+  traceback. Ollama and vLLM models are not checked. The provider registry's
+  Anthropic row now names `anthropic-workspace-id`, so the provider table in
+  `docs/choose-a-model.md` changed.
 
 - **`validate --iteration-timeout` now bounds the reference differential too.**
   It used to reach only the provider check and custom targets, so a slow
@@ -148,6 +158,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verdict's trace reading counts a guarded tool's calls as reads, the line
   says so. Nothing about how a scan decides changes, and the inventory never
   gates `check --enforce`.
+- **Send extra headers on every LLM request.** The global
+  `--llm-header NAME=VALUE` option (repeatable) and the `MYLONITE_LLM_HEADERS`
+  variable (comma-separated pairs) add headers such as the workspace id an
+  unscoped Anthropic key needs, so those keys now work. Values are treated as
+  secrets: they reach the provider and never the console, logs, artefacts,
+  fixtures or replay cache keys. The new option changes the command-tree
+  snapshot.
+
 - **`scan --scaffold` writes a file that runs as written.** A `seed_arm` the
   scan would wire on its own is now written live, tagged `# auto-detected`,
   instead of commented out for you to edit. So is an `effect_probe`, when a

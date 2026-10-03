@@ -458,6 +458,12 @@ def require_llm_configured_or_exit(
         if warning:
             echo_err(warning)
     preflight_model_or_exit(*models, api_base=api_base)
+    # Last, once the key is present and the model routes: one tiny live call
+    # per distinct model proves the provider accepts the key (and any header
+    # it needs) before any target work starts. Exits 4 in one line if not.
+    from mylonite.scan import auth_preflight
+
+    auth_preflight.auth_preflight_or_exit(*models, api_base=api_base)
 
 
 def looks_like_provider_env_var(key: str) -> bool:

@@ -86,9 +86,13 @@ def test_vertex_authenticates_via_adc_not_a_bearer_key() -> None:
     assert vertex.extra_env == ("VERTEXAI_PROJECT", "VERTEXAI_LOCATION")
 
 
-def test_extra_headers_defaults_to_empty_for_every_row() -> None:
+def test_only_anthropic_names_an_extra_header() -> None:
+    """The workspace header an unscoped Anthropic key needs is named so the
+    "header required" error line can say which header to pass; no other
+    row needs one."""
     for info in PROVIDERS.values():
-        assert info.extra_headers == ()
+        expected = ("anthropic-workspace-id",) if info.id == "anthropic" else ()
+        assert info.extra_headers == expected, info.id
 
 
 def test_provider_info_is_frozen() -> None:

@@ -63,3 +63,20 @@ def _default_model_for_tests(monkeypatch: pytest.MonkeyPatch) -> None:
     None})``, or ``monkeypatch.delenv("MYLONITE_MODEL")`` beforehand.
     """
     monkeypatch.setenv("MYLONITE_MODEL", "anthropic/claude-haiku-4-5-20251001")
+
+
+@pytest.fixture(autouse=True)
+def _no_live_key_preflight(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Before any target work, scan/validate/gate/ablate send one tiny live
+    request per role model to prove the key works (``mylonite.scan.
+    auth_preflight``). The rest of the suite runs those commands with fake
+    keys and fake completions, and counts LLM calls, so the preflight is a
+    no-op by default. ``tests/scan/test_auth_preflight.py`` and
+    ``tests/test_llm_auth_preflight.py`` put the real one back."""
+    from mylonite.scan import auth_preflight
+    from mylonite.scan.llm_headers import reset_llm_headers
+
+    monkeypatch.setattr(auth_preflight, "auth_preflight_or_exit", lambda *a, **k: None)
+    reset_llm_headers()
+    yield
+    reset_llm_headers()
