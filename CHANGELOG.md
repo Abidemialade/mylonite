@@ -202,6 +202,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An attack carried out through a tool named like a read no longer reads
+  RESISTED (#297).** The trace used to count a call as a read when a read word
+  appeared anywhere in the tool's name, so an undeclared `post_to_thread`
+  ("th-read"), `upload_file`, `create_widget` or `web_fetch` was skipped. An
+  agent that sent the data through one of those instead of the seed's own tool
+  read "called no consequential tool", and without a calibrated
+  `effect_probe` the attempt could read RESISTED. Read words now count only as
+  whole words, and a name with a consequential or egress word is never a read,
+  so that attempt reads FOUND when the call carries the attack's marker and
+  NOT TESTED (`MYL-INC-001`) when nothing ties it to the attempt. A tool such
+  as `get_issue` or `web_search` now counts as a dispatch too; list it under
+  `control_config.read_tool_names` if it only reads. The scaffold's
+  store and recall pick uses whole words as well, so `post_to_thread` is no
+  longer offered as the recall tool, and the tool inventory's "counts its
+  calls as reads" note follows the new rule.
 - **A `transport: rest` target that declares an `effect_probe` now stops with
   one clear message instead of being ignored.** Every command that loads the
   file, `check` included, exits `2` before it connects or calls a model, and

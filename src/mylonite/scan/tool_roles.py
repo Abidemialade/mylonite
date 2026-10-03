@@ -48,9 +48,12 @@ def _words(spec: str) -> tuple[str, ...]:
     return tuple(spec.split())
 
 
-# Name fragments (not load-bearing for any verdict — only for scaffold hints).
+# Name words for the store / recall pick (not load-bearing for any verdict). Matched
+# as whole words of the name (``_hints_match``), so ``post_to_thread`` is not a
+# recall tool because "thread" contains "read" (#297).
 _STORE_NAME_HINTS = _words(
-    "save store remember add create write post append note record insert put memor log"
+    "save store remember add create write post append note notes record records insert "
+    "put memory memories memorize memorise log"
 )
 _RETRIEVE_NAME_HINTS = _words(
     "recall list search history feed inbox recent browse read get find load query"
@@ -404,11 +407,11 @@ def _classify_tools(tools: list[Any]) -> _ToolRoles:
         # Walks nested array/object schemas, not just top-level string props, so
         # a batched-record write tool is no longer invisible to auto-wire.
         slot = _content_slot_template(tool)
-        if seed_arm_tool is None and slot is not None and any(h in low for h in _STORE_NAME_HINTS):
+        if seed_arm_tool is None and slot is not None and _hints_match(name, _STORE_NAME_HINTS):
             seed_arm_tool, (seed_arm_param, seed_arm_args_template) = name, slot
         if (
             retrieve_tool is None
-            and any(h in low for h in _RETRIEVE_NAME_HINTS)
+            and _hints_match(name, _RETRIEVE_NAME_HINTS)
             and not _requires_id(tool)
         ):
             retrieve_tool = name
@@ -655,9 +658,9 @@ def _read_by_id_tool(tools: list[Any]) -> str | None:
     readbacks from ``retrieve_tool``.
     """
     for tool in tools:
-        low = (getattr(tool, "name", "") or "").lower()
-        if any(h in low for h in _RETRIEVE_NAME_HINTS) and _id_param(tool) is not None:
-            return getattr(tool, "name", "") or None
+        name = getattr(tool, "name", "") or ""
+        if _hints_match(name, _RETRIEVE_NAME_HINTS) and _id_param(tool) is not None:
+            return name or None
     return None
 
 

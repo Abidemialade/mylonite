@@ -16,8 +16,9 @@ from collections.abc import Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal, get_args
 
-from mylonite.scan.control_shim import READ_HINTS
+from mylonite.scan.control_shim import _CONSEQUENTIAL_HINTS, _EGRESS_HINTS, READ_HINTS
 from mylonite.scan.predicate_primitives import DEFAULT_DEFERRED_MARKERS, has_deferral_word
+from mylonite.scan.tool_classifier import hint_matches
 
 TraceOutcome = Literal[
     "not-called",
@@ -48,6 +49,15 @@ def is_read_tool(
     A consequential tool is never a read, even when it is also named as the
     verify or recall tool: a call to it must always count as a dispatch, or a
     misconfigured probe would hide the agent's own consequential calls.
+
+    Past the declared lists, every doubt resolves to "not a read", because a
+    call wrongly read as a read can turn a landed attack into a negative (#297):
+
+    * read words match as whole words of the name, the confirm gate's rule, so
+      ``post_to_thread`` or ``upload_file`` is not a read;
+    * a name carrying a consequential or egress word (``web_fetch``,
+      ``send_and_read``) is never a read, whatever else it says, and a
+      ``readOnlyHint`` from the server does not override that.
     """
     if name in consequential_tool_names:
         return False
@@ -59,10 +69,11 @@ def is_read_tool(
     )
     if has_consequential_hint:
         return False
+    if hint_matches(name, _CONSEQUENTIAL_HINTS + _EGRESS_HINTS):
+        return False
     if declared.get("readOnlyHint") is True:
         return True
-    lowered = name.lower()
-    return any(hint in lowered for hint in READ_HINTS)
+    return hint_matches(name, READ_HINTS)
 
 
 def classify_trace(

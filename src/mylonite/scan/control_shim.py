@@ -254,9 +254,10 @@ class BoundaryControl:
 
 
 # Tool-name hints for "retrieval/read" tools whose results carry untrusted
-# content back to the planner (the W2 indirect-injection surface). Substring,
-# case-insensitive; tool_roles classification refines this heuristic. Public:
-# scan.effect_verdict reads this to tell a read call apart from a dispatch.
+# content back to the planner (the W2 indirect-injection surface). Matched as
+# whole words of the name (``tool_classifier.hint_matches``); tool_roles
+# classification refines this heuristic. Public: scan.effect_verdict reads this
+# to tell a read call apart from a dispatch.
 READ_HINTS: tuple[str, ...] = (
     "read",
     "get",

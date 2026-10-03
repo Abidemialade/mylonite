@@ -173,13 +173,25 @@ def test_read_role_matches_the_live_information_flow_control() -> None:
 
 
 def test_a_gate_and_verdict_disagreement_is_shown_not_hidden() -> None:
-    """`budget_report` has no whole-word hint, so the confirm gate guards it by
-    the fail-closed default, while the verdict's substring read check counts its
-    calls as reads. The inventory says both."""
-    entry = _by_name(tool_inventory([_tool("budget_report")]))["budget_report"]
+    """`list_notes` has no consequential word, so the confirm gate guards it by
+    the fail-closed default, while the verdict counts its calls as reads. The
+    inventory says both."""
+    entry = _by_name(tool_inventory([_tool("list_notes")]))["list_notes"]
     assert entry.consequential is True
+    assert entry.consequential_source == "unknown"
     assert entry.verdict_read is True
     assert "verdict counts its calls as reads" in treated_as_text(entry)
+
+
+@pytest.mark.parametrize(
+    "name", ["budget_report", "post_to_thread", "upload_file", "create_widget", "web_fetch"]
+)
+def test_a_read_word_inside_a_name_is_not_a_verdict_read(name: str) -> None:
+    """The verdict matches read words as whole words and never reads a
+    consequential or egress name as a read (#297); the inventory agrees."""
+    entry = _by_name(tool_inventory([_tool(name)]))[name]
+    assert entry.verdict_read is False
+    assert "reads" not in treated_as_text(entry)
 
 
 def test_a_declared_consequential_tool_is_never_a_verdict_read() -> None:

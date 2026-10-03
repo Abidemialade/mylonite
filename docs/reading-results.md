@@ -281,8 +281,13 @@ carry no `trace_outcome` and are decided as before.
 for each tool in a fixed order: your `control_config.consequential_tools` list, then the
 server's own MCP annotations (`readOnlyHint`, `destructiveHint`), then the tool's name.
 A tool none of these recognise is guarded as consequential anyway. The trace counts a
-call as a dispatch unless the tool is a read, and its read check also matches read words
-inside a longer name, so the two can disagree on a name such as `budget_report`. To see
+call as a dispatch unless the tool is a read: one you list in
+`control_config.read_tool_names`, the probe's own tool, or one whose name has a read word
+(`read`, `get`, `list`, `search` and so on) as a whole word. A read word inside a longer
+word does not count, so `post_to_thread` and `upload_file` are dispatches, and a name with
+a consequential or egress word (`send`, `post`, `fetch`, `web`) is never a read, even
+`web_fetch`. The two can still disagree: a tool such as `list_notes` is guarded by the
+gate's fail-closed default, while the trace counts its calls as reads. To see
 what each of your tools will be treated as before you spend anything, read the tool
 inventory that `mylonite scan --scaffold` writes into the target file. It has one line
 per tool, with its role, where the role came from (`declared`, `annotation`, `schema`,
