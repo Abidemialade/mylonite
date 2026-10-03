@@ -16,6 +16,7 @@ Contract with the adapter:
 from __future__ import annotations
 
 import json
+import posixpath
 
 from mylonite.contracts import AdapterResponse, Payload
 from mylonite.scan._types import Verdict
@@ -50,6 +51,16 @@ def _first_path_component(path: object, scope: str) -> str | None:
     ``path`` are normalised to forward slashes first, since the bundled
     filesystem MCP server can run on either platform. Returns ``None`` when
     ``path`` is missing, not a string, or resolves to ``scope`` itself.
+
+    ``path`` is the raw argument the planner's ``write_file`` call carried,
+    not a path the server has already canonicalised — a call like
+    ``write_file(path="notes/../secret.txt")`` writes to the top-level entry
+    ``secret.txt``, not ``notes`` (#187). ``posixpath.normpath`` collapses
+    ``..``/``.`` segments before the first component is taken, so attribution
+    matches the entry the write actually lands on rather than a path segment
+    the traversal cancels out. This is attribution only — it does not police
+    whether ``path`` escapes ``scope``; that containment is the sandboxed
+    server's own job, not this predicate's.
     """
     if not isinstance(path, str) or not path:
         return None
@@ -60,6 +71,9 @@ def _first_path_component(path: object, scope: str) -> str | None:
             return None
         if normalized.startswith(scope_norm + "/"):
             normalized = normalized[len(scope_norm) + 1 :]
+    normalized = posixpath.normpath(normalized)
+    if normalized == ".":
+        return None
     normalized = normalized.lstrip("/")
     if not normalized:
         return None

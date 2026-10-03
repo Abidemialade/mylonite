@@ -24,6 +24,21 @@ from pydantic import ValidationError
 from mylonite._cli_io import echo, echo_err, echo_exc
 from mylonite.exit_codes import EXIT_CONFIG
 from mylonite.plugins._mcp import target_registry
+
+# Re-exported here (not defined here): `load_target_file` must run this
+# check on every load, from a module (`target_file.py`) with no `typer`
+# dependency -- unlike this one. `cli.py`'s existing import of
+# `_relative_sqlite_env_keys` FROM THIS MODULE, and this module's own
+# `_scaffold_target_file` below, both keep working unchanged (#187).
+from mylonite.plugins._mcp.target_file import (
+    _relative_sqlite_arg_values as _relative_sqlite_arg_values,
+)
+from mylonite.plugins._mcp.target_file import (
+    _relative_sqlite_env_keys as _relative_sqlite_env_keys,
+)
+from mylonite.plugins._mcp.target_file import (
+    relative_sqlite_path_warnings as relative_sqlite_path_warnings,
+)
 from mylonite.scan.tool_roles import ReadbackChoice, _classify_tools, _ToolRoles
 
 
@@ -75,38 +90,6 @@ def _atomic_write_text(path: Path, text: str) -> None:
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
-
-
-def _relative_sqlite_env_keys(env: dict[str, str]) -> list[str]:
-    """Env keys whose value looks like a SQLite DB referenced by a NON-absolute
-    path — the #18 Windows footgun (a relative sqlite path silently opens a
-    different/empty DB, making a vulnerable agent look clean)."""
-    flagged: list[str] = []
-    for key, val in env.items():
-        low = val.lower()
-        if "://" in val:
-            # URL form. DCR-0011: match the SQLite marker against the URL
-            # SCHEME, not an unanchored substring test anywhere in the value —
-            # `"sqlite" in low` used to misclassify e.g.
-            # `postgresql://sqlite-cache.internal:5432/app` (a non-SQLite URL
-            # whose HOSTNAME merely contains "sqlite") as a relative SQLite path.
-            scheme = low.split("://", 1)[0]
-            if scheme not in ("sqlite", "sqlite3"):
-                continue
-            # The single '/' after the authority separator is NOT part of the
-            # path, so `sqlite:///data.db` is RELATIVE `data.db` while
-            # `sqlite:////abs/x.db` is absolute `/abs/x.db` — the exact #18 trap.
-            after = val.split("://", 1)[1]
-            path = after[1:] if after.startswith("/") else after
-        else:
-            if not ("sqlite" in low or low.endswith((".db", ".sqlite", ".sqlite3"))):
-                continue
-            path = val
-        is_posix_abs = path.startswith("/")
-        is_win_abs = len(path) >= 2 and path[1] == ":"  # C:\… or C:/…
-        if not (is_posix_abs or is_win_abs):
-            flagged.append(key)
-    return flagged
 
 
 def _suggest_weakness_classes(tools: list[Any]) -> list[str]:
@@ -212,6 +195,36 @@ def _target_file_from_flags(
     except ValidationError as exc:
         echo_exc("invalid custom target", exc)
         raise typer.Exit(code=EXIT_CONFIG) from exc
+
+
+def _rebase_relative_path(path: Path, *, output: Path) -> Path:
+    """Re-express ``path`` so it resolves to the same file once ``output`` is
+    later loaded (#187).
+
+    ``--system-prompt-file`` is typed relative to the CURRENT directory, like
+    every other relative CLI argument — but ``load_target_file`` resolves
+    every path field in a target YAML against THAT FILE'S OWN directory
+    (``TargetFile.source_dir``), not the directory ``--scaffold`` ran from.
+    Writing the flag's value verbatim into the scaffolded file breaks the
+    moment ``--scaffold`` writes to a different directory than the one the
+    caller is in. Re-base it onto ``output``'s own directory instead, so the
+    written file and the loader agree:
+
+    - an already-absolute ``path`` is returned unchanged;
+    - a ``path`` under ``output``'s directory becomes a plain relative path
+      (no ``..``);
+    - otherwise ``path`` is returned as an absolute path — a ``..``-climbing
+      relative value would fail the loader's containment check (see
+      ``resolved_system_prompt_path``), so that is never written.
+    """
+    if path.is_absolute():
+        return path
+    abs_path = (Path.cwd() / path).resolve()
+    output_dir = output.resolve().parent
+    rel = os.path.relpath(abs_path, output_dir)
+    if rel.startswith(".."):
+        return abs_path
+    return Path(rel)
 
 
 def _verify_args_stub(tool: Any) -> dict[str, Any]:
@@ -575,20 +588,46 @@ def _scaffold_target_file(
     suggested_weaknesses = _suggest_weakness_classes(tools)
     roles = _classify_tools(tools)
 
-    # #18 footgun: warn (do not block) on a relative SQLite DB path.
-    for key in _relative_sqlite_env_keys(tf.env):
-        echo_err(
-            f"warning: env {key} looks like a relative SQLite path. "
-            "On Windows a relative/ambiguous sqlite URL can open a DIFFERENT or empty "
-            "DB, making a vulnerable agent look clean (#18). Prefer an absolute path. "
-            "(value withheld — env values may carry credentials)"
-        )
+    # #18/#187 footgun: warn (do not block) on a relative SQLite DB path in
+    # either `env` or `args`.
+    for warning in relative_sqlite_path_warnings(tf):
+        echo_err(f"warning: {warning}")
+
+    # #187: write `system_prompt_file` re-based onto the SCAFFOLDED file's own
+    # directory, not the (possibly different) directory `--scaffold` ran from
+    # -- the base `load_target_file` will resolve it against later.
+    written_system_prompt_file = (
+        _rebase_relative_path(system_prompt_file, output=output)
+        if system_prompt_file is not None
+        else None
+    )
+    if written_system_prompt_file is not None:
+        from mylonite._paths import PathEscapesBase, resolve_contained
+
+        try:
+            resolve_contained(
+                written_system_prompt_file,
+                base=output.resolve().parent,
+                label="system_prompt_file",
+            )
+        except PathEscapesBase:
+            # No representation of this path can load: `system_prompt_file`
+            # must stay inside the target file's own directory (see
+            # resolved_system_prompt_path). Warn now, at scaffold time,
+            # instead of leaving the operator to discover it only when a
+            # later `scan`/`check` fails to load the file.
+            echo_err(
+                f"warning: --system-prompt-file {system_prompt_file} is outside "
+                f"{output.resolve().parent}, the directory the scaffolded file will live "
+                "in. A target file's system_prompt_file must stay inside that directory; "
+                "move the prompt file there, or pass --system-prompt inline instead."
+            )
 
     yaml_text = _render_target_scaffold(
         tf=tf,
         tool_names=tool_names,
         suggested_weaknesses=suggested_weaknesses,
-        system_prompt_file=system_prompt_file,
+        system_prompt_file=written_system_prompt_file,
         roles=roles,
         tools=tools,
     )

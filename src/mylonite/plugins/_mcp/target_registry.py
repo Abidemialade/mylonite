@@ -378,6 +378,15 @@ class TargetSpec:
     default_system_prompt: str
     requires_scope: bool
     args_with_scope: bool = True
+    # The directory a stdio launch's subprocess runs in, so a relative
+    # `command` or a relative path inside `args` resolves the same way
+    # wherever the user runs mylonite from (#187). None for every bundled
+    # family and for a custom target assembled from inline CLI flags (no
+    # target.yaml to anchor to) -- both keep the caller's own cwd, unchanged.
+    # A loaded target file's build_target_spec sets this to the YAML's own
+    # directory (TargetFile.source_dir), the same base system_prompt_file
+    # already resolves against.
+    cwd: str | None = None
     primary_tools: tuple[str, ...] = field(default_factory=tuple)
     # Custom-target extensions (empty/None for the bundled families).
     extra_env: dict[str, str] = field(default_factory=dict)
