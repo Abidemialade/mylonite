@@ -438,9 +438,11 @@ def _classify_tools(tools: list[Any]) -> _ToolRoles:
 class ReadbackChoice(NamedTuple):
     """The tool an effect_probe would read the target's state back through.
 
-    ``tied`` says the readback is tied to a consequential tool, so a W3/W4
-    effect through that tool would show in it; only a tied readback is safe to
-    propose live. ``needs_args`` says the tool has required arguments the
+    ``tied`` says the readback is strongly tied to a consequential tool (a
+    result word, or the recall of a store it writes), so a W3/W4 effect through
+    that tool would show in it; only a tied readback is proposed live. A shared
+    noun alone is not enough: an inbox reader (``list_emails``) shares a noun
+    with a sender (``send_email``) but need not show what was sent. ``needs_args`` says the tool has required arguments the
     scaffold can only stub.
     """
 
@@ -450,10 +452,12 @@ class ReadbackChoice(NamedTuple):
 
 
 #: Words a readback name uses for what a consequential verb produced: a
-#: ``sent_log`` or ``outbox`` reports what ``send_email`` sent.
+#: ``sent_log`` or ``outbox`` reports what ``send_email`` sent. Never a bare
+#: noun such as ``mail``: an inbox reader (``read_mail``) lists what arrived,
+#: not what was sent.
 _EFFECT_WORDS_BY_VERB: dict[str, frozenset[str]] = {
     "send": frozenset({"sent", "outbox", "outgoing", "delivered", "deliveries"}),
-    "email": frozenset({"sent", "outbox", "outgoing", "mail", "mails", "emails"}),
+    "email": frozenset({"sent", "outbox", "outgoing"}),
     "post": frozenset({"posted", "posts", "outbox", "published"}),
     "publish": frozenset({"published", "posts"}),
     "create": frozenset({"created"}),
@@ -476,17 +480,25 @@ def _stem(token: str) -> str:
     return token[:-1] if len(token) > 3 and token.endswith("s") else token
 
 
+#: Tie strengths, strongest first. Only ``_TIE_LIVE`` and above is "tied".
+_TIE_RESULT_WORD = 3  # the readback names the verb's result: sent_log for send_email
+_TIE_STORE_RECALL = 2  # the id-free recall of a store a consequential tool writes
+_TIE_LIVE = _TIE_STORE_RECALL
+_TIE_SHARED_NOUN = 1  # a shared noun only: list_messages for send_message
+
+
 def _tie_strength(readback: str, consequential: str) -> int:
-    """2: the readback names what the consequential tool produces (a shared
-    noun, or a word for its verb's result). 0: no tie by name."""
+    """How strongly a readback's name ties it to a consequential tool:
+    ``_TIE_RESULT_WORD`` when it names what the tool's verb produced,
+    ``_TIE_SHARED_NOUN`` when the two only share a noun, 0 otherwise."""
     r_tokens = _tokens(readback)
     c_tokens = _tokens(consequential)
+    effect_words = set().union(*(_EFFECT_WORDS_BY_VERB.get(t, frozenset()) for t in c_tokens))
+    if r_tokens & effect_words:
+        return _TIE_RESULT_WORD
     r_nouns = {_stem(t) for t in r_tokens - _TIE_STOPWORDS}
     c_nouns = {_stem(t) for t in c_tokens - _TIE_STOPWORDS}
-    if r_nouns & c_nouns:
-        return 2
-    effect_words = set().union(*(_EFFECT_WORDS_BY_VERB.get(t, frozenset()) for t in c_tokens))
-    return 2 if r_tokens & effect_words else 0
+    return _TIE_SHARED_NOUN if r_nouns & c_nouns else 0
 
 
 def _is_safe_readback(tool: Any, consequential: set[str]) -> bool:
@@ -513,11 +525,12 @@ def effect_readback(tools: list[Any]) -> ReadbackChoice | None:
     The single detector shared by ``scan --scaffold`` (which writes a probe
     live only on a tied readback that needs no arguments) and the scan's
     effect-unconfirmable message, so the two agree. A candidate must pass
-    :func:`_is_safe_readback`. Among those, one tied to a consequential tool
-    wins over listing order: first by name (``sent_log`` for ``send_email``,
-    ``list_issues`` for ``create_issue``), then as the id-free recall of a
-    store that a consequential tool writes (``read_graph`` for
-    ``create_entities``). Then a tool with no required argument wins.
+    :func:`_is_safe_readback`. Among those, the strongest tie to a
+    consequential tool wins over listing order: a result word (``sent_log`` or
+    ``outbox`` for ``send_email``), then the id-free recall of a store that a
+    consequential tool writes (``read_graph`` for ``create_entities``), then a
+    shared noun only (``list_messages`` for ``send_message``), which never
+    counts as tied. Then a tool with no required argument wins.
     """
     from mylonite.scan.control_shim import consequential_tool_names
 
@@ -534,14 +547,14 @@ def effect_readback(tools: list[Any]) -> ReadbackChoice | None:
             continue
         name = getattr(tool, "name", "") or ""
         tie = max((_tie_strength(name, c) for c in consequential), default=0)
-        if tie == 0 and name == store_pair_recall:
-            tie = 1
+        if name == store_pair_recall:
+            tie = max(tie, _TIE_STORE_RECALL)
         needs_args = bool(_schema_required(tool))
         ranked.append((-tie, 1 if needs_args else 0, index, name, needs_args))
     if not ranked:
         return None
     neg_tie, _args, _index, name, needs_args = min(ranked)
-    return ReadbackChoice(tool=name, tied=neg_tie < 0, needs_args=needs_args)
+    return ReadbackChoice(tool=name, tied=-neg_tie >= _TIE_LIVE, needs_args=needs_args)
 
 
 # --- delivery-channel detectors (v0.7.x) -------------------------------------

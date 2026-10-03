@@ -85,9 +85,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`scan --scaffold` writes a file that runs as written.** A `seed_arm` the
   scan would wire on its own is now written live, tagged `# auto-detected`,
   instead of commented out for you to edit. So is an `effect_probe`, when a
-  tool reads back what the server's consequential tools change (a shared
-  noun or result word such as `sent_log` for `send_email`, or the recall
-  tool of a store a consequential tool writes), needs no arguments, and is
+  tool reads back what the server's consequential tools change (a word for
+  the result, such as `sent_log` or `outbox` for `send_email`, or the recall
+  tool of a store a consequential tool writes; a shared noun alone, as in an
+  inbox reader `list_emails`, is not enough), needs no arguments, and is
   safe to call over and over: a whole-word read name, no write or
   destructive annotation, not consequential itself. On server-memory, for
   example, the file plants through `create_entities` and confirms effects
@@ -111,6 +112,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scaffold proposes one) to get a clean result. The scan's missing-probe
   warning names the code, and `scan --scaffold` marks such classes "effect
   unconfirmable". The reason-code snapshot gains the new code.
+
+  **Upgrading:** `gate` follows the scan. On a custom target that declares
+  W3 or W4 with no `effect_probe`, a gate that finds nothing now exits `2`
+  ("Coverage was incomplete") instead of `0` ("nothing to gate"), so a gate
+  you already committed against such a target turns red. Add an
+  `effect_probe` to the target file (re-run `mylonite scan --scaffold` to get
+  a proposed one), or remove W3/W4 from `weakness_classes`.
 - **`gate --base <branch>` picks the branch the gating PR targets.** Without
   it, `gate` now uses your repository's default branch: `origin/HEAD`, else
   the branch your current branch tracks, else `main`. It used to target

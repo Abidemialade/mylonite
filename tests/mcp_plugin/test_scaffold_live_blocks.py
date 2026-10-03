@@ -197,3 +197,50 @@ def test_the_live_probe_says_calibration_makes_real_calls() -> None:
     assert "calls up to five of this server's" in rendered
     assert "calibration: {controls: skip}" in rendered
     assert "docs/target-file.md" in rendered
+
+
+@pytest.mark.parametrize(
+    ("sender", "inbox"),
+    [
+        (_SEND, _t("list_emails")),
+        (_SEND, _t("read_mail")),
+        (_t("send_message", ("to", "body")), _t("list_messages")),
+    ],
+    ids=["list_emails", "read_mail", "list_messages"],
+)
+def test_an_inbox_reader_is_never_a_live_probe_for_a_sender(
+    sender: ToolSpec, inbox: ToolSpec
+) -> None:
+    """An inbox lists what arrived, not what was sent, so a shared noun with a
+    send tool is not a tie: the reader stays a commented hint."""
+    tools = [sender, inbox]
+    choice = effect_readback(tools)
+    assert choice is not None and choice.tool == inbox.name and not choice.tied
+    rendered = _render(tools, ["W4"])
+    assert _load(rendered).effect_probe is None
+    assert NT_EFFECT_UNCONFIRMABLE in rendered
+
+
+def test_a_result_word_beats_a_shared_noun_and_is_written_live() -> None:
+    tools = [_SEND, _t("list_emails"), _t("sent_log")]
+    choice = effect_readback(tools)
+    assert choice is not None and choice.tool == "sent_log" and choice.tied
+    probe = _load(_render(tools, ["W4"])).effect_probe
+    assert probe is not None and probe.verify_tool == "sent_log"
+
+
+def test_the_seed_arm_comment_and_block_come_from_one_source() -> None:
+    """Even when the caller's roles disagree with the tools, the comment names
+    the recall tool that goes with the seed_arm written under it."""
+    tools = memory_tools()
+    stale = _classify_tools(tools)._replace(retrieve_tool=None, seed_arm_tool="other_tool")
+    rendered = _render_target_scaffold(
+        tf=SimpleNamespace(family="custom", command="npx", args=[], env={}, scope=None),
+        tool_names=[t.name for t in tools],
+        suggested_weaknesses=["W2"],
+        system_prompt_file=None,
+        roles=stale,
+        tools=tools,
+    )
+    assert "# auto-detected: create_entities stores content and read_graph" in rendered
+    assert "no id-free retrieval" not in rendered
