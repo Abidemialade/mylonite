@@ -559,7 +559,7 @@ def credential_arg_warnings(tf: TargetFile) -> list[str]:
     masks before writing a target file to disk; a value in ``args`` survives
     byte-for-byte into every copy it writes (the scan directory, ``generate``'s
     co-located copy, the ``gate`` PR) -- see
-    ``docs/target-file.md#a-credential-in-args-is-written-in-plain-text``. This
+    ``docs/target-file.md#a-credential-in-args-is-written-in-plain-text-and-now-warns``. This
     names the position and withholds the value -- never prints it, even
     redacted, matching :func:`relative_sqlite_path_warnings`'s own precedent --
     and points at the fix: move the credential to ``env:`` (most subprocess
@@ -568,7 +568,7 @@ def credential_arg_warnings(tf: TargetFile) -> list[str]:
     return [
         f"args[{i}] looks like it carries a credential (value withheld). Move it to "
         "env: in the target file, or set it via --env-file, instead of a launch "
-        "argument -- see docs/target-file.md#a-credential-in-args-is-written-in-plain-text."
+        "argument -- see docs/target-file.md#a-credential-in-args-is-written-in-plain-text-and-now-warns."
         for i in _credential_arg_indices(tf.args)
     ]
 

@@ -113,6 +113,95 @@ def test_open_pr_fn_writes_target_before_workflows_and_threads_secret_vars(
     assert "repository secret" in body_sent.lower()
 
 
+def test_open_pr_fn_masks_a_mixed_literal_and_var_ref_header_value(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Critical review fix, on the gate path that actually commits
+    target.yaml: a header value that CONTAINS a ${VAR} reference alongside a
+    literal secret (a cookie with a real session value and a ${CSRF}
+    reference) must still be masked -- the fake secret must never reach the
+    file gate writes for a commit/PR."""
+    fake_session = "FAKESESSION999"  # pragma: allowlist secret
+    monkeypatch.chdir(tmp_path)
+    # The reference inside the mixed value is still a live ${VAR} the SOURCE
+    # target file must resolve when open_pr_fn re-loads it (unrelated to the
+    # masking fix under test) -- a fake, harmless value, never checked below.
+    monkeypatch.setenv("CSRF", "fake-csrf-value-not-checked")
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text(
+        "family: demo\ncommand: python\nargs: []\n"
+        f"headers:\n  Cookie: session={fake_session}; csrf=${{CSRF}}\n",
+        encoding="utf-8",
+    )
+    pr_mod_fake = _FakePrMod()
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest",
+        workflows=True,
+        target_file=target_file,
+        pr_mod=pr_mod_fake,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    out_dir.mkdir(parents=True)
+
+    open_pr_fn(
+        out_dir=out_dir,
+        findings=[(_exploit("p1"), SimpleNamespace(test_filename="test_p1.py"))],
+        body="## What Mylonite found\n",
+        open_pr=False,
+    )
+
+    written_target = (out_dir / "target.yaml").read_text(encoding="utf-8")
+    assert fake_session not in written_target
+    assert "${CSRF}" not in written_target
+    assert "MYLONITE_TARGET_HEADERS_COOKIE" in written_target
+
+    body_sent = pr_mod_fake.calls[0]["pr_body"]
+    assert fake_session not in body_sent
+
+
+def test_open_pr_fn_masks_a_mixed_literal_and_var_ref_env_value(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Same fix for ``env``: a DB URL with a literal password and a
+    ``${DB_HOST}`` reference must still be masked whole on the gate path."""
+    fake_password = "FAKEPASSWORD123"  # pragma: allowlist secret
+    monkeypatch.chdir(tmp_path)
+    # Same unrelated resolution requirement as the headers test above.
+    monkeypatch.setenv("DB_HOST", "fake-db-host-not-checked")
+    target_file = tmp_path / "target.yaml"
+    target_file.write_text(
+        "family: demo\ncommand: python\nargs: []\n"
+        f"env:\n  DATABASE_URL: postgres://admin:{fake_password}@${{DB_HOST}}:5432/db\n",
+        encoding="utf-8",
+    )
+    pr_mod_fake = _FakePrMod()
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest",
+        workflows=True,
+        target_file=target_file,
+        pr_mod=pr_mod_fake,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    out_dir.mkdir(parents=True)
+
+    open_pr_fn(
+        out_dir=out_dir,
+        findings=[(_exploit("p1"), SimpleNamespace(test_filename="test_p1.py"))],
+        body="## What Mylonite found\n",
+        open_pr=False,
+    )
+
+    written_target = (out_dir / "target.yaml").read_text(encoding="utf-8")
+    assert fake_password not in written_target
+    assert "${DB_HOST}" not in written_target
+    assert "MYLONITE_TARGET_ENV_DATABASE_URL" in written_target
+
+    body_sent = pr_mod_fake.calls[0]["pr_body"]
+    assert fake_password not in body_sent
+
+
 def test_open_pr_fn_threads_the_targets_command_into_the_workflows(
     tmp_path: Path, monkeypatch: Any
 ) -> None:

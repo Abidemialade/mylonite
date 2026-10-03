@@ -196,10 +196,18 @@ class _CliState:
     A command with its own ``--config``/explicit-flag knowledge re-resolves via
     :func:`_layout_for` instead of reading ``layout`` directly whenever it has a
     more specific ``config_root`` to apply — see ``scan``/``gate``.
+
+    ``env_file`` is the global ``--env-file`` path (or ``None``), carried so a
+    command that resolves its own ``--target-file`` can call
+    :func:`_reload_env_file_for_target_file` to additionally recognise that
+    specific file's own ``${NAME}`` references (#183) — the root callback that
+    first loads ``--env-file`` runs before any subcommand's own options are
+    parsed, so it cannot know that path itself.
     """
 
-    def __init__(self, layout: Layout) -> None:
+    def __init__(self, layout: Layout, env_file: Path | None = None) -> None:
         self.layout = layout
+        self.env_file = env_file
 
 
 def _layout_for(ctx: typer.Context, *, config_root: Path | None = None) -> Layout:
@@ -295,7 +303,46 @@ def _mylonite_env_var_names() -> frozenset[str]:
     return frozenset(f"MYLONITE_{name.upper()}" for name in _EnvRunConfig.model_fields)
 
 
-def _load_env_file(path: Path) -> None:
+def _env_file_extra_names_for(target_file: Path | None) -> frozenset[str]:
+    """Variable names ``--env-file`` recognises BEYOND the provider-key
+    patterns, for ONE specific ``target_file`` (#183): every name its
+    ``headers``/``request.headers``/``env`` sections reference as
+    ``${NAME}`` — user-named tokens included, not only
+    ``${MYLONITE_TARGET_...}`` placeholders. ``None``, a path that doesn't
+    exist yet (e.g. before a first ``--scaffold``), or one that doesn't parse
+    all yield no extra names; that is not this function's error to raise.
+    """
+    if target_file is None or not target_file.exists():
+        return frozenset()
+    from mylonite._redaction import target_file_var_names
+
+    try:
+        text = target_file.read_text(encoding="utf-8")
+    except OSError:
+        return frozenset()
+    return frozenset(target_file_var_names(text))
+
+
+def _reload_env_file_for_target_file(ctx: typer.Context, target_file: Path | None) -> None:
+    """Re-run ``--env-file``'s load with the extra names THIS target file
+    references (#183), once the command resolving it knows the path -- the
+    root callback that first handles ``--env-file`` runs before Typer parses
+    the chosen subcommand's own ``--target-file``, so the file isn't known
+    there yet. A no-op when ``--env-file`` wasn't passed, ``target_file`` is
+    ``None``, or it references no extra names. Call this BEFORE
+    ``load_target_file``/``load_target_file_and_warn``, so a newly-recognised
+    name is already set when that expansion runs.
+    """
+    state = ctx.obj
+    env_file = getattr(state, "env_file", None) if state is not None else None
+    if env_file is None:
+        return
+    extra = _env_file_extra_names_for(target_file)
+    if extra:
+        _load_env_file(env_file, extra_names=extra)
+
+
+def _load_env_file(path: Path, extra_names: frozenset[str] = frozenset()) -> None:
     """Load recognised provider credential/config vars from a dotenv file —
     never blanket.
 
@@ -309,6 +356,16 @@ def _load_env_file(path: Path) -> None:
     about (Groq/Mistral/DeepSeek/OpenRouter) and Azure's non-key vars
     (``AZURE_API_BASE``/``AZURE_API_VERSION``, only 1 of its 3 required vars).  # allow-literal: example
     Every unrecognised key is reported on stderr — dropped, never silent.
+
+    Also recognised (#183): every ``MYLONITE_TARGET_*``-prefixed name — the
+    placeholders Mylonite itself writes into a redacted target file — and
+    every name in ``extra_names``, the user-named tokens the command line's
+    own ``--target-file`` (if any) actually references (see
+    :func:`_reload_env_file_for_target_file`, which re-calls this function
+    once a command knows its ``--target-file`` path). Neither widens the
+    allowlist to arbitrary environment: the first is Mylonite's own fixed
+    prefix, and the second is scoped to names the SAME target file this run
+    is about to load already declares a need for.
 
     An explicitly-passed flag OVERRIDES an ambient value (standard CLI
     precedence: explicit > ambient — the exact case the flag exists for is a
@@ -325,7 +382,12 @@ def _load_env_file(path: Path) -> None:
 
     def _recognised(key: str) -> bool:
         names = _mylonite_env_var_names() | {LLM_HEADERS_ENV}  # headers: by exact name
-        return looks_like_provider_env_var(key) or key in names
+        return (
+            looks_like_provider_env_var(key)
+            or key in names
+            or key.startswith("MYLONITE_TARGET_")
+            or key in extra_names
+        )
 
     if not path.exists():
         echo_err(f"env file {path} not found.")
@@ -481,7 +543,7 @@ def _root(
     _maybe_enable_truststore()
     install_log_redaction(enabled=True)
     _warn_unsupported_python()
-    ctx.obj = _CliState(layout=resolve_layout())
+    ctx.obj = _CliState(layout=resolve_layout(), env_file=env_file)
     if env_file is not None:
         _load_env_file(env_file)
     if api_key_file is not None:
@@ -1049,6 +1111,10 @@ def scan(
         from mylonite.scan.weakness import validate_weakness_class_flag_or_exit
 
         validate_weakness_class_flag_or_exit(weakness_class)
+    # Recorded BEFORE the mylonite.yaml merge below can fill target_file in, so
+    # the --env/--arg/--command refusal (below) can tell the two apart and
+    # never tell the operator to "drop --target-file" when they never typed it.
+    explicit_target_file = target_file is not None
     # Declarative run config (mylonite.yaml): fill any flag the user omitted so a
     # custom-target run isn't a wall of repeated flags. An explicit flag wins.
     # T14: auto-discovered from ./mylonite.yaml when no --config is passed —
@@ -1094,11 +1160,25 @@ def scan(
         ]
         if _ignored_with_target_file:
             flags_named = ", ".join(_ignored_with_target_file)
+            # The source of target_file matters for the wording: naming
+            # "--target-file" when the operator never typed it (it came from
+            # mylonite.yaml's target_file:) would send them looking for a flag
+            # that isn't there.
+            target_file_source = (
+                "--target-file" if explicit_target_file else "mylonite.yaml's target_file:"
+            )
+            drop_hint = (
+                "drop --target-file"
+                if explicit_target_file
+                else "remove target_file: from mylonite.yaml (or pass --config to point "
+                "at a different one)"
+            )
             echo_err(
                 f"scan: {flags_named} {'has' if len(_ignored_with_target_file) == 1 else 'have'} "
-                "no effect together with --target-file -- the file's own command/args/env "
-                "always win. Put the launch override in the target file's env: block "
-                "instead, or drop --target-file to build the target from these flags."
+                f"no effect together with {target_file_source} -- the file's own "
+                "command/args/env always win. Put the launch override in the target "
+                f"file's env: block instead, or {drop_hint} to build the target from "
+                "these flags."
             )
             raise typer.Exit(code=EXIT_CONFIG)
 
@@ -1210,6 +1290,9 @@ def scan(
         if target_file is not None:
             from mylonite.plugins._mcp.target_file import load_target_file
 
+            # #183: give --env-file a chance to load any ${NAME} THIS target
+            # file references, before load_target_file expands them.
+            _reload_env_file_for_target_file(ctx, target_file)
             try:
                 tf = load_target_file(target_file)
             except Exception as exc:  # YAML / validation errors → exit 2
@@ -1698,6 +1781,9 @@ def generate(
     if target_file is not None:
         from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
 
+        # #183: give --env-file a chance to load any ${NAME} THIS target file
+        # references, before load_target_file expands them.
+        _reload_env_file_for_target_file(ctx, target_file)
         try:
             build_target_spec(load_target_file(target_file))
         except Exception as exc:
@@ -2024,6 +2110,7 @@ def _exit_if_provider_unreachable(
     )
 )
 def validate(
+    ctx: typer.Context,
     target: Annotated[
         Path,
         typer.Argument(
@@ -2280,6 +2367,10 @@ def validate(
         if candidate.is_file():
             target_file = candidate
             echo_err(f"Using target: {candidate} (co-located with the test)")
+
+    # #183: now that target_file is resolved, give --env-file a chance to load
+    # any ${NAME} it references, before load_target_file_and_warn expands them.
+    _reload_env_file_for_target_file(ctx, target_file)
 
     from mylonite.commands.validate_errors import validate_run_errors
     from mylonite.scan._llm import usage_tally
@@ -2903,6 +2994,9 @@ def gate(
         if target_file is not None:
             from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
 
+            # #183: give --env-file a chance to load any ${NAME} THIS target
+            # file references, before load_target_file expands them.
+            _reload_env_file_for_target_file(ctx, target_file)
             try:
                 tf = load_target_file(target_file)
             except Exception as exc:
