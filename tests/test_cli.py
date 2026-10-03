@@ -217,6 +217,64 @@ def test_scan_scaffold_requires_command(tmp_path: Path) -> None:
     assert not out.exists()
 
 
+def test_scan_refuses_env_and_arg_combined_with_target_file(tmp_path: Path) -> None:
+    """#183: --command/--arg/--env build an INLINE mcp:custom target, but once
+    --target-file is given the file's own command/args/env always win --
+    these flags used to be silently ignored. Refuse instead, naming the
+    flag(s) passed."""
+    target_file = tmp_path / "app.yaml"
+    target_file.write_text(
+        "family: custom\ncommand: python\nargs: [server.py]\nweakness_classes: []\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--target-file",
+            str(target_file),
+            "--env",
+            "GITHUB_TOKEN=ghp_fake_not_a_real_secret",
+            "--arg",
+            "--extra",
+            "--authorize",
+            "custom",
+        ],
+    )
+    assert result.exit_code == EXIT_CONFIG, result.output
+    err = result.stderr or result.output
+    assert "--env" in err
+    assert "--arg" in err
+    assert "--target-file" in err
+    assert "ghp_fake_not_a_real_secret" not in err
+
+
+def test_scan_refuses_command_alone_combined_with_target_file(tmp_path: Path) -> None:
+    target_file = tmp_path / "app.yaml"
+    target_file.write_text(
+        "family: custom\ncommand: python\nargs: [server.py]\nweakness_classes: []\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--target-file",
+            str(target_file),
+            "--command",
+            "node",
+            "--authorize",
+            "custom",
+        ],
+    )
+    assert result.exit_code == EXIT_CONFIG, result.output
+    err = result.stderr or result.output
+    assert "--command" in err
+    # Only the flag actually passed is named -- --env/--arg were not given here.
+    assert "--env" not in err
+    assert "--arg" not in err
+
+
 def test_classify_tools_happy_path() -> None:
     """A remember/recall/send_email/list_sent surface yields a usable seed_arm,
     an id-free retrieval path, an effect verify tool, and the W4 sink."""
@@ -914,6 +972,39 @@ def test_scan_scaffold_never_prints_a_credential_shaped_arg_value(
     assert token not in output
 
 
+def test_scan_scaffold_warns_on_credential_shaped_arg_value(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#210/#183: `scan --scaffold` keeps `env`/`headers` secrets out of the
+    written file, but a credential passed via `--arg` is written in plain
+    text (no key name to mask by) -- warn, naming the position, never the
+    value, and point at the fix."""
+    _patch_fake_adapter(monkeypatch)
+    fake_key = "sk-live-abcdefghijklmnopqrstuvwxyz"  # pragma: allowlist secret
+    out = tmp_path / "target.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--command",
+            "python",
+            "--arg",
+            f"--api-key={fake_key}",
+            "--scaffold",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    output = result.stderr or result.output
+    assert "carries a credential" in output
+    assert "args[0]" in output
+    assert fake_key not in output
+    written = out.read_text(encoding="utf-8")
+    # The written file still carries it in plain text (args can't be masked by
+    # key the way env/headers are) -- the warning is the only protection.
+    assert fake_key in written
+
+
 def test_relative_sqlite_env_keys_does_not_misclassify_hostname_substring() -> None:
     """DCR-0011: the unanchored `"sqlite" in low` substring match misclassified a
     non-SQLite URL whose HOSTNAME merely contains "sqlite" as a relative SQLite
@@ -1101,6 +1192,44 @@ def test_env_file_loads_unrelated_api_key_shaped_var_model_ref(
         assert "STRIPE_API_KEY" in out  # loaded, and visibly so -- never silent
     finally:
         os.environ.pop("STRIPE_API_KEY", None)
+
+
+def test_env_file_refuses_an_unresolved_var_placeholder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#183: a `.env` value that is itself an unexpanded `${VAR}` reference
+    (a templating/secrets-manager placeholder never substituted) must be a
+    clear config error, never loaded and sent to the provider as a literal
+    credential."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text("ANTHROPIC_API_KEY=${SOME_SECRET_MANAGER_VAR}\n", encoding="utf-8")
+    result = runner.invoke(app, ["--env-file", str(env_file), "version"])
+    assert result.exit_code == EXIT_CONFIG, result.output
+    err = result.stderr or result.output
+    assert "ANTHROPIC_API_KEY" in err
+    assert "${SOME_SECRET_MANAGER_VAR}" in err
+    assert "unresolved placeholder" in err
+    assert os.environ.get("ANTHROPIC_API_KEY") in (None, "")
+
+
+def test_env_file_accepts_a_real_value_shaped_differently_from_a_placeholder(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Guard the guard: an ordinary (non-placeholder-shaped) value still loads
+    fine -- the new check must not false-positive on a real key."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "ANTHROPIC_API_KEY=sk-ant-test-1234567890\n",  # pragma: allowlist secret
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["--env-file", str(env_file), "version"])
+    assert result.exit_code == 0, result.output
+    try:
+        assert os.environ.get("ANTHROPIC_API_KEY") == "sk-ant-test-1234567890"
+    finally:
+        os.environ.pop("ANTHROPIC_API_KEY", None)
 
 
 def test_scan_refuses_non_reference_without_authorize() -> None:
