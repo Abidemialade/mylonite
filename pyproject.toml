@@ -53,7 +53,15 @@ dependencies = [
     "typer>=0.12",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
-    "litellm>=1.83.10",  # >=1.83.10 fixes CVE-2026-40217; on 3.14 the resolver needs >=1.93.0 (declares <3.15)
+    # >=1.83.10 fixes CVE-2026-40217; on 3.14 the resolver needs >=1.93.0
+    # (declares <3.15). <2.0 is P2's cap: an unbounded floor let a bad or
+    # compromised release (LiteLLM had a real one, 24 Mar 2026, 1.82.7/
+    # 1.82.8) reach every install on the day it's published, with nothing
+    # to stop it short of a hand release. The cap sits at the next major
+    # boundary rather than something narrower (e.g. <1.9x) specifically so
+    # it does not re-exclude the >=1.93.0 the 3.14 resolver already needs —
+    # raise it again only alongside evidence the new range was exercised.
+    "litellm>=1.83.10,<2.0",
     "jsonschema>=4.22",
     # Rescues non-strict JSON (trailing commas, single quotes, Python literals)
     # that non-Claude / local models emit — fallback after strict parsing.

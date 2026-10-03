@@ -37,14 +37,17 @@ ALLOWLIST_ROW_COUNT_CEILING = 0
 ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 0
 
 #: scripts/workflow_key_literals_allowlist.txt's OWN ratchet -- a separate
-#: file and a separate ceiling, never merged with the pair above, so this
-#: tracked-for-removal debt (the scaffolded workflows' own hardcoded
-#: Anthropic key-variable mapping) can never be mistaken for the main
-#: allowlist's "zero rows, all clean" state. Same shrink-only rule: fixing a
-#: row lowers the count (or deletes it) and lowers this ceiling in the same
-#: change; never raise it to excuse a new, unreviewed hit.
-WORKFLOW_KEY_ALLOWLIST_ROW_COUNT_CEILING = 2
-WORKFLOW_KEY_ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 2
+#: file and a separate ceiling, never merged with the pair above, so a real,
+#: reviewed exemption here is never mistaken for the main allowlist's "zero
+#: rows, all clean" state. Drained to 0: both scaffolded workflow templates
+#: now render the gate run's own resolved provider's credential variable
+#: instead of always hardcoding Anthropic's (see
+#: mylonite.gate.workflows._llm_key_env_var). Same shrink-only rule as the
+#: main ceilings: fixing a row lowers the count (or deletes it) and lowers
+#: this ceiling in the same change; never raise it to excuse a new,
+#: unreviewed hit.
+WORKFLOW_KEY_ALLOWLIST_ROW_COUNT_CEILING = 0
+WORKFLOW_KEY_ALLOWLIST_TOTAL_OCCURRENCE_CEILING = 0
 
 
 def _write(tmp_path: Path, rel: str, text: str) -> Path:
