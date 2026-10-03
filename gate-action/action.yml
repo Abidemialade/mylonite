@@ -86,11 +86,23 @@ runs:
                 needs = "node"
             elif command in ("uvx", "uv"):
                 needs = "uv"
-        except Exception:
+        except Exception as exc:
             # A malformed/missing target file is caught properly, with a
             # real error, by the step that actually runs `mylonite gate`
             # below -- this step only decides a CI nicety and must never
-            # fail the job itself.
+            # fail the job itself. Still worth a visible trail: a target
+            # whose env: references a placeholder this step can't expand
+            # (a ${MYLONITE_TARGET_...} the caller hasn't exported yet)
+            # raises here too, and a uvx/npx target that silently lost its
+            # runtime setup fails later with nothing clearer than "command
+            # not found". Name only the exception TYPE, never str(exc) --
+            # a validation error can echo back the offending field's own
+            # value, which may not be redacted yet at this point.
+            print(
+                "::notice::could not read the target file's command to decide "
+                f"on a Node/uv setup step ({type(exc).__name__}); continuing "
+                "without one"
+            )
             needs = ""
         with open(github_output, "a", encoding="utf-8") as f:
             f.write(f"needs={needs}\n")
@@ -221,9 +233,15 @@ runs:
         if [ "$RUNS_ON" != "ubuntu-latest" ]; then
           echo "::warning::the 'runs-on' input is deprecated and has no effect (this action never passes --workflows, so mylonite gate has nothing to scaffold with it)"
         fi
-        if [ -n "$KEY_VAR" ]; then
+        # Both must be non-empty: a caller who already exports the key at
+        # job level and wires `api-key` to an unset secret would otherwise
+        # have that real key overwritten with an empty string here.
+        if [ -n "$KEY_VAR" ] && [ -n "$API_KEY" ]; then
           export "$KEY_VAR=$API_KEY"
         fi
+        # Drop the key from its original name too, so it doesn't travel
+        # under a second name into the `mylonite gate` subprocess tree.
+        unset API_KEY
         args=(
           --target-file "$TARGET_FILE"
           --authorize "$AUTHORIZE"
