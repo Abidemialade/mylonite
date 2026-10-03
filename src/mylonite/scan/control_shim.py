@@ -256,8 +256,8 @@ class BoundaryControl:
 # Tool-name hints for "retrieval/read" tools whose results carry untrusted
 # content back to the planner (the W2 indirect-injection surface). Matched as
 # whole words of the name (``tool_classifier.hint_matches``); tool_roles
-# classification refines this heuristic. Public: scan.effect_verdict reads this
-# to tell a read call apart from a dispatch.
+# classification refines this heuristic. The effect verdict uses its own,
+# stricter VERDICT_* words below, not these.
 READ_HINTS: tuple[str, ...] = (
     "read",
     "get",
@@ -269,6 +269,77 @@ READ_HINTS: tuple[str, ...] = (
     "view",
     "load",
     "lookup",
+)
+
+# The effect verdict's own read rule (``effect_verdict.is_read_tool``), stricter
+# than READ_HINTS because a call wrongly counted as a read can hide a landed
+# attack (#297). All matched as whole words of the tool name.
+#
+#: Transport words: a tool carrying one can send data to a host, so it is never
+#: a read. No "request": ``get_pull_request`` reads; ``http_request`` is caught
+#: by "http".
+VERDICT_EGRESS_WORDS: frozenset[str] = frozenset(
+    {"fetch", "http", "https", "url", "web", "curl", "download", "egress"}
+)
+#: Verbs that change state wherever they appear in the name.
+VERDICT_STRONG_VERBS: frozenset[str] = frozenset(
+    {
+        "send",
+        "transfer",
+        "pay",
+        "delete",
+        "remove",
+        "create",
+        "write",
+        "execute",
+        "dispatch",
+        "update",
+        "upload",
+        "submit",
+        "insert",
+        "publish",
+        "forward",
+        "merge",
+        "push",
+        "deploy",
+        "invoke",
+        "approve",
+        "cancel",
+        "rename",
+        "modify",
+        "upsert",
+        "append",
+        "patch",
+        "edit",
+    }
+)
+#: Words that are verbs when they lead the name (``post_to_thread``,
+#: ``email_customer``) and nouns elsewhere (``get_post``, ``get_issue``).
+VERDICT_LEAD_ONLY_VERBS: frozenset[str] = frozenset(
+    {
+        "post",
+        "add",
+        "put",
+        "set",
+        "save",
+        "store",
+        "share",
+        "reply",
+        "comment",
+        "move",
+        "archive",
+        "notify",
+        "trigger",
+        "email",
+        "issue",
+        "message",
+        "run",
+    }
+)
+#: Read verbs, as the first or the last word of the name. No "fetch": that is
+#: a transport word above.
+VERDICT_READ_VERBS: frozenset[str] = frozenset(
+    {"read", "get", "list", "search", "retrieve", "view", "load", "lookup", "recall"}
 )
 
 

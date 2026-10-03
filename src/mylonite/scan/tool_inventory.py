@@ -16,12 +16,13 @@ readers and declared lists:
 * read: ``classify`` over ``READ_HINTS`` and ``readOnlyHint``;
 * store / recall: the scan's own auto-wire pick (``_classify_tools``);
 * verdict read: whether the verdict's trace reading (``effect_verdict.is_read_tool``)
-  counts a call to the tool as a read rather than a dispatch. It matches read
-  words as whole words, never counts a name with a consequential or egress word
-  as a read, and so agrees with the gate's name tier. It can still disagree with
-  the gate's fail-closed default: ``list_notes`` is guarded by that default, yet
-  the verdict counts its calls as reads. The inventory shows that rather than
-  smoothing it over.
+  counts a call to the tool as a read rather than a dispatch, with the declared
+  ``read_tool_names`` and ``verdict_read_tools`` the scan hands it. Its name rule
+  is its own (a read verb first or last; no transport or state-changing word), so
+  it can disagree with the confirm gate both ways: ``list_notes`` is guarded by
+  the gate's fail-closed default and ``get_issue`` by the gate's name hint
+  ``issue``, yet the verdict counts calls to either as reads. The inventory shows
+  that rather than smoothing it over.
 
 A tool that no tier recognises is "unknown", and the confirm-gate control
 already treats it as consequential (the fail-closed default); the egress
@@ -104,6 +105,9 @@ def tool_inventory(tools: Sequence[Any], *, control_config: Any = None) -> list[
     declared_consequential = _declared(control_config, "consequential_tools")
     declared_egress = _declared(control_config, "egress_tools")
     declared_read = _declared(control_config, "read_tool_names")
+    # Verdict-only reads: the scan adds these to the read list it hands the
+    # verdict, and to nothing else.
+    verdict_reads = _declared(control_config, "verdict_read_tools") or frozenset()
     # A named parameter, not the tool-name fallback: the name tier is decided by
     # `classify` below, with the egress control's own token rule.
     destination_params = {
@@ -166,7 +170,7 @@ def tool_inventory(tools: Sequence[Any], *, control_config: Any = None) -> list[
                 consequential_source=cons_source,
                 verdict_read=is_read_tool(
                     name,
-                    read_tool_names=declared_read or (),
+                    read_tool_names=(declared_read or frozenset()) | verdict_reads,
                     annotations=annotations,
                     # The list the scan passes: declared consequential plus
                     # declared egress tools. The seed's own tool is added per
