@@ -1,4 +1,4 @@
-# P2: pins the scaffolded gate workflow's install to an exact, verified
+# Pins the scaffolded gate workflow's install to an exact, verified
 # LiteLLM release, rather than whatever PyPI serves `pip install` that day --
 # LiteLLM had a real supply-chain compromise (24 Mar 2026, 1.82.7/1.82.8).
 #
