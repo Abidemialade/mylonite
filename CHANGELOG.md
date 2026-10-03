@@ -55,6 +55,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attacked with different text and neither was the attack the test was
   written for. Both sides now get the committed exploit body, word for word,
   on every run, and the customiser makes no calls there.
+- **Gate dirs name each finding by a short id, so they fit 200 characters
+  deep on Windows.** A finding's folder is now its weakness class plus six hex
+  digits of a hash of its pattern id, for example `.mylonite/gate/w2-1a2b3c/`,
+  holding `test_w2-1a2b3c.py` and `exploit_w2-1a2b3c.json`. The full pattern id
+  stays in the test's docstring and the exploit JSON, `gate` prints which
+  pattern each test gates, and a multi-finding PR body has a table mapping
+  pattern ids to tests. Rejected evidence moves to `.mylonite/gate-rej/<id>/`
+  (was `gate-rejected/<pattern>/`). With the default `.mylonite/gate`, a
+  project path of up to 200 characters now fits Windows' path limit with long
+  paths off. **Upgrading:** committed gate dirs from earlier versions keep
+  replaying unchanged. Before committing tests from a new `gate` run, re-run
+  it with `--workflows`, or change the `mylonite==` pin in your committed
+  gate workflows to this version: an older pin cannot replay the new
+  recordings, so the new tests would fail in CI on their first run. `gate`
+  prints a warning naming the workflow file when it finds an older pin. A new
+  run into the same `--out` writes the new layout beside the old folders and
+  leaves them in place, so `pytest` then runs both until you delete the old
+  ones. `generate` and `validate` keep their test and exploit file names;
+  their new recordings get the short names below too.
+- **Replay recordings get 17-character file names instead of 69.** New
+  recordings are named by the first 12 hex digits of their key and store the
+  full key inside, so a recording is never mistaken for another call's.
+  Recordings made by earlier versions keep their full names and still
+  replay. Recordings made by this version need this version or later.
 - **A committed live gate now re-drives your app up to 3 times, not once.**
   `testkit.assert_target_resists` and `testkit.assert_control_holds` fail on
   the first attempt the attack lands on and stop there, and pass only after
@@ -151,6 +175,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer says to add one. A `target.yaml` saved in an earlier scan folder
   with this block now stops `generate` and `validate` with exit `2` too:
   delete the `effect_probe` block from that file and re-run.
+- **`gate` refuses an output path Windows cannot hold before it spends
+  anything.** On Windows without long paths, a gate dir deeper than 259
+  characters used to fail with a traceback when the test was written, after
+  the scan and the validation were paid for. `gate` now checks the longest
+  path it could write under `--out` before any model call or target launch,
+  prints one line naming that path and how many characters to cut from
+  `--out`, and exits `2`. It checks again after the scan with the real
+  findings, before any validation. Linux, macOS and Windows with long paths
+  on are unaffected. A new Windows CI job turns long paths off and runs a
+  two-finding offline gate from a 200-character project root.
 - **A gate run on the reference target with two or more findings now writes a
   directory that passes `pytest` on its first run.** Each kept finding's replay
   fixtures are recorded in that finding's own folder,
@@ -161,7 +195,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each test written at the root stopped pytest from collecting the directory.
   Two findings whose names reduce to the same folder name now also get
   distinct test file names, so pytest collects both, and a rejected finding's
-  recordings move to `.mylonite/gate-rejected/` with the rest of its evidence.
+  recordings move to `.mylonite/gate-rej/` with the rest of its evidence.
   A new offline test runs a two-finding gate and then `pytest` on its output,
   with no provider key.
 
