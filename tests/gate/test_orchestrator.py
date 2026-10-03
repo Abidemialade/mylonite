@@ -11,6 +11,7 @@ from mylonite.contracts._types import (
     ValidationOutcome,
     ValidationReport,
 )
+from mylonite.exit_codes import EXIT_GATE_KEPT
 from mylonite.gate.orchestrator import (
     GateResult,
     ScanOutcomeBundle,
@@ -105,6 +106,17 @@ def _all_errored_no_formal_abort_outcome() -> ScanOutcome:
     return ScanOutcome.from_report(report)
 
 
+def _proven_legs(stability: str) -> list[ValidationOutcome]:
+    """The legs of a KEPT (proven) report: a passing build, stability and
+    differential. A kept report without a proof leg is STABLE, NOT PROVEN,
+    and `gate` lists it as a candidate instead of gating it."""
+    return [
+        ValidationOutcome(stage="build", passed=True, detail="ok", metric=None),
+        ValidationOutcome(stage="stability", passed=True, detail=stability, metric=1.0),
+        ValidationOutcome(stage="differential", passed=True, detail="3/3 vs 0/3", metric=1.0),
+    ]
+
+
 def _exploit(pattern_id: str = "indirect-injection-note-body-direct"):
     return ExploitRecord(
         target_id="mcp:custom",
@@ -144,7 +156,7 @@ def test_run_gate_kept_assembles_and_invokes_pr(tmp_path):
     report = ValidationReport(
         test_filename="test_security_x.py",
         kept=True,
-        outcomes=[ValidationOutcome(stage="stability", passed=True, detail="1/1", metric=1.0)],
+        outcomes=_proven_legs("1/1"),
         mutation_score=None,
     )
     pr_calls = {}
@@ -178,7 +190,7 @@ def test_run_gate_kept_assembles_and_invokes_pr(tmp_path):
         open_pr=False,
     )
     assert isinstance(result, GateResult)
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_GATE_KEPT
     assert (tmp_path / ".mylonite" / "gate" / _test_name()).exists()
     assert (tmp_path / ".mylonite" / "gate" / _exploit_name()).exists()
     assert "Suggested mitigation" in pr_calls["body"]
@@ -198,7 +210,7 @@ def test_validation_report_is_on_disk_before_the_pr_step_runs(tmp_path):
     report = ValidationReport(
         test_filename="test_security_x.py",
         kept=True,
-        outcomes=[ValidationOutcome(stage="stability", passed=True, detail="5/5", metric=1.0)],
+        outcomes=_proven_legs("5/5"),
         mutation_score=None,
     )
     out_dir = tmp_path / ".mylonite" / "gate"
@@ -260,7 +272,7 @@ def test_run_gate_threads_system_prompt_so_localize_resolves_a_line(tmp_path):
     report = ValidationReport(
         test_filename="test_security_x.py",
         kept=True,
-        outcomes=[ValidationOutcome(stage="stability", passed=True, detail="1/1", metric=1.0)],
+        outcomes=_proven_legs("1/1"),
         mutation_score=None,
     )
     pr_calls = {}
@@ -333,7 +345,7 @@ def test_run_gate_threads_target_context_into_the_structural_recommendation(tmp_
     report = ValidationReport(
         test_filename="test_security_x.py",
         kept=True,
-        outcomes=[ValidationOutcome(stage="stability", passed=True, detail="1/1", metric=1.0)],
+        outcomes=_proven_legs("1/1"),
         mutation_score=None,
     )
     pr_calls = {}
@@ -378,7 +390,7 @@ def test_run_gate_threads_a_real_configurable_mitigation_model(tmp_path):
     report = ValidationReport(
         test_filename="test_security_x.py",
         kept=True,
-        outcomes=[ValidationOutcome(stage="stability", passed=True, detail="1/1", metric=1.0)],
+        outcomes=_proven_legs("1/1"),
         mutation_score=None,
     )
     seen_models: list[str] = []
@@ -416,7 +428,7 @@ def test_run_gate_threads_a_real_configurable_mitigation_model(tmp_path):
         mitigation_model="my-custom/enrichment-model",
         mitigation_completion_fn=fake_completion,
     )
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_GATE_KEPT
     assert seen_models == ["my-custom/enrichment-model"]
     assert "Unverified LLM suggestion" in pr_calls["body"]
     assert "untrusted envelope" in pr_calls["body"]
@@ -547,7 +559,7 @@ def test_run_gate_opened_pr_flows_from_prresult(tmp_path):
     report = ValidationReport(
         test_filename="t.py",
         kept=True,
-        outcomes=[ValidationOutcome(stage="stability", passed=True, detail="1/1", metric=1.0)],
+        outcomes=_proven_legs("1/1"),
         mutation_score=None,
     )
 
@@ -595,7 +607,7 @@ def _kept_report(filename: str = "test_security_x.py") -> ValidationReport:
     return ValidationReport(
         test_filename=filename,
         kept=True,
-        outcomes=[ValidationOutcome(stage="stability", passed=True, detail="1/1", metric=1.0)],
+        outcomes=_proven_legs("1/1"),
         mutation_score=None,
     )
 
@@ -647,7 +659,7 @@ def test_run_gate_processes_every_exploit_in_pattern_id_order(tmp_path):
     # Deterministic order: 'a-pattern' before 'b-pattern', not scan order.
     assert generated_order == ["a-pattern", "b-pattern"]
     assert validated_order == ["a-pattern", "b-pattern"]
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_GATE_KEPT
     assert result.kept is True
     assert result.kept_count == 1
     assert result.rejected_count == 1
@@ -685,7 +697,7 @@ def test_run_gate_a_single_kept_finding_stays_flat_no_subdir(tmp_path):
         open_pr_fn=lambda **k: "printed",
         open_pr=False,
     )
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_GATE_KEPT
     assert (out_dir / _test_name("solo-pattern")).exists()
     assert not (out_dir / _fid("solo-pattern")).exists()
 
@@ -749,7 +761,7 @@ def test_run_gate_one_findings_generate_failure_does_not_hide_the_other(tmp_path
     )
 
     assert generated_calls == ["ok-pattern", "zz-broken-pattern"]
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_GATE_KEPT
     assert result.kept_count == 1
     assert result.rejected_count == 1
     assert [e.pattern_id for e, _r in pr_calls["findings"]] == ["ok-pattern"]
@@ -1186,7 +1198,7 @@ def test_gate_echoes_the_coverage_caveat_and_notes_it_in_the_pr_body(tmp_path, c
         open_pr_fn=fake_open_pr,
         open_pr=False,
     )
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_GATE_KEPT
     assert _INCOMPLETE_COVERAGE_WITH_FINDINGS_MESSAGE in capsys.readouterr().out
     assert "Coverage was incomplete" in seen["body"]
     assert "2 attempt" in seen["body"]
@@ -1319,7 +1331,8 @@ def test_gate_pr_body_evidence_lines_are_redacted(tmp_path):
                 passed=True,
                 detail=f"1/1 (target error: bad key {_FAKE_KEY})",
                 metric=1.0,
-            )
+            ),
+            *_proven_legs("1/1")[::2],
         ],
     )
     seen = _run_gate_with_secret(tmp_path, report)
@@ -1410,7 +1423,7 @@ def _gate_once(tmp_path, exploit):
         open_pr_fn=lambda **_: "printed",
         open_pr=False,
     )
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_GATE_KEPT
     name = exploit_filename_for(gate_test_filename(_finding_id(exploit)))
     on_disk = json.loads((out / name).read_text("utf-8"))
     # The validator never sees the pending tag: it only shapes the emitted test.

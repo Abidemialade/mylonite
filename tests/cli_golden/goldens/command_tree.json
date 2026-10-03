@@ -277,7 +277,7 @@
       ]
     },
     "gate": {
-      "epilog": "Examples:\n\n`mylonite gate reference:vulnerable` -- the full pipeline on the reference target.\n\n`mylonite scan --command python --arg server.py --scaffold app.yaml --scope my-app`\n-- write the target file first; its scope is the --authorize value below.\n\n`mylonite gate --target-file app.yaml --authorize my-app` -- gate YOUR app (writes the test).\n\n`mylonite gate --target-file app.yaml --authorize my-app --open-pr` -- also open the gating PR via gh.",
+      "epilog": "Examples:\n\n`mylonite gate reference:vulnerable` -- the full pipeline on the reference target.\n\n`mylonite scan --command python --arg server.py --scaffold app.yaml --scope my-app`\n-- write the target file first; its scope is the --authorize value below.\n\n`mylonite gate --target-file app.yaml --authorize my-app` -- gate YOUR app (writes the test).\n\n`mylonite gate --target-file app.yaml --authorize my-app --open-pr` -- also open the gating PR via gh.\n\nExit codes: 0 nothing found | 9 a proven finding was gated | 10 only unproven candidates, nothing written (full table: docs/cli-reference.md).",
       "help": "Scan -> generate -> validate -> (optionally) open a gating PR. The full pipeline.",
       "hidden": false,
       "name": "gate",

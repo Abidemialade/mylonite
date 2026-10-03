@@ -23,9 +23,11 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from tests.gate._proven import proven_legs
 from tests.plugins.test_differential_validator import _build_exploit
 from tests.plugins.test_record_during_validate import _install_fake_acompletion
 
+from mylonite.exit_codes import EXIT_GATE_KEPT
 from mylonite.gate import pr as real_pr_mod
 from mylonite.gate.orchestrator import ScanOutcomeBundle, _finding_id, run_gate
 from mylonite.gate.wiring import make_open_pr_fn, make_validate_fn
@@ -124,7 +126,7 @@ def two_finding_gate(
 def test_both_findings_are_kept(two_finding_gate: tuple[Any, Path, list[Any]]) -> None:
     result, _out, _captured = two_finding_gate
     assert result.kept is True
-    assert result.exit_code == 0
+    assert result.exit_code == EXIT_GATE_KEPT
 
 
 def test_each_finding_records_its_own_fixtures(
@@ -192,7 +194,9 @@ def test_colliding_pattern_ids_still_collect_as_two_tests(tmp_path: Path) -> Non
             outcome=_two_found(), exploits=[_build_exploit(p) for p in patterns]
         ),
         generate_fn=ReferencePytestGenerator().emit,
-        validate_fn=lambda g, _d: ValidationReport(test_filename=g.filename, kept=True),
+        validate_fn=lambda g, _d: ValidationReport(
+            test_filename=g.filename, kept=True, outcomes=proven_legs()
+        ),
         open_pr_fn=lambda **_k: None,
         open_pr=False,
     )

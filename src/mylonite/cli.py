@@ -2413,7 +2413,9 @@ def report(
         "`mylonite scan --command python --arg server.py --scaffold app.yaml --scope my-app`\n"
         "-- write the target file first; its scope is the --authorize value below.\n\n"
         "`mylonite gate --target-file app.yaml --authorize my-app` -- gate YOUR app (writes the test).\n\n"
-        "`mylonite gate --target-file app.yaml --authorize my-app --open-pr` -- also open the gating PR via gh."
+        "`mylonite gate --target-file app.yaml --authorize my-app --open-pr` -- also open the gating PR via gh.\n\n"
+        "Exit codes: 0 nothing found | 9 a proven finding was gated | 10 only unproven "
+        "candidates, nothing written (full table: docs/cli-reference.md)."
     )
 )
 def gate(

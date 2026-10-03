@@ -17,6 +17,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from tests.gate._proven import proven_legs
 
 from mylonite.contracts._types import (
     AdapterResponse,
@@ -24,7 +25,6 @@ from mylonite.contracts._types import (
     ExploitRecord,
     GeneratedTest,
     Payload,
-    ValidationOutcome,
     ValidationReport,
 )
 from mylonite.gate.orchestrator import (
@@ -122,7 +122,7 @@ def _kept(test: GeneratedTest, _dir: Path) -> ValidationReport:
     return ValidationReport(
         test_filename=test.filename,
         kept=True,
-        outcomes=[ValidationOutcome(stage="build", passed=True, detail="ok")],
+        outcomes=proven_legs(),
     )
 
 
