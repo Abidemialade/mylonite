@@ -265,7 +265,23 @@ def test_generate_latest_honours_custom_output_dir(
     runner = CliRunner()
     custom = "custom-scans-root"
 
-    scan_res = runner.invoke(app, ["scan", "reference:vulnerable", "--output-dir", custom])
+    # Narrowed to W1/W2: an output-path test, not a coverage one; the
+    # read_note-only stub never calls send_email/web_fetch, which the bundled
+    # W3/W4 seeds ask for outright, and in scope that reads as incomplete
+    # coverage rather than the EXIT_SUCCESS this test asserts.
+    scan_res = runner.invoke(
+        app,
+        [
+            "scan",
+            "reference:vulnerable",
+            "--output-dir",
+            custom,
+            "--weakness-class",
+            "W1",
+            "--weakness-class",
+            "W2",
+        ],
+    )
     assert scan_res.exit_code == EXIT_SUCCESS, scan_res.output
     assert (tmp_path / custom).is_dir(), "scan --output-dir must write under the custom dir"
     assert not (tmp_path / ".mylonite").exists(), (
@@ -312,7 +328,14 @@ def test_generate_latest_honours_mylonite_yaml_root(
 
     runner = CliRunner()
 
-    scan_res = runner.invoke(app, ["scan", "reference:vulnerable"])
+    # Narrowed to W1/W2: this test is about output paths, not coverage, and
+    # the read_note-only stub above never calls send_email/web_fetch, which
+    # the bundled W3/W4 seeds ask for outright — out of scope here would
+    # read as incomplete coverage rather than the EXIT_SUCCESS this asserts.
+    scan_res = runner.invoke(
+        app,
+        ["scan", "reference:vulnerable", "--weakness-class", "W1", "--weakness-class", "W2"],
+    )
     assert scan_res.exit_code == EXIT_SUCCESS, scan_res.output
     assert (tmp_path / custom_root).is_dir(), (
         "scan (no --output-dir) must write under mylonite.yaml's configured root"
@@ -393,6 +416,12 @@ def test_scan_output_dir_flag_wins_over_config_root_and_env(
             flag_dir,
             "--config",
             "mylonite.yaml",
+            # Narrowed to W1/W2: a path-precedence test, not a coverage one; see
+            # the comment above test_generate_latest_honours_mylonite_yaml_root.
+            "--weakness-class",
+            "W1",
+            "--weakness-class",
+            "W2",
         ],
     )
     assert result.exit_code == EXIT_SUCCESS, result.output
