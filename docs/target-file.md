@@ -15,10 +15,12 @@ each block tagged `# auto-detected`:
   - **safe** to call before and after every attempt: a whole-word read name (or
     `readOnlyHint: true`), no `readOnlyHint: false` or `destructiveHint`, no write verb in
     its name, not a consequential tool itself, and no record id to know;
-  - **tied** to what the consequential tools change: a shared noun or result word
-    (`sent_log` or `outbox` for `send_email`, `list_issues` for `create_issue`), or the
-    id-free recall of a store a consequential tool writes (`read_graph` for
-    `create_entities`). A tied tool wins over listing order;
+  - **tied** to what the consequential tools change: a word for what the tool's verb
+    produced (`sent_log` or `outbox` for `send_email`), or the id-free recall of a store a
+    consequential tool writes (`read_graph` for `create_entities`). A shared noun alone
+    (`list_emails` for `send_email`, `list_messages` for `send_message`) is not enough:
+    an inbox can list what arrived and not what was sent. A tied tool wins over listing
+    order;
   - free of required arguments (`verify_args_template: {}`).
 
   It sets no `expect_marker`, so any new change a call from the attempt made counts as the

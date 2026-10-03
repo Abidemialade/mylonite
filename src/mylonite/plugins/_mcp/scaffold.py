@@ -354,7 +354,12 @@ def _render_seed_arm_block(roles: _ToolRoles, tools: list[Any]) -> str:
     scan would not."""
     from mylonite.plugins._mcp.target_file import infer_seed_arm
 
+    # One source for the block AND its comment: infer_seed_arm classifies
+    # ``tools`` with _classify_tools, so read the recall tool from the same
+    # classification rather than from the caller's ``roles``.
     spec = infer_seed_arm(tools)[0] if tools else None
+    if tools:
+        roles = _classify_tools(tools)
     sa_param = roles.seed_arm_param or "body"
     template = (
         dict(spec.args_template)

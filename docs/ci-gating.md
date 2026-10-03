@@ -157,6 +157,16 @@ If a custom target does not come up while `gate` is validating a finding, `gate`
 stops with one `[MYL-ABT-006]` line and exit `2`. The line says how many runs had
 finished, that later findings were not validated, and where the scan results are.
 
+### W3 or W4 with no `effect_probe`
+
+On a custom target that declares W3 or W4 and no `effect_probe`, nothing reads the
+target's own state, so each of those classes reads NOT TESTED
+([`MYL-NT-017`](reason-codes.md#myl-nt-017)) unless an attempt fires. A gate that finds
+nothing there exits **`2`** ("Coverage was incomplete"), not `0` ("nothing to gate").
+**Upgrading:** a gate you committed against such a target before this change turns red.
+Add an `effect_probe` to the target file (re-run `mylonite scan --scaffold` to get a
+proposed one), or remove W3/W4 from `weakness_classes`.
+
 ### Pre-flight order
 
 `gate` runs its pre-flight checks in this order, all before any LLM call:
