@@ -177,6 +177,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   has never written one; it used to exit without mentioning `--workflows` at
   all. It now names why, every time. `docs/ci-gating.md`, `docs/cli-reference.md`
   and `README.md` no longer read as if a workflow is always written. (#225)
+- **A calibration write now sees a content argument typed as a schema union or a
+  nullable array, and never sends a call it already knows is invalid.** The schema
+  walker behind `scan --scaffold` and calibration's own control writes compared a
+  property's `"type"` with plain equality, so a content argument declared either as a
+  JSON Schema union (`anyOf`/`oneOf`, the shape Pydantic and many OpenAPI generators
+  emit — a Redis MCP server's `set` typed its value this way) or as a nullable
+  type list (`"type": ["null", "array"]`, the Go JSON-Schema generator's own idiom for
+  an optional field) read as having no type at all, and the obviously-correct write
+  tool was invisible as a content slot. The walker now resolves either shape to its
+  first concrete branch before deciding. The backfill that fills a candidate's other
+  required arguments now also supplies a schema-valid literal for an integer, number or
+  boolean field (previously only a string), and skips a tool entirely — rather than
+  calling it with a required argument missing — when no required argument has a
+  generic, safe value. An id-shaped required argument (a name ending in `id`, or a bare
+  `key`/`ref`/`handle`) is never filled this way even when its type is fillable: a
+  guessed `0` or `False` can address a real resource, so that tool is skipped instead.
+  (#324, partial)
+- **Calibration's recall check, and the live effect probe, now read `structuredContent`
+  as well as `content`.** Some MCP servers (the Go SDK's own examples among them) echo a
+  write back only through the typed `structuredContent` field, while `content` stays a
+  fixed, unrelated reply such as "Nodes searched successfully". The W2 seed control's
+  recall check, and the effect probe that confirms a dispatched action's effect, used to
+  read only `content`, so a target that genuinely echoed a planted record back still
+  read as though it had not. Both checks now see either field a server answers through,
+  but never count the same marker twice: a server that puts the identical JSON in both
+  fields (the shape the MCP spec asks for, and the one FastMCP actually sends) is
+  deduplicated, not double-counted. The W2 seed control also takes a baseline recall
+  read, with the exact arguments the real check reuses, before anything is planted, and
+  requires the token's count to grow — a recall tool that merely echoes its own query
+  argument back no longer passes with nothing actually recalled. A recall tool whose baseline read fails is left out of the check, never
+  treated as an empty baseline. Seeing more of a
+  response can only move a result toward confirmed — an absent marker is still not proof
+  of resistance on its own, and every no-false-clean rule stands unchanged. (#324, partial)
 - **A JSON request body is sent as JSON.** The `rest` transport sent its body with no
   content type, so agent servers that require one (FastAPI, for example) rejected every
   attack with a 422 before it reached the agent, and the class read NOT TESTED. When the

@@ -67,6 +67,7 @@ class _Store:
         send_reply: str = "sent",
         send_extra: dict[str, Any] | None = None,
         hold_to: str | None = None,
+        structured_echo: bool = False,
     ) -> None:
         self.outbox: list[str] = list(outbox or [])
         self.notes: list[str] = list(notes or [])
@@ -86,6 +87,11 @@ class _Store:
         #: A send to this address is held: listed as ``HELD ...`` in the outbox
         #: and answered "queued for review". Other sends follow the rules above.
         self.hold_to = hold_to
+        #: #324 review I1: ``list_outbox`` echoes its own text into
+        #: ``structuredContent`` too, verbatim (the shape the MCP spec asks a
+        #: server with structured output for, and the one FastMCP actually
+        #: sends) -- a regression guard against double-counting a marker.
+        self.structured_echo = structured_echo
 
 
 def _text(text: str, *, is_error: bool = False) -> CallToolResult:
@@ -162,6 +168,13 @@ class _StoreSession:
                 )
             return _text(store.send_reply)
         if name == "list_outbox":
+            if store.structured_echo:
+                structured = {"entries": self._outbox_view()}
+                echoed = json.dumps(structured)
+                return CallToolResult(
+                    content=[TextContent(type="text", text=echoed)],
+                    structuredContent=structured,
+                )
             return _text("\n".join(self._outbox_view()) or "outbox empty")
         if name == "search_outbox":
             q = str(arguments.get("q", ""))
@@ -723,6 +736,28 @@ async def test_a_dropped_send_carrying_the_marker_next_to_a_held_one_is_unattrib
     """The marker grew by one, which the held send alone explains."""
     _register(_OUTBOX_PROBE)
     store = _Store(hold_to=MARKER, drop_sends=True)
+    meta = await _invoke(
+        store,
+        _Script([_send(), _send(to="archive", body=f"cc {MARKER}")]),
+        _payload(consequential_tool="send_email"),
+    )
+    assert meta["effect_confirmed"] == "unattributed"
+
+
+@pytest.mark.asyncio
+async def test_a_fastmcp_shaped_echo_does_not_double_count_the_held_marker() -> None:
+    """#324 review I1: the verify tool echoes its own reply into
+    ``structuredContent`` too, verbatim -- the shape the MCP spec asks a
+    server with structured output for, and the one FastMCP actually sends.
+    Concatenating ``content`` and ``structuredContent`` unconditionally used
+    to count the held item's marker TWICE (once in each field) while the
+    held call's own argument occurrences (what the growth is checked
+    against) stayed single-counted, so the SAME scenario as
+    ``test_a_dropped_send_carrying_the_marker_next_to_a_held_one_is_unattributed``
+    -- a dropped send next to a held one, nothing new really landed --
+    wrongly cleared to "true" instead of staying "unattributed"."""
+    _register(_OUTBOX_PROBE)
+    store = _Store(hold_to=MARKER, drop_sends=True, structured_echo=True)
     meta = await _invoke(
         store,
         _Script([_send(), _send(to="archive", body=f"cc {MARKER}")]),

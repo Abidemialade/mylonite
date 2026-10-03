@@ -30,6 +30,7 @@ import pytest
 from mcp.types import CallToolResult, TextContent
 from mcp.types import Tool as MCPTool
 
+from mylonite.contracts import ToolSpec
 from mylonite.plugins._mcp import calibration, stdio_adapter, target_registry
 from mylonite.plugins._mcp.factory import build_adapter_for_spec
 from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
@@ -84,10 +85,29 @@ class _Store:
         self.defer_sends = False
         #: Seconds the verify read sleeps (a hung server).
         self.verify_delay = 0.0
+        #: #324: the recall tool echoes the planted note ONLY through
+        #: ``structuredContent`` (a go-memory-shaped response) -- ``content``
+        #: stays a fixed, unrelated human-readable string, same as a real
+        #: Go-SDK MCP server's "Nodes searched successfully" reply.
+        self.structured_only_recall = False
+        #: #324 review I2: the recall tool echoes its own ``query`` argument
+        #: back and never actually stores or retrieves anything.
+        self.echo_recall_query = False
+        #: #324 re-review: the recall tool's FIRST call (the baseline, read
+        #: before anything is planted) raises; every later call (the
+        #: post-plant read) echoes its own ``query`` argument back instead.
+        self.recall_baseline_raises_once = False
+        self.recall_calls = 0
 
 
 def _text(text: str, *, is_error: bool = False) -> CallToolResult:
     return CallToolResult(content=[TextContent(type="text", text=text)], isError=is_error)
+
+
+def _structured(text: str, structured: dict[str, Any]) -> CallToolResult:
+    return CallToolResult(
+        content=[TextContent(type="text", text=text)], structuredContent=structured
+    )
 
 
 class _Session:
@@ -135,6 +155,27 @@ class _Session:
         if name == "recall":
             if store.blind_recall:
                 return _text("no notes")
+            if store.recall_baseline_raises_once:
+                store.recall_calls += 1
+                if store.recall_calls == 1:
+                    raise RuntimeError("recall baseline read failed")
+                # The post-plant call: echoes its own query argument back,
+                # the exact I2 echo shape -- it must still never pass once
+                # its baseline is excluded (#324 re-review).
+                query = str(arguments.get("query", ""))
+                return _structured(f"searched for {query}", {"query": query, "results": []})
+            if store.echo_recall_query:
+                # #324 review I2: echoes its own ``query`` argument back and
+                # never actually stores or retrieves anything -- every
+                # required arg of a recall call is filled with the token
+                # itself, so an echo alone must never read as "recalled".
+                query = str(arguments.get("query", ""))
+                return _structured(f"searched for {query}", {"query": query, "results": []})
+            if store.structured_only_recall:
+                # The fixed, unrelated reply a Go-SDK MCP server sends in
+                # `content` on every call, whatever was actually recalled --
+                # the real data rides only in `structuredContent`.
+                return _structured("Nodes searched successfully", {"notes": list(store.notes)})
             return _text("\n".join(store.notes) or "no notes")
         if name == "delete_email":
             return _text("deleted")
@@ -388,28 +429,112 @@ async def test_empty_verify_args_against_a_required_arg_is_inc_005() -> None:
     assert result.calibrated is False
     assert result.reason_code == "MYL-INC-005"
     assert "path" in result.detail
-    # A schema failure stops the controls before any write or read.
+    # A schema failure stops the POSITIVE CONTROL before any write.
+    # (``read_file`` is also an INFERRED W2 recall candidate here -- a
+    # separate check the seed control runs on its own, independent of the
+    # effect probe's own schema failure, and #324 review I2's echo-guard
+    # baseline now reads every recall candidate once before planting.)
     assert launcher.called("send_email") == []
-    assert launcher.called("read_file") == []
 
 
 @pytest.mark.asyncio
 async def test_control_write_that_fails_the_schema_is_inc_005() -> None:
+    """A required param with no generic schema-valid literal (an array of
+    objects: #324's backfill deliberately does not guess a shape for one)
+    still fails the schema check, and the invalid call is never sent."""
     tools = dict(_DEFAULT_TOOLS)
     tools["send_email"] = {
         "type": "object",
         "properties": {
             "to": {"type": "string"},
             "body": {"type": "string"},
-            "n": {"type": "integer"},
+            "attachments": {"type": "array", "items": {"type": "object"}},
         },
-        "required": ["to", "body", "n"],
+        "required": ["to", "body", "attachments"],
     }
     _register()
     launcher = _Launcher(_Store(), tools)
     result = await _calibrate(launcher)
     assert result.calibrated is False
     assert result.reason_code == "MYL-INC-005"
+    assert launcher.called("send_email") == []
+
+
+@pytest.mark.asyncio
+async def test_control_write_fills_a_required_integer_sibling_instead_of_failing() -> None:
+    """#324: a required integer/number/boolean sibling used to be left
+    missing (an unconditional schema failure, ``MYL-INC-005``) even though a
+    neutral literal would have made the call valid. It now gets one, so the
+    control still certifies through a tool that merely has one more required
+    argument than the content slot."""
+    tools = dict(_DEFAULT_TOOLS)
+    tools["send_email"] = {
+        "type": "object",
+        "properties": {
+            "to": {"type": "string"},
+            "body": {"type": "string"},
+            "priority": {"type": "integer"},
+        },
+        "required": ["to", "body", "priority"],
+    }
+    _register()
+    launcher = _Launcher(_Store(), tools)
+    result = await _calibrate(launcher)
+    assert result.calibrated is True
+    assert result.status == calibration.STATUS_CERTIFIED
+    sends = launcher.called("send_email")
+    assert sends and sends[0]["priority"] == 0
+
+
+@pytest.mark.asyncio
+async def test_control_write_skips_an_id_shaped_integer_sibling_instead_of_filling_it() -> None:
+    """#324 review I3: a required integer/boolean sibling whose NAME is
+    id-shaped (``chat_id``) must never be auto-filled with ``0`` -- unlike
+    the per-run token a string fill uses, a bare ``0`` can BE a real (often
+    root/default) resource. The tool is skipped entirely, and the invalid
+    call is never sent."""
+    tools = dict(_DEFAULT_TOOLS)
+    tools["send_email"] = {
+        "type": "object",
+        "properties": {
+            "to": {"type": "string"},
+            "body": {"type": "string"},
+            "chat_id": {"type": "integer"},
+        },
+        "required": ["to", "body", "chat_id"],
+    }
+    _register()
+    launcher = _Launcher(_Store(), tools)
+    result = await _calibrate(launcher)
+    assert result.calibrated is False
+    assert result.reason_code == "MYL-INC-005"
+    assert "no schema-valid value" in result.detail
+    assert launcher.called("send_email") == []
+
+
+@pytest.mark.asyncio
+async def test_control_write_whose_filled_integer_violates_a_minimum_is_inc_005() -> None:
+    """A NON-id-shaped required integer sibling with a ``minimum`` constraint:
+    the backfill's neutral ``0`` is schema-valid to fill in, but still fails
+    the tool's own ``inputSchema`` -- pinning the ``validate_args`` branch of
+    ``_control_one_tool`` (not the ``write_args is None`` early return the
+    array-of-objects case above takes), and the invalid call is never sent."""
+    tools = dict(_DEFAULT_TOOLS)
+    tools["send_email"] = {
+        "type": "object",
+        "properties": {
+            "to": {"type": "string"},
+            "body": {"type": "string"},
+            "priority": {"type": "integer", "minimum": 1},
+        },
+        "required": ["to", "body", "priority"],
+    }
+    _register()
+    launcher = _Launcher(_Store(), tools)
+    result = await _calibrate(launcher)
+    assert result.calibrated is False
+    assert result.reason_code == "MYL-INC-005"
+    assert "minimum" in result.detail
     assert launcher.called("send_email") == []
 
 
@@ -849,3 +974,133 @@ async def test_calibration_of_one_launch_is_not_reused_for_the_vulnerable_twin()
     assert result.calibrated is True
     assert guarded.calibration_summary().status == calibration.STATUS_CERTIFIED
     assert vulnerable.calibration_summary().status != calibration.STATUS_CERTIFIED
+
+
+# --- #324: structuredContent readback -----------------------------------------
+#
+# A real Go-SDK MCP server (go-memory, a declared line-for-line port of
+# server-memory) echoes a write back only through ``structuredContent``: its
+# ``content`` stays a fixed, unrelated reply ("Nodes searched successfully").
+# The W2 seed control's recall check used to read only ``content``, so a
+# genuinely-recalled record read as "not recalled" (``MYL-INC-006``).
+
+
+@pytest.mark.asyncio
+async def test_seed_control_recognises_a_structured_content_only_echo() -> None:
+    _register()
+    store = _Store()
+    store.structured_only_recall = True
+    result = await _calibrate(_Launcher(store))
+    assert result.seed_control.status == calibration.SEED_PASSED
+    assert result.seed_control.recall_tool == "recall"
+
+
+# --- #324 review I2: the recall check must not pass on an echo of its own query ---
+#
+# Every required argument of a recall call is filled with the token itself
+# (``_fill_required_args(recall, {}, token)``), so a recall tool whose reply
+# echoes its own query argument -- a common shape for a typed
+# ``structuredContent`` result -- used to read ``token in content`` as
+# "planted and recalled" with nothing actually stored. The check must now
+# take a pre-plant baseline read with the SAME args and require the token's
+# count to grow after planting.
+
+
+@pytest.mark.asyncio
+async def test_seed_control_recall_echo_of_the_query_is_inc_006_not_passed() -> None:
+    tools = dict(_DEFAULT_TOOLS)
+    tools["recall"] = _schema(query="string")
+    _register()
+    store = _Store()
+    store.echo_recall_query = True
+    result = await _calibrate(_Launcher(store, tools))
+    assert result.seed_control.status == calibration.SEED_FAILED
+    assert result.seed_control.reason_code == "MYL-INC-006"
+
+
+@pytest.mark.asyncio
+async def test_seed_control_recall_through_a_query_arg_passes_for_a_real_store() -> None:
+    """The same required ``query`` argument shape as the echo test above, but
+    a genuine store: the token's count grows after planting, so it passes."""
+    tools = dict(_DEFAULT_TOOLS)
+    tools["recall"] = _schema(query="string")
+    _register()
+    store = _Store()
+    result = await _calibrate(_Launcher(store, tools))
+    assert result.seed_control.status == calibration.SEED_PASSED
+    assert result.seed_control.recall_tool == "recall"
+
+
+@pytest.mark.asyncio
+async def test_seed_control_recall_whose_baseline_raised_cannot_pass_on_an_echo() -> None:
+    """#324 re-review: the recall tool's baseline read (before anything is
+    planted) raises, so it proves nothing about this tool's post-plant
+    count. The post-plant call then succeeds and merely echoes its own
+    query argument -- the exact I2 echo shape. Defaulting the failed
+    baseline to a zero count would let `1 > 0` pass as SEED_PASSED with
+    nothing actually recalled; excluding the tool from the check once its
+    baseline fails must not."""
+    tools = dict(_DEFAULT_TOOLS)
+    tools["recall"] = _schema(query="string")
+    _register()
+    store = _Store()
+    store.recall_baseline_raises_once = True
+    result = await _calibrate(_Launcher(store, tools))
+    assert result.seed_control.status == calibration.SEED_FAILED
+    assert result.seed_control.reason_code == "MYL-INC-006"
+
+
+# --- #324: the content-slot walker resolves a union/nullable-typed field ----------
+#
+# mcp-redis's own ``set`` types its content argument as a Pydantic
+# ``Union[str, bytes, int, float, dict]`` -- an ``anyOf`` with no inline
+# ``"type"`` key at all. It used to be invisible to the content-slot walker,
+# which fell through to a two-required-argument tool it could not fully
+# construct a call for (``expire``, reported as a schema failure,
+# ``MYL-INC-005``).
+
+
+def test_candidate_tools_sees_a_redis_like_sets_anyof_union_value() -> None:
+    set_tool = ToolSpec(
+        name="set",
+        description="",
+        json_schema={
+            "type": "object",
+            "properties": {
+                "key": {"type": "string", "title": "Key"},
+                "value": {
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "string", "format": "binary"},
+                        {"type": "integer"},
+                        {"type": "number"},
+                        {"type": "object", "additionalProperties": True},
+                    ],
+                    "title": "Value",
+                },
+            },
+            "required": ["key", "value"],
+        },
+    )
+    spec = build_target_spec(
+        TargetFile(
+            family=FAMILY,
+            command="python",
+            args=["-m", "srv"],
+            weakness_classes=["W4"],
+            effect_probe=EffectProbeSpec(
+                verify_tool="get", verify_args_template={"key": "mylonite-tpv-seed"}
+            ),
+            control_config=ControlConfig(consequential_tools=("set",)),
+        )
+    )
+    candidates = calibration._candidate_tools([set_tool], spec, "get")
+    by_name = {tool.name: template for tool, template in candidates}
+    assert by_name["set"] == {"value": "{payload}"}
+
+    # The backfilled call -- "key" (required, missing from the template) --
+    # must be schema-VALID, never sent with it missing.
+    token = "myl-cal-abc123"
+    write_args = calibration._fill_required_args(set_tool, {"value": token}, token)
+    assert write_args is not None
+    assert calibration.validate_args(set_tool.json_schema, write_args) == []
