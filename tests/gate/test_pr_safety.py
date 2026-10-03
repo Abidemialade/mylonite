@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -159,10 +160,12 @@ def test_missing_origin_falls_through_honestly_instead_of_claiming_proposed(
     monkeypatch.setattr(pr_mod.shutil, "which", lambda _: "/usr/bin/gh")
 
     calls: list[list[str]] = []
+    # `gh` is answered without a network (a CI runner has no gh login), git runs for real.
+    inner = _real_git_fake_gh()
 
-    def run(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+    def run(cmd: list[str], **kwargs: object) -> Any:
         calls.append(list(cmd))
-        return subprocess.run(cmd, text=True, capture_output=True, check=False, **kwargs)
+        return inner(cmd, **kwargs)
 
     with pytest.raises(GatePrError, match="git push"):
         open_or_print_pr(
