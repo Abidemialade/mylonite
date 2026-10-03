@@ -40,14 +40,11 @@ pip install -e ".[dev]"
 pip install -e ./reference_targets/mcp_kitchen_sink
 ```
 
-For **live scans** behind a corporate proxy, also install the OS-trust-store
-helper so provider calls don't fail `CERTIFICATE_VERIFY_FAILED` — see
-[Enterprise networking](enterprise-networking.md). It now also ships in `[dev]`,
-so a dev install already has it:
-
-```powershell
-pip install mylonite             # truststore is already a base dependency
-```
+For **live scans** behind a corporate proxy, provider calls can fail
+`CERTIFICATE_VERIFY_FAILED` unless Mylonite reads your OS's own certificate store —
+see [Enterprise networking](enterprise-networking.md) for why. Nothing extra to
+install: `truststore` is a base dependency of `mylonite` itself (and so already
+present in the `[dev]` install above), not a separate add-on step.
 
 ## 4. UTF-8 output — handled automatically, with a fallback
 

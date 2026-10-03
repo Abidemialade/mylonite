@@ -45,6 +45,13 @@ as the honest first rung of a ramp (report it, fix the substantive findings it n
 it green as the surface changes), not a one-time gate you flip on once the surface happens
 to read "clean."
 
+`check reference:vulnerable` and `check reference:guarded` report the **same** findings
+and the same `--enforce` exit code: `check` only reads tool schemas (`describe()`), and the
+guarded twin's safeguard is a runtime behaviour that schema has no way to show. A tool
+surface looking identical either way is expected, not a sign the guard did nothing —
+`scan`/`gate`, which actually drive an attack and compare the two builds, are what show the
+guard's effect.
+
 Reports: consequential tools with no approval-shaped sibling tool, descriptions that
 steer the agent, tools taking an apparent network destination, content-processing tools
 that could carry an indirect-injection payload, unpinned tool descriptions (paste-ready

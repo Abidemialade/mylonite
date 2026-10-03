@@ -110,7 +110,8 @@ mylonite report .mylonite/scans/<dir> --sarif out.sarif --json finding.json
   (the in-process reference app builds), and the bundled MCP (Model Context
   Protocol) stdio families
   `mcp:filesystem:<sandbox>`, `mcp:fetch`, `mcp:github:<owner/repo>` — these
-  require `--authorize` (see the
+  require `--authorize` naming the family itself (`fetch` above) or, for
+  `mcp:filesystem`/`mcp:github`, the scope after the second colon (see the
   [responsible-use policy](security.md)) plus the family's runtime: `uv` for
   `mcp:fetch` (spawns via `uvx`), Node.js for `mcp:filesystem` /
   `mcp:github` (spawn via `npx`). Add `--dry-run` to enumerate seeds
@@ -183,6 +184,7 @@ mylonite report .mylonite/generated/<dir> --json finding.json   # dashboards / S
 ## Where to go next
 
 - [Test your own app](test-your-app.md) — the custom MCP on-ramp (`scan --scaffold` → scan → gate).
+- [Weakness classes](weakness-classes.md) — what W1–W4 mean.
 - [Try it — the reference app](quarry.md) — the deliberately vulnerable playground (W1–W4 walkthrough).
 - [Attack modes](attack-modes.md) — the single-shot W1–W4 attack engine.
 - [The validation engine](validation.md) — why a generated test means what it claims.
