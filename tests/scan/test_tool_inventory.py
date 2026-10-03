@@ -170,3 +170,20 @@ def test_read_role_matches_the_live_information_flow_control() -> None:
         live_applies, live_reason = control._is_read_tool(entry.name)  # type: ignore[attr-defined]
         has_read_role = any(r.role == "read" for r in entry.roles)
         assert has_read_role is (live_applies and live_reason != "fail-closed default"), entry.name
+
+
+def test_a_gate_and_verdict_disagreement_is_shown_not_hidden() -> None:
+    """`budget_report` has no whole-word hint, so the confirm gate guards it by
+    the fail-closed default, while the verdict's substring read check counts its
+    calls as reads. The inventory says both."""
+    entry = _by_name(tool_inventory([_tool("budget_report")]))["budget_report"]
+    assert entry.consequential is True
+    assert entry.verdict_read is True
+    assert "verdict counts its calls as reads" in treated_as_text(entry)
+
+
+def test_a_declared_consequential_tool_is_never_a_verdict_read() -> None:
+    cc = SimpleNamespace(consequential_tools=["list_notes"], egress_tools=[], read_tool_names=[])
+    entry = _by_name(tool_inventory([_tool("list_notes")], control_config=cc))["list_notes"]
+    assert entry.verdict_read is False
+    assert treated_as_text(entry) == "yes (declared)"

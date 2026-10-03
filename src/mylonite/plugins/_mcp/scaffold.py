@@ -313,6 +313,13 @@ def _render_target_scaffold(
         tools=tools,
         effectful=sorted({"W3", "W4"} & set(suggested_weaknesses)),
     )
+    from mylonite.scan.tool_inventory import inventory_comment_lines, tool_inventory
+
+    # Every tool with its role and that role's source, from the same inventory
+    # `mylonite check` prints. Comments only: the scan reads nothing from it.
+    inventory_block = (
+        "\n".join(inventory_comment_lines(tool_inventory(tools))) + "\n" if tools else ""
+    )
     sink_hint = (
         f"# Consequential-action tools detected (W4 candidates): {', '.join(consequential_tools)}.\n"
         if consequential_tools
@@ -330,7 +337,7 @@ args: {args_line}
 # primary_tools: recorded for documentation; nothing reads it yet (see docs/target-file.md).
 # Use weakness_classes to control what gets tested.
 primary_tools: {_yaml_list(tool_names) if tool_names else "[]"}
-
+{inventory_block}
 # Weakness classes this target exposes (only classes this surface can be tested for):
 #   W1 tool-description instruction smuggling · W2 indirect injection
 #   W3 unrestricted egress / SSRF · W4 unconfirmed consequential action
@@ -600,6 +607,19 @@ def _scaffold_target_file(
     echo_err(
         f"  weakness_classes {suggested_weaknesses or '[]'}: the classes this surface "
         "can be tested for."
+    )
+    from mylonite.scan.tool_inventory import tool_inventory, unknown_tools
+
+    unknown = unknown_tools(tool_inventory(tools))
+    echo_err(
+        "  tool inventory: every tool is listed in the file with its role and where the "
+        "role came from."
+        + (
+            f" {len(unknown)} have an unknown role and are treated as consequential: "
+            f"{', '.join(unknown)}."
+            if unknown
+            else ""
+        )
     )
     # Describe what was WRITTEN (the round-tripped file), so these lines can
     # never disagree with the file or with what the scan then does.

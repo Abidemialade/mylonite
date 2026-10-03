@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 from rich.console import Console
@@ -31,9 +31,44 @@ from mylonite.exit_codes import EXIT_CONFIG, EXIT_FINDINGS, EXIT_SUCCESS
 from mylonite.plugins.cli_targets import _build_adapter_for_reference
 from mylonite.scan.control_shim import _check_description_pins, _has_approval_sibling
 from mylonite.scan.tool_classifier import destination_tools
+from mylonite.scan.tool_inventory import role_text, tool_inventory, treated_as_text, unknown_tools
 from mylonite.scan.tool_roles import content_processor_tools, instruction_bearing_tools
 
+if TYPE_CHECKING:
+    from mylonite.contracts import ToolSpec
+    from mylonite.plugins._mcp.target_registry import ControlConfig
+
 _console = Console()
+
+
+def _print_tool_inventory(tools: list[ToolSpec], cc: ControlConfig | None) -> None:
+    """Print every tool's role, the source of that role, and whether the scan's
+    confirm gate treats it as consequential. Unknown tools are named once, with
+    the target-file line that confirms them.
+
+    Not counted as a structural finding and never gates ``--enforce``: on first
+    contact most servers have a tool no tier recognises, and failing CI for that
+    would repeat the unpinned-descriptions trap.
+    """
+    entries = tool_inventory(tools, control_config=cc)
+    table = Table(title="Tool inventory (what the scan treats each tool as)")
+    table.add_column("Tool")
+    table.add_column("Role (source)")
+    table.add_column("Consequential")
+    for entry in entries:
+        table.add_row(
+            rich_escape(entry.name),
+            rich_escape(role_text(entry)),
+            rich_escape(treated_as_text(entry)),
+        )
+    console_print(_console, table)
+    unknown = unknown_tools(entries)
+    if unknown:
+        echo_err(
+            f"{len(unknown)} tool(s) have an unknown role and are treated as consequential "
+            f"(fail-closed): {', '.join(unknown)}. To confirm them, list the consequential "
+            "tools under control_config.consequential_tools."
+        )
 
 
 def check(
@@ -261,6 +296,10 @@ def check(
     )
     for line in trifecta_lines(legs):
         echo_err(line)
+
+    # Advisory, like the trifecta: the inventory and its unknown-role line never
+    # count toward the structural findings or --enforce.
+    _print_tool_inventory(tools, cc)
 
     echo(f"{findings} structural finding(s) across {len(tools)} tool(s).")
 

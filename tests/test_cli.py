@@ -6683,3 +6683,74 @@ def test_bundled_scoped_target_without_scope_prints_the_command_form(cmd: str) -
     out = result.stderr or result.output
     assert "Pass --authorize <scope>" not in out
     assert "Name a scope: mcp:filesystem:<scope> --authorize <scope>." in out
+
+
+def _desc_with_an_unrecognised_tool() -> Any:
+    from mylonite.contracts import TargetDescriptor, ToolSpec
+
+    return TargetDescriptor(
+        target_id="mcp:myapp",
+        kind="mcp",
+        system_prompt="x",
+        tools=[
+            ToolSpec(
+                name="send_email",
+                description="Send an email.",
+                json_schema={"properties": {"to": {"type": "string"}}},
+            ),
+            ToolSpec(
+                name="frobnicate_thing",
+                description="Does a thing.",
+                json_schema={"properties": {}},
+            ),
+        ],
+    )
+
+
+def test_check_prints_the_tool_inventory_with_role_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every tool is listed with its role and where the role came from, and a
+    tool nothing recognises reads as unknown and treated as consequential."""
+    _patch_fake_adapter_for(monkeypatch, _desc_with_an_unrecognised_tool)
+    target_file = _write_check_target(tmp_path)
+    result = runner.invoke(app, ["check", "--target-file", str(target_file)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    inventory = result.output.split("Tool inventory", 1)[1]
+    assert "send_email" in inventory
+    assert "consequential (name)" in inventory
+    assert "frobnicate_thing" in inventory
+    assert "fail-closed" in inventory
+    assert "1 tool(s) have an unknown role" in result.output
+    assert "control_config.consequential_tools" in result.output
+
+
+def test_check_unknown_tools_never_gate_enforce_or_change_the_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The unknown-role advisory is shown but, like unpinned descriptions, it
+    never turns `--enforce` red on first contact and is not a structural finding."""
+    from mylonite.scan.control_shim import DescriptionIntegrityControl
+
+    _patch_fake_adapter_for(monkeypatch, _desc_with_an_unrecognised_tool)
+    pins = (
+        f"    send_email: {DescriptionIntegrityControl.digest('Send an email.')}\n"
+        f"    frobnicate_thing: {DescriptionIntegrityControl.digest('Does a thing.')}\n"
+    )
+    target_file = _write_check_target(
+        tmp_path,
+        extra=(
+            f"control_config:\n  consequential_tools: [send_email]\n  description_pins:\n{pins}"
+        ),
+    )
+    # Declared: the user confirmed the list once, so nothing is unknown.
+    result = runner.invoke(app, ["check", "--target-file", str(target_file), "--enforce"])
+    assert "unknown role" not in result.output
+    assert "no (declared)" in result.output
+
+    target_file = _write_check_target(
+        tmp_path, extra=f"control_config:\n  description_pins:\n{pins}"
+    )
+    result = runner.invoke(app, ["check", "--target-file", str(target_file), "--enforce"])
+    assert "1 tool(s) have an unknown role" in result.output
+    assert "1 structural finding(s) across 2 tool(s)." in result.output  # send_email W4 only

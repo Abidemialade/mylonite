@@ -106,6 +106,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   snapshot gains the new name.
 ### Added
 
+- **`scan --scaffold` lists every tool with its role and where the role came
+  from.** The target file gets a tool inventory as a comment block: each tool's
+  role (consequential, egress, read, store, recall), its source (`declared`,
+  `annotation`, `schema`, `name` or `unknown`), and whether the scan's confirm
+  gate treats it as consequential. A tool nothing recognises reads `unknown`
+  and is treated as consequential, which the scan already did without saying
+  so. The scaffold names those tools when it finishes, and the experimental
+  `check` command prints the same inventory. Each line comes from the
+  classification the scan itself runs, so the two cannot disagree; where the
+  verdict's trace reading counts a guarded tool's calls as reads, the line
+  says so. Nothing about how a scan decides changes, and the inventory never
+  gates `check --enforce`.
 - **`scan --scaffold` writes a file that runs as written.** A `seed_arm` the
   scan would wire on its own is now written live, tagged `# auto-detected`,
   instead of commented out for you to edit. So is an `effect_probe`, when a
