@@ -626,31 +626,35 @@ Both checks fail loud (`PathEscapesBase` / `InvalidTargetScope`) rather than sil
 reading or sandboxing the wrong thing. See `SECURITY.md` for what a `target.yaml` you
 received from someone else can and cannot do.
 
-### `command` and `args` resolve against your shell, not the target file
+### `command` and `args` resolve against the target file's own directory
 
-Unlike `system_prompt_file` above, a relative `command` or a relative path inside `args`
-is **not** resolved against the target YAML's own directory. It resolves against
-whatever directory the process running `mylonite` is in when it launches — there is no
-`cwd` field to pin it to the file's own location. A target file with `command: python`,
-`args: [server.py]` only finds `server.py` when you run `mylonite` from the directory that
-file lives in; `mylonite scan --target-file configs/app.yaml` from the repo root, where
-`server.py` sits next to `configs/app.yaml`, will not. The same file can work for one
-command run from one directory and fail for another (`mylonite scan` from your project
-root, `mylonite gate` from CI's checkout root) with no warning that the launch directory
-changed — track this as [#187](https://github.com/Abidemialade/mylonite/issues/187). Give
-`command`/`args` an absolute path, or a path relative to wherever you always invoke
-Mylonite from, until a `cwd` field exists.
+A relative `command` or a relative path inside `args` resolves against the directory the
+target YAML itself lives in — the same base `system_prompt_file` above uses — not against
+whatever directory the process running `mylonite` happens to be in. A target file with
+`command: python`, `args: [server.py]` finds `server.py` next to the YAML wherever you run
+`mylonite` from: `mylonite scan --target-file configs/app.yaml` from the repo root, where
+`server.py` sits next to `configs/app.yaml`, works the same as running it from inside
+`configs/`. The same file now behaves identically for `mylonite scan` run from your
+project root and `mylonite gate` run from CI's checkout root
+([#187](https://github.com/Abidemialade/mylonite/issues/187)).
 
-The scaffold's own relative-path check only looks at `env` values shaped like a SQLite
-database path (`#18` — a relative SQLite path can silently open a different or empty
-database on Windows); it does not check `args`, and it only runs when `scan --scaffold`
-writes the file, not on a later `check` or `scan` against a file you hand-edited.
-Similarly, the scaffold writes `system_prompt_file` as a path relative to *your current
-directory at scaffold time*, while loading the file later resolves that same value
-relative to *the target YAML's own directory* (see above) — scaffold from one directory
-and the written reference can point at the wrong file once you run `scan` from another.
-Until this is fixed, write `system_prompt_file` as an absolute path, or re-check it by
-hand after scaffolding.
+An **inline** `mcp:custom` target built from `--command`/`--arg` flags (no `--target-file`,
+so no YAML to anchor to) keeps resolving `command`/`args` against your shell's current
+directory, exactly as before.
+
+The scaffold's relative-path check — a SQLite database path that looks relative (`#18` — a
+relative SQLite path can silently open a different or empty database on Windows) — now also
+looks at `args`, not only `env`, and now runs every time a target file loads, not only when
+`scan --scaffold` first writes one: `check`, `scan`, `generate`, `validate` and `gate` warn
+against a file you hand-edited too. It is always a warning, never a refusal.
+
+`scan --scaffold` also writes `system_prompt_file` relative to the *scaffolded file's own*
+directory, the same base the loader uses, instead of the directory `--scaffold` ran from —
+so the two never disagree, even when `--scaffold` and the target YAML end up in different
+places. A `system_prompt_file` has to stay inside the target file's own directory either
+way (see [Path containment](#path-containment) above); when the path given on the command
+line can't be reached from there at all, the scaffold says so immediately instead of
+leaving you to find out only when a later `scan` fails to load it.
 
 ### A credential in `args` is written in plain text
 

@@ -41,6 +41,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   discriminate would get, and a one-line legend explains what each mark
   means.
 
+- **A relative `command`/`args` in a target file now resolves against the
+  target file's own directory, not whoever's shell runs `mylonite`.** The
+  same target.yaml used to work for `mylonite scan` run from your project
+  root and fail for `mylonite gate` run from CI's checkout root, with no
+  warning that the launch directory had changed (#187). It now resolves
+  against the YAML's own directory — the same base `system_prompt_file`
+  already used — for every command that loads a target file (`check`,
+  `scan`, `generate`, `validate`, `gate`). An inline `mcp:custom` target built
+  from `--command`/`--arg` flags (no YAML to anchor to) keeps resolving
+  against your shell's current directory, unchanged. `scan --scaffold` also
+  now writes `system_prompt_file` relative to the *scaffolded file's own*
+  directory instead of the directory `--scaffold` ran from, so the two never
+  disagree even when they differ; when the prompt file given on the command
+  line can't be reached from there at all, the scaffold says so right away
+  instead of leaving it to fail later. The scaffold's relative-path warning
+  for a SQLite DB path (#18) now also checks `args`, not only `env`, and the
+  same warning now fires on every `load_target_file` call, not only when
+  `--scaffold` first writes the file. A `write_file` path containing a `..`
+  traversal (e.g. `notes/../secret.txt`) is now attributed to the top-level
+  entry it actually writes, not the segment the traversal cancels out — the
+  filesystem predicate used to credit the wrong (or no) entry and under-report
+  the finding.
 - **A JSON request body is sent as JSON.** The `rest` transport sent its body with no
   content type, so agent servers that require one (FastAPI, for example) rejected every
   attack with a 422 before it reached the agent, and the class read NOT TESTED. When the
