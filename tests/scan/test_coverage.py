@@ -501,7 +501,7 @@ def test_dominant_cause_no_engagement_names_the_model() -> None:
     )
     outcome = ScanOutcome.from_report(report)
     assert outcome.operator_message is not None
-    assert "tool calls" in outcome.operator_message
+    assert "never called the tool this attack targets" in outcome.operator_message
     assert "credentials" not in outcome.operator_message
 
 
