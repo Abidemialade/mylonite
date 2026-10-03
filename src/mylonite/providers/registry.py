@@ -44,10 +44,12 @@ class ProviderInfo:
     ``extra_env`` is anything else LiteLLM needs to actually route a call
     beyond the key (Azure's endpoint + API version) -- never key-shaped, so
     kept in a separate field rather than folded into ``key_env``.
-    ``extra_headers`` names any HTTP header (beyond a bare API key) a
-    provider needs on every request, e.g. an Anthropic workspace id -- empty
-    for every row here; wiring an actual ``--llm-header``/env-var path for
-    one is a later PR in this track.
+    ``extra_headers`` names any HTTP header (beyond a bare API key) some keys
+    for this provider need on every request, e.g. the workspace id an
+    unscoped Anthropic key needs. Mylonite never sends one on its own: the
+    operator supplies the value with ``--llm-header NAME=VALUE`` or
+    ``MYLONITE_LLM_HEADERS``, and the name here is what the "header
+    required" error line tells them to pass.
 
     ``key_env_alternatives`` lists OTHER sets of env vars that, on their own,
     are each independently sufficient proof of a credential for this
@@ -101,6 +103,7 @@ PROVIDERS: dict[str, ProviderInfo] = {
         tier="measured",
         model_prefix="anthropic/",
         key_env=("ANTHROPIC_API_KEY",),
+        extra_headers=("anthropic-workspace-id",),
         example_model="anthropic/claude-haiku-4-5-20251001",
     ),
     "ollama": ProviderInfo(

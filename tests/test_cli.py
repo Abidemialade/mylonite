@@ -1418,6 +1418,8 @@ def test_scan_bad_model_fails_before_the_autowire_probe_launches_anything(
         yield SimpleNamespace()
 
     monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _tracking_open)
+    # A key is present, so the run gets past the key check to the model one.
+    monkeypatch.setenv("NOT_A_REAL_API_KEY", "x")  # pragma: allowlist secret
     p = tmp_path / "t.yaml"
     p.write_text(
         "family: acme\ncommand: python\nargs: [-m, srv]\nweakness_classes: [W2]\n",

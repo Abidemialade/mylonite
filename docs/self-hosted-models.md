@@ -72,6 +72,13 @@ static `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` pair, a named
 is sufficient; Mylonite doesn't demand the static pair specifically just
 because it's the row's canonical/first-listed one.
 
+A row can also name extra headers some of its keys need (today, Anthropic's
+`anthropic-workspace-id`). Mylonite never sends one by itself; the name is
+what the "header required" error line tells you to pass with
+`--llm-header`. Before any target work, every live command checks the key
+with one tiny request per remote role model; Ollama and vLLM rows are
+skipped, since they have no key to check.
+
 A provider id outside this table isn't unchecked, but Mylonite never asks
 LiteLLM what it needs — an earlier approach did, and `litellm.get_llm_provider`
 for a route like `chatgpt/` or `github_copilot/` starts an interactive

@@ -14,10 +14,35 @@ there is no ceiling. While a ceiling is set, Mylonite makes the provider retries
 (`num_retries` from `mylonite.yaml` or `MYLONITE_NUM_RETRIES`) so each one is
 counted. `--max-llm-calls` is a softer per-scan budget, described below.
 
+**Extra LLM headers.** Some keys need a header on every request beyond the key itself:
+an unscoped Anthropic key needs its workspace id, and some gateways route on a header.
+Pass `--llm-header NAME=VALUE` before the command (repeat it for more than one), or set
+`MYLONITE_LLM_HEADERS` to comma-separated `NAME=VALUE` pairs; the flag wins over the
+variable for the same name. For example:
+
+```bash
+mylonite --llm-header anthropic-workspace-id=<your-workspace-id> scan reference:vulnerable
+```
+
+Header values are treated as secrets. They go to the provider and nowhere else: the
+console, logs, artefacts, fixtures and replay cache keys never carry them. A malformed
+entry exits `2` without echoing its value.
+
+**Key check before the target starts.** `scan`, `validate`, `gate` and `ablate` send one
+tiny request per distinct role model (a few tokens, no retries, counted against
+`--max-llm-requests`) before they launch or touch the target. If the provider refuses
+the key, the run stops with one line and exit `4`: an invalid or expired key (HTTP 401)
+names the key variable, and a key that needs an extra header (HTTP 400, for example a
+missing workspace id) names `--llm-header` and `MYLONITE_LLM_HEADERS`. Local providers
+(Ollama, vLLM) are skipped. A timeout or rate limit on this request does not stop the
+run; the later reachability check reports those. A key that is not set at all still
+exits `2` before any request.
+
 **Exit codes:** `0` ok/kept · `1` structural findings present (the experimental `check
 --enforce` — see [experimental.md](experimental.md)) · `2` config or usage error (incl. an
 empty scan) · `3` LLM-call budget or the hard request ceiling exceeded · `4` no model
-chosen, or the chosen provider unreachable · `5` test rejected
+chosen, the provider refused the key or a required header, or the chosen provider
+unreachable · `5` test rejected
 (not kept), or `generate` refused an input whose validation did not keep it · `6`
 `gate`: the test generator returned nothing (internal collaborator failure) · `7` `gate`: the validator returned nothing (internal collaborator failure) · `8`
 `gate`: the git/gh step failed (your findings and validation report are still in `--out`).

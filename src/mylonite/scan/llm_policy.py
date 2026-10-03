@@ -32,7 +32,7 @@ Why each field is load-bearing:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
@@ -120,6 +120,11 @@ class LLMPolicy:
     num_retries: int = 2
     drop_params: bool = True
     seed: int | None = 0
+    #: Extra HTTP headers for every request (``--llm-header``/
+    #: ``MYLONITE_LLM_HEADERS``), as ``(name, value)`` pairs. The values are
+    #: secrets: kept out of ``repr`` and out of the replay cache key (which
+    #: only folds in an allowlist of kwargs, see ``_replay``).
+    extra_headers: tuple[tuple[str, str], ...] = field(default=(), repr=False)
 
     def __post_init__(self) -> None:
         # Defense in depth: even if a caller builds an LLMPolicy directly
@@ -145,4 +150,6 @@ class LLMPolicy:
             out["api_key"] = self.api_key
         if self.api_version is not None:
             out["api_version"] = self.api_version
+        if self.extra_headers:
+            out["extra_headers"] = dict(self.extra_headers)
         return out

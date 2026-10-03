@@ -43,6 +43,7 @@ from mylonite._cli_io import (
 from mylonite._experimental import hidden_command as _hidden_experimental_command
 from mylonite.commands.check import check
 from mylonite.commands.llm_ceiling import CeilingGuardGroup, apply_request_ceiling
+from mylonite.commands.llm_headers import LLMHeaderOption, apply_llm_headers
 from mylonite.commands.model_choice import (
     require_model_chosen_or_exit as _require_model_chosen_or_exit,
 )
@@ -106,6 +107,7 @@ from mylonite.scan.assembly import (
     no_usable_modules_message,
     select_attack_modules,
 )
+from mylonite.scan.llm_headers import configured_llm_headers
 from mylonite.scan.preflight import (
     DEFAULT_ITERATION_TIMEOUT_S as _DEFAULT_ITERATION_TIMEOUT_S,  # validate --iteration-timeout
 )
@@ -114,7 +116,6 @@ from mylonite.scan.preflight import preflight_failure_message, unreachable_hint
 from mylonite.scan.preflight import provider_preflight as _provider_preflight
 from mylonite.scan.preflight import provider_preflight_direct as _provider_preflight_direct
 from mylonite.scan.providers import LOCAL_MODEL_HINT as _LOCAL_MODEL_HINT
-from mylonite.scan.providers import preflight_model_or_exit
 from mylonite.scan.providers import (
     require_llm_configured_or_exit as _require_llm_configured_or_exit,
 )
@@ -439,6 +440,7 @@ def _root(
             ),
         ),
     ] = None,
+    llm_header: LLMHeaderOption = None,
 ) -> None:
     """Run before every command; normalise stdio + install secret redaction.
 
@@ -465,6 +467,7 @@ def _root(
     if api_key_file is not None:
         _load_api_key_file(api_key_file)
     apply_request_ceiling(max_llm_requests)
+    apply_llm_headers(llm_header)
 
 
 @app.command()
@@ -729,7 +732,7 @@ def _resolve_llm_policy(rc: Any | None, env_rc: Any) -> Any:
         kwargs["timeout"] = timeout
     if num_retries is not None:
         kwargs["num_retries"] = num_retries
-    return LLMPolicy(**kwargs)
+    return LLMPolicy(**kwargs, extra_headers=configured_llm_headers())
 
 
 def _exit_if_missing_kitchen_sink(exc: BaseException) -> None:
@@ -1242,11 +1245,13 @@ def scan(
         # See cli_targets.autowire_seed_arm for the probe + inference logic.
         synth_covers_indirect = False
         if tf.transport != "rest" and needs_seed_arm_autowire(tf) and not allow_no_seed_arm:
-            # #207: validate the model BEFORE this probe can launch the real
-            # server -- a bad --model must not spawn a subprocess first. A dry
-            # run makes no model call, so it skips this check, as before.
+            # #207: check the key and model BEFORE this probe can launch the
+            # real server -- a bad --model or key must not spawn a subprocess.
+            # A dry run makes no model call, so it skips this check, as before.
             if not dry_run:
-                preflight_model_or_exit(effective_planner_model, api_base=effective_policy.api_base)
+                _require_llm_configured_or_exit(
+                    effective_planner_model, provider=provider, api_base=effective_policy.api_base
+                )
             tf, tf_mutated, synth_covers_indirect = autowire_seed_arm(
                 tf,
                 authorize,
