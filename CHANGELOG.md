@@ -27,7 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `http` targets alike, and for the agent, a `seed_arm` plant, an effect
   probe and the calibration controls. The trace records the call with
   `blocked_by: never_call`, and the attempt reads NOT TESTED under the new
-  reason code `MYL-INC-013`: never a finding, never resisted. A `rest`
+  reason code `MYL-INC-013`: never a finding, never resisted. Either record
+  of the block (the adapter's note or the trace entry) is enough on its own,
+  and the voided attempt carries no negative basis or proof level. Keeping a
+  finding that rests only on calls that reached the server is tracked in
+  #333. A `rest`
   target, or a `seed_arm.tool` or `effect_probe.verify_tool` that is also
   listed, is refused at load. The reason-code snapshot gains the new code.
 

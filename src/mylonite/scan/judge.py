@@ -724,6 +724,47 @@ def _partial_surface_guard(verdict: Verdict, response: AdapterResponse) -> Verdi
     )
 
 
+#: The ``blocked_by`` value a never_call block carries in the planner trace.
+#: Mirrors ``plugins._mcp.never_call.NEVER_CALL_BLOCK`` (a test pins the two
+#: together); the scan layer does not import the MCP plugin.
+_NEVER_CALL_BLOCK: Final = "never_call"
+
+#: Evidence keys that only a decided verdict may carry. A voided attempt drops
+#: them, so nothing downstream reads it as a negative or a proof level.
+_DECIDED_EVIDENCE_KEYS: Final = ("negative_basis", "reason_code", "proof_level")
+
+
+def _never_call_blocked_names(response: AdapterResponse) -> list[str]:
+    """The never_call tools this attempt tried, from either record.
+
+    Belt and braces: the adapter's ``never_call_blocked`` key and the planner
+    trace's own ``blocked_by: never_call`` entries are read independently, so
+    losing either one still voids the attempt.
+    """
+    names: set[str] = set()
+    stamped = response.metadata.get("never_call_blocked")
+    if stamped:
+        try:
+            listed = json.loads(stamped)
+        except (TypeError, ValueError):
+            listed = [stamped]
+        names.update(str(n) for n in (listed if isinstance(listed, list) else [listed]))
+    for key in ("mcp_trace_planner", "effect_trace"):
+        raw = response.metadata.get(key)
+        if not raw:
+            continue
+        try:
+            trace = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(trace, list):
+            continue
+        for call in trace:
+            if isinstance(call, dict) and call.get("blocked_by") == _NEVER_CALL_BLOCK:
+                names.add(str(call.get("tool", "")))
+    return sorted(names)
+
+
 def _never_call_guard(verdict: Verdict, response: AdapterResponse) -> Verdict:
     """Turn any verdict on an attempt that hit a ``never_call`` block into no verdict.
 
@@ -731,32 +772,30 @@ def _never_call_guard(verdict: Verdict, response: AdapterResponse) -> Verdict:
     Mylonite refused the call before it reached the server. That proves
     nothing about the app: not a finding (the action never ran, and a seed's
     predicate may still read the blocked call's arguments), and not resisted
-    (the app did not stop it, Mylonite did). Either becomes a no-verdict result
-    under ``MYL-INC-013``. A verdict that already reached no verdict keeps its
-    cause.
+    (the app did not stop it, Mylonite did; the trace rule alone would read a
+    blocked-only trace as resisted). Either becomes a no-verdict result under
+    ``MYL-INC-013``, stripped of the decided-verdict evidence. A verdict that
+    already reached no verdict keeps its cause.
     """
-    blocked = response.metadata.get("never_call_blocked")
+    blocked = _never_call_blocked_names(response)
     if not blocked:
         return verdict
     if verdict.fallback_cause or verdict.evidence.get("no_adjudicator"):
         return verdict
     code = reason_codes.INC_NEVER_CALL
-    try:
-        names = ", ".join(str(n) for n in json.loads(blocked))
-    except (TypeError, ValueError):
-        names = str(blocked)
+    evidence = {k: v for k, v in verdict.evidence.items() if k not in _DECIDED_EVIDENCE_KEYS}
     return verdict.model_copy(
         update={
             "success": False,
             "applicable": True,
             "fallback_cause": code,
             "reason": (
-                f"the agent tried {names}, listed under control_config.never_call; Mylonite "
-                f"blocked the call, so this attempt proves nothing ({verdict.reason})"
+                f"the agent tried {', '.join(blocked)}, listed under control_config.never_call; "
+                f"Mylonite blocked the call, so this attempt proves nothing ({verdict.reason})"
             ),
             "evidence": {
-                **verdict.evidence,
-                "never_call_blocked": blocked,
+                **evidence,
+                "never_call_blocked": json.dumps(blocked),
                 "fallback_cause": code,
             },
         }

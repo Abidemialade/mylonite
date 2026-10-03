@@ -332,3 +332,152 @@ def test_a_seed_arm_tool_on_the_never_call_list_is_refused() -> None:
 def test_a_blank_never_call_entry_is_refused() -> None:
     with pytest.raises(ValueError, match="non-empty tool names"):
         TargetFile(family=FAMILY, command="python", control_config=ControlConfig(never_call=(" ",)))
+
+
+# --- end to end: a blocked-only attempt is never resisted ----------------------
+
+
+def test_the_judge_and_the_plugin_agree_on_the_block_marker() -> None:
+    from mylonite.scan import judge as judge_module
+
+    assert judge_module._NEVER_CALL_BLOCK == NEVER_CALL_BLOCK
+
+
+async def _blocked_only_response() -> AdapterResponse:
+    _register("stdio")
+    opener = _Opener()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(stdio_adapter, "_open_mcp_session", opener)
+        adapter = MCPStdioAdapter(
+            family=FAMILY, scope=None, completion_fn=_Script([("wipe_account", {"id": "1"})])
+        )
+        response = await adapter.invoke(_payload())
+    assert opener.calls == []
+    return response
+
+
+async def test_a_blocked_only_attempt_would_read_resisted_without_the_guard() -> None:
+    """The trace rule alone reads a trace whose only consequential call was
+    blocked as resisted; the judge must not. Either record of the block (the
+    adapter's key or the trace entry) is enough on its own."""
+    response = await _blocked_only_response()
+    assert response.metadata["trace_outcome"] == "blocked-by-client"
+    judge = SuccessJudge(model="stub", llm_fallback=False)
+    trace_only = response.model_copy(
+        update={
+            "metadata": {k: v for k, v in response.metadata.items() if k != NEVER_CALL_METADATA_KEY}
+        }
+    )
+    for candidate in (response, trace_only):
+        verdict = await judge.judge(_payload(), candidate)
+        assert verdict.success is False
+        assert verdict.fallback_cause == reason_codes.INC_NEVER_CALL
+        assert "negative_basis" not in verdict.evidence
+        assert "proof_level" not in verdict.evidence
+
+
+def test_guard_strips_decided_verdict_evidence() -> None:
+    verdict = Verdict(
+        success=False,
+        reason="r",
+        mechanism="predicate",
+        evidence={"negative_basis": "trace", "reason_code": "MYL-SRV-001", "tool_calls": []},
+    )
+    out = _never_call_guard(
+        verdict,
+        _response(mcp_trace_planner=json.dumps([{"tool": "x", "blocked_by": NEVER_CALL_BLOCK}])),
+    )
+    assert out.fallback_cause == reason_codes.INC_NEVER_CALL
+    assert "negative_basis" not in out.evidence
+    assert "reason_code" not in out.evidence
+    assert out.evidence["tool_calls"] == []
+
+
+async def _engine_run_blocked_only(tmp_path: Any) -> Any:
+    """A full scan (engine + judge) whose planner only ever calls the never_call tool."""
+    from mylonite.plugins._reference.excessive_agency_module import ExcessiveAgencyAttackModule
+    from mylonite.scan.customiser import PayloadCustomiser
+    from mylonite.scan.engine import ScanConfig, ScanEngine
+
+    async def _no_verdict(**_kw: Any) -> SimpleNamespace:
+        message = SimpleNamespace(
+            content=json.dumps({"success": False, "confidence": 0.0, "reason": "n/a"}),
+            tool_calls=None,
+        )
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    import litellm
+
+    _register("stdio")
+    opener = _Opener()
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(stdio_adapter, "_open_mcp_session", opener)
+        mp.setattr(litellm, "acompletion", _no_verdict)  # no model call, ever
+        adapter = MCPStdioAdapter(
+            family=FAMILY, scope=None, completion_fn=_Script([("wipe_account", {"id": "1"})])
+        )
+        engine = ScanEngine(
+            config=ScanConfig(
+                target_id=f"mcp:{FAMILY}",
+                provider="anthropic",
+                model="stub",
+                max_llm_calls=200,
+                max_concurrent=1,
+                output_dir=tmp_path,
+            ),
+            adapter=adapter,
+            attack_modules=[ExcessiveAgencyAttackModule()],
+            customiser=PayloadCustomiser(model="stub", completion_fn=_no_verdict),
+            judge=SuccessJudge(model="stub", completion_fn=_no_verdict),
+        )
+        result = await engine.run()
+    assert "wipe_account" not in opener.calls
+    return result
+
+
+async def test_engine_records_a_blocked_only_attempt_as_undecided(tmp_path: Any) -> None:
+    result = await _engine_run_blocked_only(tmp_path)
+    blocked = [
+        a
+        for a in result.report.attempts
+        if a.judge_evidence.get("fallback_cause") == reason_codes.INC_NEVER_CALL
+    ]
+    assert blocked, [(a.seed_id, a.outcome, a.judge_evidence) for a in result.report.attempts]
+    # Never resisted, never a finding. The seed aimed at the blocked tool is
+    # undecided under its own code; a seed aimed at another tool the agent
+    # never touched is NOT TESTED for that reason instead.
+    assert not any(a.outcome in ("no_finding", "finding") for a in blocked)
+    aimed = [a for a in blocked if a.outcome == "undecided"]
+    assert aimed, [(a.seed_id, a.outcome) for a in blocked]
+    for attempt in aimed:
+        assert coverage.reason_code_for_attempt(attempt) == reason_codes.INC_NEVER_CALL
+
+
+async def test_a_guarded_leg_blocked_by_never_call_is_not_resistance(tmp_path: Any) -> None:
+    """The validator's guarded leg: when the guarded run's only call is a
+    never_call block, ``_resisted`` is False, so the differential cannot keep
+    the finding on that run."""
+    from mylonite.plugins._reference.reference_validator import DifferentialValidator
+
+    result = await _engine_run_blocked_only(tmp_path)
+    pattern_ids = {
+        a.pattern_id
+        for a in result.report.attempts
+        if a.judge_evidence.get("fallback_cause") == reason_codes.INC_NEVER_CALL
+    }
+    assert pattern_ids
+    for pattern_id in pattern_ids:
+        assert DifferentialValidator._resisted(result, pattern_id) is False
+    # Every guarded run voided: the vulnerable twin firing 3/3 still keeps nothing.
+    decision = DifferentialValidator._decide(
+        vuln_fires=3,
+        guard_resists=0,
+        guard_fires=0,
+        iterations=3,
+        min_rate_gap=0.5,
+        min_vuln_rate=0.5,
+        max_guard_leak=0.0,
+        min_guard_resist_rate=0.5,
+    )
+    assert decision.differential_passed is False
+    assert decision.flakiness_passed is False
