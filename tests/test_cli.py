@@ -6336,9 +6336,13 @@ def test_gate_bundled_mcp_route_completes_a_clean_scan_without_fast(
             ],
         )
         assert result.exit_code == EXIT_SUCCESS, result.output
-        out = result.stderr or result.output
-        assert "internal:" not in out
-        assert "no exploit found" in out
+        assert "internal:" not in result.stdout
+        assert "internal:" not in result.stderr
+        # The pre-spend LLM-call estimate (always printed to stderr) means
+        # stderr is no longer empty on a clean run, so check each stream
+        # directly rather than falling back to stdout only when stderr is
+        # empty.
+        assert "no exploit found" in result.stdout or "no exploit found" in result.stderr
     finally:
         target_registry.clear_runtime_targets()
 
