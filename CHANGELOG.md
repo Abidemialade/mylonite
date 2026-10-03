@@ -65,8 +65,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lets every 1.x patch through — including a bad one (LiteLLM had a real
   compromised patch release, 24 Mar 2026). The actual protection is the
   exact pin in a vendored constraints file, applied by both the
-  scaffolded workflows and `gate-action`, at a release that supports
-  this package's full 3.11–3.14 matrix.
+  scaffolded workflows and `gate-action`, at `1.93.2` — the first release
+  that supports this package's full 3.11–3.14 matrix with a prebuilt
+  wheel on every platform `runs-on`/`gate-action` can target (macOS,
+  Windows, manylinux, musllinux); an earlier 1.93.x ships only a
+  manylinux wheel and a Rust sdist, so pip would have to compile it from
+  source everywhere else.
 
 ### Changed
 
