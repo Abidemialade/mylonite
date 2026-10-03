@@ -637,13 +637,18 @@ def test_the_vendored_litellm_pin_satisfies_pyprojects_own_range():
     pin = Version(match.group(1))
 
     assert spec.contains(pin), f"litellm=={pin} does not satisfy pyproject.toml's {spec!r}"
-    # Specifically pin >= the floor the 3.14 resolver needs (the whole
-    # point of choosing this pin over something lower, per pyproject's own
-    # comment) -- a regression here would silently drop 3.14 support for
-    # every scaffolded/action install, without failing the pyproject
-    # specifier check above (which only enforces the FLOOR pyproject itself
-    # declares, currently lower, for the other supported Pythons).
-    assert pin >= Version("1.93.0")
+    # Specifically pin >= 1.93.2, not just >= 1.93.0 (the floor pyproject's
+    # own comment names for 3.14 support): 1.93.0 publishes only a
+    # manylinux wheel plus a Rust (maturin) sdist, so pip must compile it
+    # from source on macOS, Windows or a musl runner -- 1.93.2 is the
+    # first >=1.93 release with cp310-cp314 wheels for macOS, manylinux,
+    # musllinux and win_amd64 (confirmed against PyPI's published file
+    # list). A regression here would silently drop either 3.14 support or
+    # cross-platform wheel availability for every scaffolded/action
+    # install, without failing the pyproject specifier check above (which
+    # only enforces the FLOOR pyproject itself declares, currently lower,
+    # for the other supported Pythons).
+    assert pin >= Version("1.93.2")
 
 
 # ---------------------------------------------------------------------------
