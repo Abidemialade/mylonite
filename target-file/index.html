@@ -1,0 +1,2758 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source framework for AI-layer security testing.">
+      
+      
+      
+        <link rel="canonical" href="https://abidemialade.github.io/mylonite/target-file/">
+      
+      
+        <link rel="prev" href="../cli-reference/">
+      
+      
+        <link rel="next" href="../reason-codes/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>target.yaml reference - Mylonite</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#targetyaml-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Mylonite" class="md-header__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Mylonite
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              target.yaml reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Mylonite" class="md-nav__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Mylonite
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../choose-a-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose a model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install-windows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing on Windows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quarry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Try it — the reference app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../upgrading-to-0.12/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading from 0.10.x/0.11.x
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The journey
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    The journey
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/1-try/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    1. Try it
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/2-choose-a-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2. Choose a model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/3-point-at-your-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3. Point at your app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/4-find/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    4. Find
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/5-prove/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5. Prove
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/6-commit-the-gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    6. Commit the gate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/7-re-prove/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    7. Re-prove
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test-your-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test your own app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../http-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test a plain HTTP agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ci-gating/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gate CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Re-validate on a new model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reading-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reading the results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How it works
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weakness-classes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weakness classes & how attacks work
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../attack-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Attack modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The validation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testkit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The testkit API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../verification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Independent verification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../standards-mapping/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standards mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    target.yaml reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    target.yaml reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#minimal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#full-annotated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full, annotated
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remote-targets-sse-http" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remote targets (SSE / HTTP)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-session-timeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP session timeout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#probes-per-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Probes per class
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#calibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Calibration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#field-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Field groups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coverage-a-declared-class-your-surface-cant-run-is-refused-not-silently-dropped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage: a declared class your surface can't run is refused, not silently dropped
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#effect-attribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Effect attribution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#secrets-stay-out-of-the-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets stay out of the file
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-boundary-controls-fail-closed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The boundary controls fail closed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#path-containment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path containment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Path containment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#command-and-args-resolve-against-the-target-files-own-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        command and args resolve against the target file's own directory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-credential-in-args-is-written-in-plain-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A credential in args is written in plain text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-env-command-and-arg-are-ignored-once-target-file-is-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --env, --command and --arg are ignored once --target-file is set
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reason-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reason codes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & modules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugin-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claims/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Claims register
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operating
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operating
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../self-hosted-models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Self-hosted models (Ollama/vLLM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security & responsible use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../threat-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Threat model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#minimal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Minimal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#full-annotated" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Full, annotated
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#remote-targets-sse-http" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remote targets (SSE / HTTP)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#mcp-session-timeout" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP session timeout
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#probes-per-class" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Probes per class
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#calibration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Calibration
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#field-groups" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Field groups
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#coverage-a-declared-class-your-surface-cant-run-is-refused-not-silently-dropped" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Coverage: a declared class your surface can't run is refused, not silently dropped
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#effect-attribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Effect attribution
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#secrets-stay-out-of-the-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Secrets stay out of the file
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-boundary-controls-fail-closed" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The boundary controls fail closed
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#path-containment" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Path containment
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Path containment">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#command-and-args-resolve-against-the-target-files-own-directory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        command and args resolve against the target file's own directory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-credential-in-args-is-written-in-plain-text" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A credential in args is written in plain text
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#-env-command-and-arg-are-ignored-once-target-file-is-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        --env, --command and --arg are ignored once --target-file is set
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="targetyaml-reference"><code>target.yaml</code> reference<a class="headerlink" href="#targetyaml-reference" title="Permanent link">&para;</a></h1>
+<p>A target file is how you point Mylonite at a custom MCP server (<code>--target-file</code>). One
+YAML declares how to launch the server, which weakness classes it exposes, and how to
+plant and verify attacks. <code>mylonite scan --scaffold app.yaml</code> scaffolds one for you; this
+page is the full field reference.</p>
+<p>The scaffold writes a file that runs as written. What it detects goes in live,
+each block tagged <code># auto-detected</code>:</p>
+<ul>
+<li>a <code>seed_arm</code> when the server has a tool that stores content and a tool that reads it
+  back without an id. It is the same <code>seed_arm</code> a scan would wire on its own, so the
+  scaffold and the scan agree.</li>
+<li>an <code>effect_probe</code> when the file lists W3 or W4 and a readback tool is all of:</li>
+<li><strong>safe</strong> to call before and after every attempt: a whole-word read name (or
+    <code>readOnlyHint: true</code>), no <code>readOnlyHint: false</code> or <code>destructiveHint</code>, no write verb in
+    its name, not a consequential tool itself, and no record id to know;</li>
+<li><strong>tied</strong> to what the consequential tools change: a word for what the tool's verb
+    produced (<code>sent_log</code> or <code>outbox</code> for <code>send_email</code>), or the id-free recall of a store a
+    consequential tool writes (<code>read_graph</code> for <code>create_entities</code>). A shared noun alone
+    (<code>list_emails</code> for <code>send_email</code>, <code>list_messages</code> for <code>send_message</code>) is not enough:
+    an inbox can list what arrived and not what was sent. A tied tool wins over listing
+    order;</li>
+<li>free of required arguments (<code>verify_args_template: {}</code>).</li>
+</ul>
+<p>It sets no <code>expect_marker</code>, so any new change a call from the attempt made counts as the
+  effect, and no deferral words, so a reply that says "queued" reads NOT TESTED
+  (<a href="../reason-codes/#myl-inc-012"><code>MYL-INC-012</code></a>), never resisted.</p>
+<p>A live probe turns on <a href="#calibration">calibration</a>: before it trusts the probe, the first
+scan calls up to five of the server's consequential tools for real (never one marked
+destructive), with <code>myl-cal-</code> marker values, to prove the probe sees a change. Add
+<code>calibration: {controls: skip}</code> to turn that off; the probe's "no change" then never clears
+a call (<a href="../reason-codes/#myl-inc-002"><code>MYL-INC-002</code></a>). Attempts on a target with an
+<code>effect_probe</code> run one at a time.</p>
+<p>Any other readback is written as a commented hint (with its required arguments stubbed,
+when it has some): check it, fill it in and uncomment it. Until the file declares an
+<code>effect_probe</code>, the scaffold marks W3 and W4 "effect unconfirmable" and the scan reads
+those classes NOT TESTED (<a href="../reason-codes/#myl-nt-017"><code>MYL-NT-017</code></a>) unless an attempt
+fires. A store tool whose
+only readback needs the new record's id (the agent never learns it) gets a commented
+<code>seed_arm</code>, and W2 is left out of <code>weakness_classes</code>.</p>
+<p><code>--scaffold</code> checks the output path is writable (not a directory, parent creatable)
+before it launches your server, so a bad path fails fast with one line, not a
+traceback after the launch cost. The write itself is atomic — a crash mid-write
+leaves any existing file untouched, never truncated. Both the MCP scaffold and
+the <code>--rest-url</code> scaffold get the same check.</p>
+<h2 id="minimal">Minimal<a class="headerlink" href="#minimal" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="nt">family</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-app</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">my_server.py</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="nt">weakness_classes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">W2</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="nt">seed_arm</span><span class="p">:</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span><span class="nt">tool</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">save_note</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span><span class="nt">args_template</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> body</span><span class="p">:</span><span class="w"> </span><span class="s">"{payload}"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<h2 id="full-annotated">Full, annotated<a class="headerlink" href="#full-annotated" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># --- how to launch the server ---------------------------------------------</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">family</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-app</span><span class="w">                 </span><span class="c1"># short name used in report ids (not a bundled name)</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python</span><span class="w">                </span><span class="c1"># the MCP server launch command</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">my_server.py</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">--port</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="s">"0"</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> LOG_LEVEL</span><span class="p">:</span><span class="w"> </span><span class="nv">warning</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">    </span><span class="c1"># ADDED to a small allowlist, not merged into your full env — see below</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="nt">scope</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">tenant-a</span><span class="w">                </span><span class="c1"># optional label; must match --authorize / {scope}</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="nt">requires_scope</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w">          </span><span class="c1"># set true to require a non-empty scope</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1"># timeout_s: 90                # optional; stdio/sse/http only. Overrides the planner</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="c1">#                               # AND MCP session read timeout (both default to 60s) --</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1">#                               # see "MCP session timeout" below.</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="c1"># calibration:                 # optional; stdio/sse/http only -- see "Calibration" below.</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="c1">#   controls: auto              # auto (default) | allow | skip</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="c1"># --authorize must EQUAL this target's required value: the declared `scope`</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="c1"># exactly (e.g. `--authorize tenant-a` above) if one is set, else `family`</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="c1"># (e.g. `--authorize my-app`) if it isn't. This is derived from the target's</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="c1"># own data, never from `requires_scope` — see `mylonite._authz`, SECURITY.md.</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a><span class="c1"># --- the AI layer ----------------------------------------------------------</span>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="nt">system_prompt</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span><span class="w">               </span><span class="c1"># the target's system prompt (inline)...</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="w">  </span><span class="no">You are a helpful assistant with access to the connected tools.</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a><span class="c1"># system_prompt_file: prompts/system.txt   # ...or read it from a file (one or the other)</span>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="nt">primary_tools</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[]</span><span class="w">              </span><span class="c1"># optional: documentation only — see the note below</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="nt">weakness_classes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">W1</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">W2</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">W3</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">W4</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># which classes to test</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="c1"># --- how to plant poisoned content (required for indirect-injection W2) ----</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a><span class="nt">seed_arm</span><span class="p">:</span>
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="w">  </span><span class="nt">tool</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">save_note</span><span class="w">              </span><span class="c1"># the tool that stores attacker-controllable content</span>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="w">  </span><span class="nt">args_template</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> body</span><span class="p">:</span><span class="w"> </span><span class="s">"{payload}"</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w">   </span><span class="c1"># {payload} is the bare natural-language plant</span>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a><span class="w">  </span><span class="nt">id_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">id</span><span class="w">                   </span><span class="c1"># JSON field in the result holding the new record's handle</span>
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="w">  </span><span class="c1"># id_pattern: 'note_(\d+)'   # ...or a regex to extract the id</span>
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="w">  </span><span class="c1"># id_from: first_int         # ...or "first integer in the result"</span>
+<a id="__codelineno-1-32" name="__codelineno-1-32" href="#__codelineno-1-32"></a>
+<a id="__codelineno-1-33" name="__codelineno-1-33" href="#__codelineno-1-33"></a><span class="c1"># --- how to confirm the damage materialised (recommended for custom targets)</span>
+<a id="__codelineno-1-34" name="__codelineno-1-34" href="#__codelineno-1-34"></a><span class="nt">effect_probe</span><span class="p">:</span>
+<a id="__codelineno-1-35" name="__codelineno-1-35" href="#__codelineno-1-35"></a><span class="w">  </span><span class="nt">verify_tool</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">list_sent_mail</span>
+<a id="__codelineno-1-36" name="__codelineno-1-36" href="#__codelineno-1-36"></a><span class="w">  </span><span class="nt">verify_args_template</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{}</span>
+<a id="__codelineno-1-37" name="__codelineno-1-37" href="#__codelineno-1-37"></a><span class="w">  </span><span class="c1"># A marker the AGENT must PRODUCE by acting (here: the attacker recipient in the</span>
+<a id="__codelineno-1-38" name="__codelineno-1-38" href="#__codelineno-1-38"></a><span class="w">  </span><span class="c1"># sent-mail log). Do NOT use a literal Mylonite plants into the payload (e.g. an</span>
+<a id="__codelineno-1-39" name="__codelineno-1-39" href="#__codelineno-1-39"></a><span class="w">  </span><span class="c1"># exfil address inside a poisoned note) on a plant-and-recall target: the verify</span>
+<a id="__codelineno-1-40" name="__codelineno-1-40" href="#__codelineno-1-40"></a><span class="w">  </span><span class="c1"># tool would reflect the planted payload back and the marker would match without</span>
+<a id="__codelineno-1-41" name="__codelineno-1-41" href="#__codelineno-1-41"></a><span class="w">  </span><span class="c1"># the agent doing anything. An effect now counts for an attempt only when the</span>
+<a id="__codelineno-1-42" name="__codelineno-1-42" href="#__codelineno-1-42"></a><span class="w">  </span><span class="c1"># marker is NEW since that attempt's own pre-drive baseline AND one of that</span>
+<a id="__codelineno-1-43" name="__codelineno-1-43" href="#__codelineno-1-43"></a><span class="w">  </span><span class="c1"># attempt's own executed calls carries it (or is the declared consequential/</span>
+<a id="__codelineno-1-44" name="__codelineno-1-44" href="#__codelineno-1-44"></a><span class="w">  </span><span class="c1"># egress tool) — a marker that was already there, or that another attempt</span>
+<a id="__codelineno-1-45" name="__codelineno-1-45" href="#__codelineno-1-45"></a><span class="w">  </span><span class="c1"># wrote, does not confirm this attempt. See "Effect attribution" below.</span>
+<a id="__codelineno-1-46" name="__codelineno-1-46" href="#__codelineno-1-46"></a><span class="w">  </span><span class="nt">expect_marker</span><span class="p">:</span><span class="w"> </span><span class="s">"{exfil_email}"</span><span class="w">        </span><span class="c1"># renders to this attempt's exfil address; see below</span>
+<a id="__codelineno-1-47" name="__codelineno-1-47" href="#__codelineno-1-47"></a><span class="w">  </span><span class="nt">deferred_markers</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"queued</span><span class="nv"> </span><span class="s">for</span><span class="nv"> </span><span class="s">approval"</span><span class="p p-Indicator">]</span><span class="w">    </span><span class="c1"># words that mark a HELD item in the verify output</span>
+<a id="__codelineno-1-48" name="__codelineno-1-48" href="#__codelineno-1-48"></a><span class="w">  </span><span class="nt">deferred_reply_words</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"Job</span><span class="nv"> </span><span class="s">accepted"</span><span class="p p-Indicator">]</span><span class="w">       </span><span class="c1"># words in a tool REPLY that mean "accepted for later"</span>
+<a id="__codelineno-1-49" name="__codelineno-1-49" href="#__codelineno-1-49"></a>
+<a id="__codelineno-1-50" name="__codelineno-1-50" href="#__codelineno-1-50"></a><span class="c1"># --- which tools implement which controls (for the synthetic guarded build) -</span>
+<a id="__codelineno-1-51" name="__codelineno-1-51" href="#__codelineno-1-51"></a><span class="nt">control_config</span><span class="p">:</span>
+<a id="__codelineno-1-52" name="__codelineno-1-52" href="#__codelineno-1-52"></a><span class="w">  </span><span class="nt">egress_tools</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">web_fetch</span><span class="p p-Indicator">]</span><span class="w">            </span><span class="c1"># W3: tools that reach the network</span>
+<a id="__codelineno-1-53" name="__codelineno-1-53" href="#__codelineno-1-53"></a><span class="w">  </span><span class="nt">egress_url_param</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">url</span><span class="w">                </span><span class="c1"># the URL arg the allowlist guards</span>
+<a id="__codelineno-1-54" name="__codelineno-1-54" href="#__codelineno-1-54"></a><span class="w">  </span><span class="nt">fetch_allowlist</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">example.com</span><span class="p p-Indicator">]</span><span class="w">       </span><span class="c1"># hosts the egress control permits</span>
+<a id="__codelineno-1-55" name="__codelineno-1-55" href="#__codelineno-1-55"></a><span class="w">  </span><span class="nt">consequential_tools</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">send_email</span><span class="p p-Indicator">]</span><span class="w">    </span><span class="c1"># W4: high-impact actions to gate</span>
+<a id="__codelineno-1-56" name="__codelineno-1-56" href="#__codelineno-1-56"></a><span class="w">  </span><span class="nt">read_tool_names</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">read_note</span><span class="p p-Indicator">]</span><span class="w">         </span><span class="c1"># W2: tools whose results get quarantined</span>
+<a id="__codelineno-1-57" name="__codelineno-1-57" href="#__codelineno-1-57"></a><span class="w">  </span><span class="nt">verdict_read_tools</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">web_search</span><span class="p p-Indicator">]</span><span class="w">     </span><span class="c1"># verdict only: calls that count as reads</span>
+<a id="__codelineno-1-58" name="__codelineno-1-58" href="#__codelineno-1-58"></a><span class="w">  </span><span class="nt">private_tools</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">get_user_sessions</span><span class="p p-Indicator">]</span><span class="w">   </span><span class="c1"># W2/W4: tools that RETURN sensitive data</span>
+<a id="__codelineno-1-59" name="__codelineno-1-59" href="#__codelineno-1-59"></a><span class="w">  </span><span class="nt">private_markers</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="s">"INTERNAL-SECRET-"</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># …or a literal that marks a result private</span>
+<a id="__codelineno-1-60" name="__codelineno-1-60" href="#__codelineno-1-60"></a><span class="w">  </span><span class="nt">destructive_tools</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">delete_entities</span><span class="p p-Indicator">]</span><span class="w"> </span><span class="c1"># W2: sinks where an injected call is damage itself</span>
+<a id="__codelineno-1-61" name="__codelineno-1-61" href="#__codelineno-1-61"></a><span class="w">  </span><span class="nt">enforcement_mode</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">approve</span><span class="w">            </span><span class="c1"># block (default) | approve | observe</span>
+<a id="__codelineno-1-62" name="__codelineno-1-62" href="#__codelineno-1-62"></a><span class="w">  </span><span class="nt">approval_policy</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">approve_when_trusted</span><span class="w"> </span><span class="c1"># in approve mode: deny_all | approve_when_trusted</span>
+<a id="__codelineno-1-63" name="__codelineno-1-63" href="#__codelineno-1-63"></a><span class="w">  </span><span class="nt">declared</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">W2</span><span class="p p-Indicator">]</span><span class="w">                       </span><span class="c1"># controls you've already implemented server-side</span>
+<a id="__codelineno-1-64" name="__codelineno-1-64" href="#__codelineno-1-64"></a><span class="w">  </span><span class="nt">synthetic</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">W3</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">W4</span><span class="p p-Indicator">]</span><span class="w">                  </span><span class="c1"># controls NOT already declared — Mylonite synthesizes/tests these</span>
+<a id="__codelineno-1-65" name="__codelineno-1-65" href="#__codelineno-1-65"></a>
+<a id="__codelineno-1-66" name="__codelineno-1-66" href="#__codelineno-1-66"></a><span class="c1"># --- optional: a genuinely unguarded build + per-control server-layer toggles</span>
+<a id="__codelineno-1-67" name="__codelineno-1-67" href="#__codelineno-1-67"></a><span class="nt">vulnerable_launch</span><span class="p">:</span><span class="w">                     </span><span class="c1"># how to launch a DELIBERATELY-unguarded variant</span>
+<a id="__codelineno-1-68" name="__codelineno-1-68" href="#__codelineno-1-68"></a><span class="w">  </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python</span>
+<a id="__codelineno-1-69" name="__codelineno-1-69" href="#__codelineno-1-69"></a><span class="w">  </span><span class="nt">args</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">my_server.py</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-1-70" name="__codelineno-1-70" href="#__codelineno-1-70"></a><span class="w">  </span><span class="nt">env</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> SECURITY_MODE</span><span class="p">:</span><span class="w"> </span><span class="s">"off"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-1-71" name="__codelineno-1-71" href="#__codelineno-1-71"></a><span class="nt">control_env</span><span class="p">:</span><span class="w">                           </span><span class="c1"># per-control env that disables ONE server guard</span>
+<a id="__codelineno-1-72" name="__codelineno-1-72" href="#__codelineno-1-72"></a><span class="w">  </span><span class="nt">W2</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> SANITIZE_INPUT</span><span class="p">:</span><span class="w"> </span><span class="s">"false"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+<a id="__codelineno-1-73" name="__codelineno-1-73" href="#__codelineno-1-73"></a><span class="w">  </span><span class="nt">W3</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> ALLOWLIST</span><span class="p">:</span><span class="w"> </span><span class="s">"disabled"</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<h2 id="remote-targets-sse-http">Remote targets (SSE / HTTP)<a class="headerlink" href="#remote-targets-sse-http" title="Permanent link">&para;</a></h2>
+<p>By default a target is launched over <strong>stdio</strong> (<code>command</code>/<code>args</code> spawn a subprocess). To
+scan a <em>remote</em> MCP server, set <code>transport</code> and <code>url</code> instead — <code>command</code> becomes optional:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">family</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-remote-app</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nt">transport</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">sse</span><span class="w">                 </span><span class="c1"># stdio (default) | sse | http (streamable-HTTP)</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nt">url</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">https://app.example.com/mcp</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="nt">headers</span><span class="p">:</span><span class="w">                       </span><span class="c1"># optional; may carry auth</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span><span class="nt">Authorization</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Bearer ${MY_TOKEN}</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="nt">weakness_classes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">W2</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">W4</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="nt">seed_arm</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> tool</span><span class="p">:</span><span class="w"> </span><span class="nv">save_note</span><span class="p p-Indicator">,</span><span class="nt"> args_template</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> body</span><span class="p">:</span><span class="w"> </span><span class="s">"{payload}"</span><span class="w"> </span><span class="p p-Indicator">}</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<ul>
+<li><code>url</code> is required for <code>sse</code>/<code>http</code> and rejected for <code>stdio</code>.</li>
+<li><code>headers</code> are passed to the transport but <strong>never logged and never shown</strong> in the target
+  descriptor (only the host appears). A target file keeps tokens out of shell history.</li>
+<li>Reference the token with <code>${VAR}</code>, as above, and export it before you scan
+  (<code>export MY_TOKEN='...'</code> / <code>$env:MY_TOKEN = '...'</code>) — the same <code>${VAR}</code> mechanism the REST
+  adapter's <code>request.headers</code> uses (see <a href="../http-agent/"><code>docs/http-agent.md</code></a>). Mylonite
+  expands it from your shell's environment and never writes the literal value to the file.</li>
+<li>If the server rejects the request with 401 or 403, <code>scan</code> names the host and the status
+  and points at this section — for example: <code>the server at app.example.com rejected the
+  request (401). Set the token in headers: in the target file, e.g. Authorization: Bearer
+  ${MY_TOKEN}, and export MY_TOKEN before you scan.</code> See
+  <a href="../limitations/">Known limitations</a> for what this does not (yet) cover — a static token
+  only, no OAuth sign-in.</li>
+<li><code>command</code>/<code>args</code>/<code>env</code> and the server-layer <code>vulnerable_launch</code>/<code>control_env</code> toggles do
+  not apply to remote targets and are ignored.</li>
+<li>Everything else (<code>seed_arm</code>, <code>effect_probe</code>, <code>weakness_classes</code>, <code>control_config</code>) works
+  exactly the same.</li>
+</ul>
+<h2 id="mcp-session-timeout">MCP session timeout<a class="headerlink" href="#mcp-session-timeout" title="Permanent link">&para;</a></h2>
+<p><code>timeout_s</code> (optional; <code>stdio</code>/<code>sse</code>/<code>http</code> only — a <code>rest</code> target uses
+<a href="../http-agent/#the-target-file"><code>request.timeout_s</code></a> instead) overrides BOTH the
+planner's per-turn budget and the MCP <code>ClientSession</code>'s read timeout, which otherwise
+default to 60 seconds each. Raise it for a target that legitimately takes longer per
+turn — a local model, a slow server, or a first-run <code>npx</code>/<code>uvx</code> download. Both the
+planner-timeout error (raised mid-scan, on a slow turn) and the <code>describe()</code>-timeout
+error (raised on connect, e.g. a hung server) name <code>timeout_s</code> and its effective
+value. The one-off <code>seed_arm</code> auto-wire probe (a single <code>describe()</code> call <code>scan</code>
+makes up front to infer a <code>seed_arm</code> — see <a href="../cli-reference/">CLI reference</a>) also
+names <code>timeout_s</code>, but its own budget is <code>max(20, timeout_s)</code>: even a smaller
+<code>timeout_s</code> never shrinks that first probe below 20 seconds. Omitting the field
+keeps today's fixed 60s default for the planner and session, so an existing target
+file loads unchanged. Must be greater than 0; declaring it on a <code>transport: rest</code>
+target is rejected — set <code>request.timeout_s</code> there instead.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nt">timeout_s</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">90</span>
+</code></pre></div>
+<h2 id="probes-per-class">Probes per class<a class="headerlink" href="#probes-per-class" title="Permanent link">&para;</a></h2>
+<p><code>seed_tool_ceiling</code> (optional; <code>stdio</code>/<code>sse</code>/<code>http</code> only) sets how many tools in one
+weakness class get their own probe. The default is 8, and the value must be a whole
+number from 3 to 50. A tool past the ceiling is never attacked, and the scan reports
+it as NOT TESTED (<a href="../reason-codes/#myl-nt-018"><code>MYL-NT-018</code></a>), so on a server with more
+candidate tools than that in one class the class can't read resisted.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="nt">seed_tool_ceiling</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">20</span>
+</code></pre></div>
+<p>Each extra probe costs LLM calls: a customiser call, several planner turns and a judge
+call. Raise <code>--max-llm-calls</code> with the ceiling, or the scan stops on its budget
+(<a href="../reason-codes/#myl-abt-001"><code>MYL-ABT-001</code></a>) and the seeds it cut off read NOT TESTED
+too. For W4 there is a second way: a <code>control_config.consequential_tools</code> list replaces
+the classifier, so listing only the tools that matter keeps the class under the
+ceiling. Declaring <code>egress_tools</code> only moves those tools to the front of the W3 list;
+the classifier's other matches still count toward the ceiling.</p>
+<h2 id="calibration">Calibration<a class="headerlink" href="#calibration" title="Permanent link">&para;</a></h2>
+<p><code>calibration.controls</code> (optional; <code>stdio</code>/<code>sse</code>/<code>http</code> only — a <code>rest</code> target is
+rejected, mirroring <code>timeout_s</code>) says whether <code>calibrate_custom_target()</code> may run
+its controls: real writes through a consequential tool, and a plant-and-recall
+through <code>seed_arm</code>, proving your <code>effect_probe</code> can actually see a change before
+a scan trusts its "no change". Every <code>scan</code>/<code>gate</code>/<code>ablate</code>/<code>validate</code> run that
+drives this target calls it once, automatically, and prints each control's status
+and <a href="../reason-codes/">reason code</a>. Run
+<code>mylonite scan --target-file app.yaml --authorize my-app</code> to see it before
+trusting a full campaign's "no change" findings:</p>
+<ul>
+<li><code>auto</code> (the default): run on an <strong>authorized <code>stdio</code></strong> target only. Every
+  live-driving command already requires <code>--authorize</code> to match this target's
+  scope — <code>auto</code> additionally withholds consent for a remote (<code>sse</code>/<code>http</code>)
+  target, since real writes against a server you don't launch yourself need a
+  separate, explicit opt-in.</li>
+<li><code>allow</code>: run on any transport, once authorized — including a remote one.</li>
+<li><code>skip</code>: never run. An uncalibrated <code>effect_probe</code>'s "no change" can then
+  never certify a resisted attempt; attempts it would have covered read
+  NOT TESTED with <code>MYL-INC-002</code> instead.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nt">calibration</span><span class="p">:</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="w">  </span><span class="nt">controls</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">allow</span><span class="w">   </span><span class="c1"># e.g. for a remote (sse/http) target you own</span>
+</code></pre></div>
+<p>A certified probe is trusted only for what calibration showed it. Its "no change"
+clears a call only when every consequential tool the attempt called is one the
+positive control wrote through (<code>scan --target-file app.yaml --authorize my-app</code>
+lists them). A call through any
+other tool may land where the probe cannot look, so it stays a finding. A
+<code>verify_args_template</code> that uses <code>{payload}</code> is never certified (<code>MYL-INC-003</code>): an
+attempt fills it with its whole attack text, so calibration cannot prove that read.
+Select the record by a fixed value, or use a verify tool that takes no arguments.
+Calibration is recorded per launch, so a result from the default launch is not reused
+for a <code>vulnerable_launch</code> twin.</p>
+<h2 id="field-groups">Field groups<a class="headerlink" href="#field-groups" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Launch</strong> (<code>family</code>, <code>command</code>, <code>args</code>, <code>env</code>, <code>scope</code>, <code>requires_scope</code>) — how the
+  stdio MCP server is started and labelled. For remote servers use
+  <code>transport: sse|http</code> + <code>url</code> + optional <code>headers</code> instead of <code>command</code>/<code>args</code>.</li>
+<li>
+<p><strong>AI layer</strong> (<code>system_prompt</code> / <code>system_prompt_file</code>, <code>primary_tools</code>,
+  <code>weakness_classes</code>) — what the agent is and what to test. Set at most one of the two
+  prompt fields.</p>
+<div class="admonition note">
+<p class="admonition-title"><code>primary_tools</code> is currently documentation only</p>
+<p>It is accepted, validated and round-tripped, but <strong>nothing reads it</strong> — it does
+not narrow seed selection today, despite what earlier versions of this page
+claimed. Use <code>weakness_classes</code> to control what gets tested. Wiring it as a real
+filter is tracked in <code>TODOS.md</code>.</p>
+</div>
+<ul>
+<li><strong><code>seed_arm</code></strong> (<code>SeedArmSpec</code>) — how to plant untrusted content. <code>{payload}</code> must sit
+  at a <strong>bare string leaf</strong> (e.g. <code>body: "{payload}"</code>), not nested inside serialized
+  JSON. The <code>id_key</code>/<code>id_pattern</code>/<code>id_from</code> tell Mylonite how to capture the new
+  record's handle so it can drive a read-back.</li>
+<li><strong><code>effect_probe</code></strong> (<code>EffectProbeSpec</code>) — confirms the damage end-to-end, not just that
+  a tool was called. Without one, a W3/W4 finding is proven only as far as <code>dispatched</code>
+  and a "queued" reply from the server reads NOT TESTED (<code>MYL-INC-012</code>), not resisted (see
+  <a href="../reading-results/#how-an-mcp-attempt-is-decided">How an MCP attempt is decided</a>).
+  <code>mylonite scan --scaffold</code> proposes a <code>verify_tool</code> and writes it live only when it is
+  safe, tied to a consequential tool and needs no arguments (see the top of this page);
+  otherwise it is a commented hint. Check that it reads back what an attack would change.
+  With no <code>effect_probe</code> in effect, a W3 or W4 class on a custom target reads NOT TESTED
+  (<a href="../reason-codes/#myl-nt-017"><code>MYL-NT-017</code></a>) unless an attempt in it fires.
+  Not available on a <code>transport: rest</code> target: declaring one there is refused on load
+  with exit <code>2</code>, before any model call, and W3 and W4 read NOT
+  TESTED (<a href="../reason-codes/#myl-nt-016"><code>MYL-NT-016</code></a>). <code>expect_marker</code> proves it fired; <code>deferred_markers</code> mean the action
+  was <em>defended</em> (e.g. queued for approval), not a success. List in <code>deferred_markers</code> only
+  words that mark a held item in the verify tool's output, never a word that also shows for
+  items that will still go out: when one grows, the attempt reads resisted. Words the server
+  puts in a tool reply when it accepts a call for later (<code>Job accepted</code>, <code>Task created</code>) go
+  in <code>deferred_reply_words</code>; they make the call read deferred (NOT TESTED unless the probe
+  saw it held), never resisted. Both match whole words, ignoring case. Choose <code>expect_marker</code> as a
+  value <strong>the agent's own call carries</strong> — the recipient address, a row it wrote,
+  <code>{exfil_email}</code> or <code>{exfil_host}</code> — not a status word the target itself would print regardless of who acted.
+  A fixed status word like <code>status=sent</code> can only be tied to an attempt through the tool
+  the seed names as its consequential or egress tool, and only synthesised seeds name
+  one. A tool declared under <code>control_config.consequential_tools</code> can link only
+  synthesised seeds; catalogue seeds, which <code>validate</code> re-drives, never link through it.
+  So <code>scan</code>, <code>validate</code> and <code>check</code> warn on a fixed marker whatever <code>control_config</code>
+  declares: on a catalogue seed that effect can read <code>"unattributed"</code> but never
+  <code>"true"</code>, and <code>validate</code> cannot keep the finding. The dependable fix is a marker the
+  agent's own call carries. A marker shaped like an email address (<code>x@y.z</code>) or a URL
+  (containing <code>://</code>) is exempt from the warning: it is assumed to be carried by the
+  agent's call. A scan can mint a fresh exfil destination for each attempt (the
+  generalization probe), which a fixed literal address can never match — use
+  <code>{exfil_email}</code> / <code>{exfil_host}</code> instead of writing one in. Both render to this
+  attempt's active destination either way, so they also work when that randomization
+  is off; <code>scan</code>, <code>validate</code> and <code>check</code> warn when a marker is a literal address
+  rather than one of the two placeholders. See
+  <a href="#effect-attribution">Effect attribution</a> below for what confirms an effect and what
+  <code>"unattributed"</code> means.</li>
+<li><strong><code>control_config</code></strong> (<code>ControlConfig</code>) — tells the synthetic guarded build which tools
+  carry egress (W3), consequential actions (W4), and untrusted-data results to quarantine
+  (<code>read_tool_names</code>, W2), the allowlist, which controls you've <code>declared</code>, and whether to
+  <code>synthetic</code>-ally synthesize the rest. For W2 specifically, two further lists decide
+  whether the control can actually <em>discriminate</em>:</li>
+<li><strong><code>private_tools</code></strong> — tools whose results carry sensitive data. Reading one raises
+  the session to <code>private</code>, and a public-facing sink then refuses. <strong>This is the
+  knob that catches exfiltration.</strong> <code>read_tool_names</code> alone only marks content
+  untrusted, which on its own gates nothing but destructive sinks.</li>
+<li><strong><code>destructive_tools</code></strong> — sinks where an injection-driven call is damage in itself
+  (delete/overwrite/transfer). These refuse untrusted context outright. Inferred
+  from MCP's <code>destructiveHint</code> and name hints when you don't declare them.</li>
+<li><strong><code>accepts_untrusted_tools</code></strong> — the opposite exemption: tools explicitly cleared to
+  act on untrusted content regardless of taint state. Declare a tool here only when
+  it is genuinely safe to drive from untrusted input, for example a summarizer with
+  no side effect — it is never refused for acting on untrusted content once listed.</li>
+<li><strong><code>description_pins</code></strong> — tool name to the sha256 hex digest of its approved
+  description text (W1). A tool whose live description hash no longer matches its
+  pin is refused at call time — the deterministic answer to a rug-pull, where a
+  tool's description changes after a user already approved it.
+  <code>verdict_read_tools</code> is separate from every control. It names tools whose calls the
+  effect verdict counts as reads, not as an action the attack could carry out, for a
+  reader whose name it cannot tell from an action (<code>web_search</code>, <code>fetch_note</code>). No
+  result is quarantined and no call is confirmed differently. Use it instead of
+  <code>read_tool_names</code> for this: declaring <code>read_tool_names</code> narrows W2's quarantine to the
+  tools you list. See <a href="../reading-results/">Reading results</a> for the verdict's read rule.</li>
+<li><strong><code>calibration</code></strong> (<code>CalibrationSettings</code>) — whether the calibration controls (real
+  writes proving your <code>effect_probe</code> can see a change) may run; see
+  <a href="#calibration">Calibration</a> above.</li>
+<li><strong>Server-layer build</strong> (<code>vulnerable_launch</code>, <code>control_env</code>) — optional: drive the
+  differential against <em>your own</em> unguarded build and per-control env toggles, instead of
+  the adapter-boundary shim. Use these when you can launch genuinely (un)guarded variants
+  of the server. See <a href="../concepts/">Concepts</a> and <a href="../security/">Security</a>.</li>
+<li><strong><code>framework</code></strong> — optional, free-form (e.g. <code>langchain</code>, <code>crewai</code>, <code>llamaindex</code>).
+  Entirely a labelling hint: it names your agent framework in a structural
+  recommendation's code sketch alongside the language Mylonite already infers from
+  <code>command</code> (<code>python</code>/<code>uv</code>/<code>uvx</code>/<code>poetry</code> → Python, <code>node</code>/<code>npx</code>/<code>bun</code>/<code>tsx</code> → TypeScript,
+  else generic pseudocode). Never validated against a fixed list, and never used to
+  fabricate that framework's actual hook/decorator syntax — Mylonite points you at where
+  to wire a sketch in, not at invented API details it hasn't verified.</li>
+</ul>
+</li>
+</ul>
+<blockquote>
+<p><strong>Windows SQLite footgun.</strong> If <code>env</code> points at a SQLite DB by URL, note that
+<code>sqlite:////c/Users/...</code> (4 slashes) and <code>sqlite:///C:/Users/...</code> (3 slashes) open
+<em>different</em> databases on Windows — a silent way to scan an empty DB and wrongly
+conclude the agent is clean. Prefer an absolute path and verify it opened.</p>
+<p><strong><code>env</code> is an overlay, not your full environment.</strong> A stdio target's spawned process
+does <strong>not</strong> inherit Mylonite's own environment wholesale — Mylonite routinely spawns
+deliberately-vulnerable and third-party servers, and handing every one of them
+Mylonite's own provider API keys / <code>GITHUB_TOKEN</code> / other credentials would be a real
+leak. Mylonite itself forwards only a small, fixed allowlist of OS-plumbing variables
+(<code>PATH</code>, <code>HOME</code>, <code>USERPROFILE</code>, <code>SYSTEMROOT</code>, <code>TEMP</code>, <code>TMP</code>, <code>TMPDIR</code>, <code>LANG</code>, <code>LC_ALL</code>,
+<code>PATHEXT</code>, <code>COMSPEC</code>, <code>APPDATA</code>, <code>LOCALAPPDATA</code>) plus whatever you declare in <code>env:</code>.
+The underlying MCP SDK then adds its own platform-default set on top of that — it
+always does this, independently of Mylonite — pulling a few more OS-plumbing
+variables (<code>HOMEDRIVE</code>, <code>HOMEPATH</code>, <code>PROCESSOR_ARCHITECTURE</code>, <code>SYSTEMDRIVE</code>,
+<code>USERNAME</code> on Windows; <code>LOGNAME</code>, <code>SHELL</code>, <code>TERM</code>, <code>USER</code> on POSIX) from Mylonite's own
+process into the child. None of these carry secrets, so the leak this allowlist
+guards against (provider API keys, <code>GITHUB_TOKEN</code>, other credentials) still can't
+happen, but "nothing else" is the aspiration, not the literal child environment. If
+your server needs some OTHER parent-env variable, declare it explicitly here — the
+SDK default set is fixed and not configurable. The most common case: an
+<code>npx</code>/<code>uvx</code>-launched target running behind a corporate TLS-inspecting proxy needs its
+proxy/CA variables declared explicitly too, e.g. <code>env: { HTTPS_PROXY: "...",
+HTTP_PROXY: "...", NO_PROXY: "...", NODE_EXTRA_CA_CERTS: "...", SSL_CERT_FILE: "..." }</code>
+— without them the launch can fail with a TLS/registry error that looks unrelated to
+Mylonite.</p>
+</blockquote>
+<h2 id="coverage-a-declared-class-your-surface-cant-run-is-refused-not-silently-dropped">Coverage: a declared class your surface can't run is refused, not silently dropped<a class="headerlink" href="#coverage-a-declared-class-your-surface-cant-run-is-refused-not-silently-dropped" title="Permanent link">&para;</a></h2>
+<p>Declaring a class in <code>weakness_classes</code> is a promise: Mylonite tests it. Before either
+<code>scan</code> or <code>gate</code> spends an LLM call, it checks whether your target's introspected tool
+surface can actually produce even one seed for every declared class. A class can be
+covered by more than one mechanism — the bundled catalogue seed for a literally-named
+tool (<code>send_email</code>, <code>web_fetch</code>), or a seed synthesised for your target's OWN tool
+(classifier-found, e.g. <code>execute_sql</code>, or declared via <code>control_config.egress_tools</code> /
+<code>control_config.consequential_tools</code>) — so W3/W4 refuse only when NEITHER exists: no
+egress-shaped tool at all for W3, no consequential tool at all for W4. W2 refuses only
+when there is no store-and-recall pair AND no content-processing tool. If a class would
+run zero seeds either way, the run refuses outright and names each one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>error: [MYL-PRE-001] this target declares weakness class(es) its tool surface cannot
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>cover at all (every attempt for them would never run):
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>  W2: this server has no tool that can store content for a later recall — remove W2
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>      from weakness_classes, or declare a seed_arm
+</code></pre></div>
+<p>The fix is always one of the two named (<a href="../reason-codes/#myl-pre-001">MYL-PRE-001</a>): drop the class from <code>weakness_classes</code>, or
+declare the missing piece (a <code>seed_arm</code> for W2, <code>control_config.egress_tools</code> for W3,
+<code>control_config.consequential_tools</code> for W4). <code>mylonite scan --scaffold</code> only ever
+suggests a class it already confirmed is coverable for the surface it just introspected,
+so a fresh scaffold's target.yaml never trips this refusal on first run.</p>
+<p><code>--dry-run</code> downgrades the refusal to a warning — a dry run only enumerates seeds, so it
+stays informative instead of blocking. A dry run wires a missing <code>seed_arm</code> the same way a
+real scan does (detection reads the tool list; no LLM call), so its preview of W2 matches
+what the scan will run. A W2 class you've explicitly accepted running
+uncovered via <code>--allow-no-seed-arm</code> is not re-blocked here — the run proceeds, its
+kitchen-sink seeds are still scheduled, and each one hits the target and reports
+<code>skipped_no_seed_arm</code> (NOT TESTED), which forces the scan's overall coverage to PARTIAL
+rather than letting it read as a trustworthy clean pass. <code>gate</code> gets the same refusal,
+with no <code>--dry-run</code> equivalent to downgrade it and no <code>--allow-no-seed-arm</code> flag of its
+own — an uncoverable class always refuses there. <code>gate</code> also has no <code>seed_arm</code>
+auto-wire: a W2 target that <code>scan</code> would wire for you refuses in <code>gate</code>. Run <code>scan</code> on it
+first; when it finds a store-and-recall pair it writes the wired target to
+<code>.mylonite/scans/&lt;timestamp&gt;/target.yaml</code>, and that file is the one to pass to <code>gate</code>.</p>
+<p>The check has to launch the server to see its tools, and it fails closed: if the server
+crashes, or can't be described within 20 seconds (or the target's <code>timeout_s</code>, when that
+is larger), the run stops with exit 2 and says which, rather than starting without
+knowing whether every declared class can run. After a timeout, re-run once (a first
+<code>npx</code>/<code>uvx</code> download is cached after that) or raise <code>timeout_s</code>; after a crash, check the
+target file's <code>command:</code> and <code>args:</code>. The scan engine repeats
+the same rule on the description it actually runs against: a declared class with no seed
+at all aborts the scan before any payload is sent (<code>no_payloads</code>, exit 2), so a skipped or
+failed pre-flight can never let the other classes read as a clean pass.</p>
+<p>When the refused class came from <code>--weakness-class</code> rather than the file, the message
+says so and points at the flag, since editing <code>weakness_classes</code> would not help.</p>
+<p>This is a different check from <code>mylonite check</code> (hidden and experimental — see
+<a href="../experimental/">docs/experimental.md</a>), which needs a live tool surface and no
+LLM call: it diffs <code>seed_arm.tool</code>, <code>effect_probe.verify_tool</code> and every
+<code>control_config</code> tool-name field against the server's described tools, and flags any
+name that isn't there — a typo, or a stale name copied from another target file. Those
+findings count toward <code>check --enforce</code>, the same as an unapproved sink.</p>
+<h2 id="effect-attribution">Effect attribution<a class="headerlink" href="#effect-attribution" title="Permanent link">&para;</a></h2>
+<p>An <code>effect_probe</code> reads the verify tool before the agent runs (this attempt's own
+baseline) and again after. An effect confirms <code>"true"</code> for <strong>this</strong> attempt only when
+both hold: the marker is new since that baseline (with no marker, the verify output
+itself changed), and one of this attempt's own calls that reached the server without an
+error carries the marker or is the scenario's declared consequential or egress tool. A
+call whose reply says "queued" or carries a task handle still counts, because a queue can
+send at once. Everything else the probe sees
+falls into one of:</p>
+<ul>
+<li><strong><code>"false"</code></strong> — the attempt did nothing, or a linked call reported success while the
+  marker never appeared, before or after (a silent drop).</li>
+<li><strong><code>"deferred"</code></strong> — a deferral marker (e.g. <code>"queued for approval"</code>) grew: the target's
+  own state names a held/queued action. A defended app, not an unproven one — distinct
+  from <code>"false"</code> because it rests on something the target actually said, not just on
+  nothing having changed.</li>
+<li><strong><code>"unattributed"</code></strong> — the state change, or its absence, could not be tied to this
+  attempt: an idempotent write, a delete, a bounded output window that slid, or a change
+  another attempt made while this one only made an unrelated call.</li>
+<li><strong><code>"errored"</code></strong> — the baseline read, or the post-drive read itself, raised or timed
+  out, or the post-drive read answered with its own <code>isError</code>. None of these mean the
+  attempt was resisted: the probe never actually checked, so it can neither confirm nor
+  clear anything the agent did.</li>
+</ul>
+<p>None of these values decides an attempt alone. The tool-call trace says what the agent
+did. The probe can raise a linked dispatch to <code>effect-confirmed</code>, or clear it, only
+after calibration has proven the probe works. See <a href="../reading-results/#how-an-mcp-attempt-is-decided">How an MCP attempt is
+decided</a>.</p>
+<p>This is what stops a target whose state outlives one run — a file, a database, a memory
+store, any remote server — from letting an earlier attempt's write count as this
+attempt's proof. A concurrent attempt's write can't be told apart this way, so on a
+target with an <code>effect_probe</code>, Mylonite runs attempts one at a time. It costs one extra read-only call to the verify tool per attempt
+with a declared <code>verify_tool</code>; nothing sent to the model changes.</p>
+<h2 id="secrets-stay-out-of-the-file">Secrets stay out of the file<a class="headerlink" href="#secrets-stay-out-of-the-file" title="Permanent link">&para;</a></h2>
+<p>Every target file Mylonite writes keeps the secrets in <code>headers</code>, <code>request.headers</code> and
+<code>env</code> out of it: <code>scan --scaffold</code>, the copy saved in the scan directory, the copy
+<code>generate</code> puts next to the test and the copy <code>gate</code> commits. Each value in <code>headers</code>
+and <code>request.headers</code>, and each secret-looking <code>env</code> value (a key such as <code>GITHUB_TOKEN</code>
+or <code>DB_PASSWORD</code>, or a value shaped like an API key), becomes a <code>${MYLONITE_TARGET_...}</code>
+placeholder. Plain values such as <code>LOG_LEVEL: debug</code> stay as written.</p>
+<p>A credential in the query string of <code>url</code> or <code>request.url</code> is masked too. A parameter
+with a credential name (<code>api_token</code>, <code>access_key</code>, <code>client_secret</code>, <code>key</code>, <code>sig</code>, ...),
+or whose value is shaped like an API key, becomes <code>***REDACTED***</code>. Other parameters
+stay as written, and so do a few named exceptions that are request options, such as
+<code>max_tokens</code>, <code>page_token</code> and <code>sort_key</code>. <code>url</code> reads no
+variables, so a masked copy won't connect until you put the value back; the note the
+writing command prints names each masked field, such as <code>request.url</code>. Keep copies
+runnable by sending the token in <code>headers:</code> as a <code>${VAR}</code> reference instead.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="nt">env</span><span class="p">:</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">GITHUB_TOKEN</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${MYLONITE_TARGET_ENV_GITHUB_TOKEN}</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">LOG_LEVEL</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">debug</span>
+</code></pre></div>
+<p>Whichever command wrote the file prints the variables to set, with the key each one
+stands for. The secret itself is never printed:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>note: secrets in headers and env were kept out of app.yaml. It reads them from these environment variables; set them before you use the file:
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>  bash/zsh:
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>    export MYLONITE_TARGET_ENV_GITHUB_TOKEN='&lt;your GITHUB_TOKEN&gt;'
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>  PowerShell:
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>    $env:MYLONITE_TARGET_ENV_GITHUB_TOKEN = '&lt;your GITHUB_TOKEN&gt;'
+</code></pre></div>
+<p>The bundled <code>mcp:github</code> family (no target file needed) uses the same <code>${VAR}</code>
+expansion for its own fixed variable, <code>GITHUB_PERSONAL_ACCESS_TOKEN</code> — see
+<a href="../test-your-app/#bundled-targets">Bundled targets</a>.</p>
+<p>Set each variable to the real value in the shell that runs Mylonite, then use the file:</p>
+<p>On Linux / macOS (bash):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">MYLONITE_TARGET_ENV_GITHUB_TOKEN</span><span class="o">=</span><span class="s1">'ghp_...'</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>mylonite<span class="w"> </span>scan<span class="w"> </span>--target-file<span class="w"> </span>app.yaml<span class="w"> </span>--dry-run
+</code></pre></div>
+<p>On Windows (PowerShell):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nv">$env:MYLONITE_TARGET_ENV_GITHUB_TOKEN</span> <span class="p">=</span> <span class="s1">'ghp_...'</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">mylonite</span> <span class="n">scan</span> <span class="p">-</span><span class="n">-target</span><span class="o">-file</span> <span class="n">app</span><span class="p">.</span><span class="n">yaml</span> <span class="p">-</span><span class="n">-dry-run</span>
+</code></pre></div>
+<p>To keep the values in a <code>.env</code> file instead, load it into your shell first
+(<code>set -a; . ./.env; set +a</code> in bash or zsh). Mylonite's own <code>--env-file</code> flag reads only
+recognised provider credential/config names (see <a href="../choose-a-model/">Choose a model</a>) —
+not a <code>MYLONITE_TARGET_...</code> placeholder or a user-named token, both of which it drops
+with a warning rather than loading. In CI, set the target's own variables as secrets on
+the job.</p>
+<p>If a variable is unset, loading the file stops with exit code 2 and names the variable,
+the key it holds and the <code>export</code> line to run. Mylonite never starts your server with an
+empty credential. Placeholders are expanded only inside <code>env</code>, <code>headers</code> and
+<code>request.headers</code>, so <code>${...}</code> text elsewhere in the file, such as a template-injection
+payload in <code>system_prompt</code>, is left alone.</p>
+<h2 id="the-boundary-controls-fail-closed">The boundary controls fail closed<a class="headerlink" href="#the-boundary-controls-fail-closed" title="Permanent link">&para;</a></h2>
+<p>The four boundary controls the adapter-boundary shim synthesizes (W1 description
+pinning, W2 information-flow control, W3 egress allowlist, W4 confirm-gate) each
+answer one question about a tool call: <em>does this control apply to this tool?</em> For
+W2/W3/W4, that answer is decided in this order:</p>
+<ol>
+<li>An explicit list in <code>control_config</code> (<code>read_tool_names</code> / <code>egress_tools</code> /
+   <code>consequential_tools</code>) — you said so, and this is always the final word for that
+   tool name.</li>
+<li>The tool's own <strong>MCP annotations</strong> (<code>readOnlyHint</code>, <code>destructiveHint</code>,
+   <code>openWorldHint</code>) — the protocol's standard risk vocabulary. Ranked below your
+   declaration on purpose: the MCP spec is explicit that annotations are hints from a
+   possibly-untrusted server.</li>
+<li>Structural evidence: W3 only — a call with a URL, a bare hostname, or an IP-literal
+   argument is treated as egress regardless of what the tool is called.</li>
+<li>A name heuristic — whole-word tokens like <code>read</code>/<code>fetch</code>/<code>list</code> for W2,
+   <code>fetch</code>/<code>http</code>/<code>web</code> for W3 egress, <code>send</code>/<code>delete</code>/<code>pay</code> for W4 consequential
+   actions. A convenience, never the gate. Matching is on <strong>tokens</strong>, not substrings,
+   so <code>get_postal_code</code> is not treated as consequential because of <code>post</code>.</li>
+<li><strong>Otherwise: guarded.</strong> A tool that matches none of the above is still treated as
+   in-scope for the control.</li>
+</ol>
+<p>This means a W2/W3/W4 tool your target exposes that doesn't match any hint, and isn't
+declared, is now guarded by default instead of silently passed through unguarded:
+- W3 — an egress call with no destination Mylonite can identify is <strong>refused</strong>:
+  <code>refused: ... no destination argument could be identified</code>.
+- W4 — an unconfirmed consequential call requires <strong>out-of-band approval</strong>. The
+  decision is made by an <code>ApprovalPolicy</code> supplied by whoever runs the scan (or a
+  human), <em>not</em> by the model: an earlier design refused the call and asked the model
+  to re-supply a server-minted <code>confirm_token</code>, which no model completed in practice
+  because the advertised tool schema never declared that argument.
+- W2 — content read into the session carries <strong>two independent labels</strong>, following
+  <a href="https://arxiv.org/abs/2505.23643">FIDES</a>:
+    - <code>integrity</code> — a read tool's result is <em>untrusted</em>. Untrusted context is refused
+      only at <strong>destructive</strong> sinks (delete/overwrite/transfer, or anything the server
+      marks <code>destructiveHint</code>), where an injection-driven call is damage in itself.
+    - <code>confidentiality</code> — <em>public</em> by default; <em>private</em> for a tool you list in
+      <code>private_tools</code>. A public-facing sink refuses to run in a private context, which
+      is what stops exfiltration.</p>
+<p>Labels combine most-restrictive-wins across the session. Crucially, ordinary
+  read-then-act work is <strong>not</strong> blocked: reading a document and emailing a summary is
+  allowed, while reading a <em>secret</em> and emailing it is refused. (An earlier
+  single-axis version tainted the whole session on any read and refused every
+  subsequent sink call, so "the guard resisted" was true by construction.)</p>
+<p>The first time this fires for a given tool name in a run, Mylonite logs a warning
+(once per tool name) with the exact <code>control_config</code> snippet to paste to classify it
+precisely — either to confirm it with the right list/argument name, or (by omitting it
+from a <em>non-empty</em> declared list) to exempt it entirely. W1 has no comparable warning:
+it sanitizes every tool description unconditionally, regardless of name, so there is
+nothing to classify or exempt.</p>
+<p>If your custom target has a read/egress/consequential tool with an unusual name (e.g.
+<code>materialise_record</code>, <code>dispatch_widget</code>, <code>relay_message</code>), declare it up front so the
+run doesn't spend a cycle discovering it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nt">control_config</span><span class="p">:</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="w">  </span><span class="nt">read_tool_names</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">materialise_record</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="w">  </span><span class="nt">egress_tools</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">dispatch_widget</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="w">  </span><span class="nt">egress_url_param</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">destination</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="w">  </span><span class="nt">consequential_tools</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">relay_message</span><span class="p p-Indicator">]</span>
+</code></pre></div>
+<h2 id="path-containment">Path containment<a class="headerlink" href="#path-containment" title="Permanent link">&para;</a></h2>
+<p><code>target.yaml</code> is a shareable, PR-editable document — a teammate can mail you one, or
+a pull request can edit the one already in your repo. Two fields resolve to a real
+filesystem path, and both are contained, not just shape-checked:</p>
+<ul>
+<li><strong><code>system_prompt_file</code></strong> resolves relative to the directory the target YAML itself
+  lives in (its <code>source_dir</code>), never the current working directory of whoever runs
+  <code>mylonite</code>. A value like <code>../../../../etc/passwd</code> — or a symlink that points outside
+  that directory — is refused before the file is ever opened; it cannot be used to read
+  an arbitrary file off your disk. See <code>mylonite._paths.resolve_contained</code>.</li>
+<li><strong><code>mcp:filesystem:&lt;scope&gt;</code></strong> (the sandbox path handed to
+  <code>@modelcontextprotocol/server-filesystem</code>) must be a real, existing, non-root
+  directory: <code>/</code>, <code>C:\</code>, your home directory, and any path containing <code>..</code> are all
+  rejected outright, and the directory must actually exist. Set <code>MYLONITE_FS_SCOPE_ROOT</code>
+  to an absolute directory to additionally require every filesystem scope stay inside
+  that root — an opt-in hard ceiling for CI/shared-runner environments that launch
+  scans against target files they didn't author.</li>
+</ul>
+<p>Both checks fail loud (<code>PathEscapesBase</code> / <code>InvalidTargetScope</code>) rather than silently
+reading or sandboxing the wrong thing. See <code>SECURITY.md</code> for what a <code>target.yaml</code> you
+received from someone else can and cannot do.</p>
+<h3 id="command-and-args-resolve-against-the-target-files-own-directory"><code>command</code> and <code>args</code> resolve against the target file's own directory<a class="headerlink" href="#command-and-args-resolve-against-the-target-files-own-directory" title="Permanent link">&para;</a></h3>
+<p>A relative <code>command</code> or a relative path inside <code>args</code> resolves against the directory the
+target YAML itself lives in — the same base <code>system_prompt_file</code> above uses — not against
+whatever directory the process running <code>mylonite</code> happens to be in. A target file with
+<code>command: python</code>, <code>args: [server.py]</code> finds <code>server.py</code> next to the YAML wherever you run
+<code>mylonite</code> from: <code>mylonite scan --target-file configs/app.yaml</code> from the repo root, where
+<code>server.py</code> sits next to <code>configs/app.yaml</code>, works the same as running it from inside
+<code>configs/</code>. The same file now behaves identically for <code>mylonite scan</code> run from your
+project root and <code>mylonite gate</code> run from CI's checkout root
+(<a href="https://github.com/Abidemialade/mylonite/issues/187">#187</a>).</p>
+<p>An <strong>inline</strong> <code>mcp:custom</code> target built from <code>--command</code>/<code>--arg</code> flags (no <code>--target-file</code>,
+so no YAML to anchor to) keeps resolving <code>command</code>/<code>args</code> against your shell's current
+directory, exactly as before.</p>
+<p>The scaffold's relative-path check — a SQLite database path that looks relative (<code>#18</code> — a
+relative SQLite path can silently open a different or empty database on Windows) — now also
+looks at <code>args</code>, not only <code>env</code>, and now runs every time a target file loads, not only when
+<code>scan --scaffold</code> first writes one: <code>check</code>, <code>scan</code>, <code>generate</code>, <code>validate</code> and <code>gate</code> warn
+against a file you hand-edited too. It is always a warning, never a refusal.</p>
+<p><code>scan --scaffold</code> also writes <code>system_prompt_file</code> relative to the <em>scaffolded file's own</em>
+directory, the same base the loader uses, instead of the directory <code>--scaffold</code> ran from —
+so the two never disagree, even when <code>--scaffold</code> and the target YAML end up in different
+places. A <code>system_prompt_file</code> has to stay inside the target file's own directory either
+way (see <a href="#path-containment">Path containment</a> above); when the path given on the command
+line can't be reached from there at all, the scaffold says so immediately instead of
+leaving you to find out only when a later <code>scan</code> fails to load it.</p>
+<h3 id="a-credential-in-args-is-written-in-plain-text">A credential in <code>args</code> is written in plain text<a class="headerlink" href="#a-credential-in-args-is-written-in-plain-text" title="Permanent link">&para;</a></h3>
+<p><code>headers</code>, <code>request.headers</code> and <code>env</code> are the only credential-bearing fields Mylonite
+masks (see <a href="#secrets-stay-out-of-the-file">Secrets stay out of the file</a> below) — <code>args</code> is
+an unstructured string list with no key name to mask by, so a value embedded there (for
+example <code>args: [--api-key, sk-live-...]</code>, or a URL with <code>?access_token=...</code>) survives
+byte-for-byte into every copy Mylonite writes: the scan directory, <code>generate</code>'s co-located
+copy, and the <code>gate</code> PR. <code>scan --scaffold</code>'s own "secrets were kept out of the file"
+message does not mention this, so the message can read as a stronger guarantee than it
+is. See <a href="https://github.com/Abidemialade/mylonite/blob/main/SECURITY.md"><code>SECURITY.md</code></a>
+for the full policy. If a target's launch needs a credential, pass it via <code>env</code> (most
+subprocess CLIs also accept the value from an environment variable) or, for a remote
+server, <code>headers</code> — never as a literal <code>args</code> entry.</p>
+<h3 id="-env-command-and-arg-are-ignored-once-target-file-is-set"><code>--env</code>, <code>--command</code> and <code>--arg</code> are ignored once <code>--target-file</code> is set<a class="headerlink" href="#-env-command-and-arg-are-ignored-once-target-file-is-set" title="Permanent link">&para;</a></h3>
+<p><code>scan</code>, <code>generate</code>, <code>validate</code> and <code>gate</code> all accept <code>--target-file</code> alongside the
+<code>mcp:custom</code> flags (<code>--command</code>, <code>--arg</code>, <code>--env</code>) that build an inline target spec, but
+once <code>--target-file</code> is given, those three flags are silently ignored rather than
+rejected — the file's own <code>command</code>/<code>args</code>/<code>env</code> always win, with no warning that the
+flags you passed had no effect. Put any launch override in the target file's <code>env:</code>
+block instead of trying to pass it on the command line alongside <code>--target-file</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
