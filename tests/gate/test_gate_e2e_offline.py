@@ -154,7 +154,7 @@ def _reference_scan_report(variant: str, acompletion: Any) -> Any:
 def test_gate_planner_that_declines_direct_requests_is_not_clean(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The F9 false clean: a planner that never calls the tool a direct seed's
+    """The declined-request false clean: a planner that never calls the tool a direct seed's
     OWN user message asks for measured the planner declining, not the target
     resisting. `gate` must read that as incomplete coverage, not a clean pass.
 
