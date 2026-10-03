@@ -1,8 +1,11 @@
 # 7. Re-prove
 
 You've shipped a fix for the finding [step 6](6-commit-the-gate.md)
-committed. One local command answers the question the rest of this journey
-has been building toward: **did it actually work?**
+committed. Mylonite doesn't write that fix — it's a change in your own
+app's code or configuration that closes the gap the gate test proved. This
+page starts from there, once it's shipped. One local command answers the
+question the rest of this journey has been building toward: **did it
+actually work?**
 
 ```bash
 MYLONITE_LIVE_TARGET=1 pytest .mylonite/gate/
@@ -24,25 +27,34 @@ network access to both the provider and your server — the same
 prerequisites `gate` itself needed. It is not a replay of recorded fixtures;
 each run genuinely re-attacks your current build.
 
+This spends too: the global `--max-llm-requests N` / `MYLONITE_MAX_LLM_REQUESTS=N`
+ceiling from [step 4](4-find.md) still applies here, since the redrive goes
+through the same LLM call path.
+
 The committed test also carries `@testkit.pending_fix(...)`, and that
 decorator is what makes the same command answer "fired before, resisted
 after" at each stage, with no separate "before" run to remember to keep
 around:
 
 1. **Before the fix.** The attack still lands, so the check fails — reported
-   as an expected failure (`xfail`), and the run stays **green**. This is
-   the "fired before" half: a check that could pass today would be lying
-   about what the pending test is still proving.
+   as an expected failure (`xfail`), and the run stays **green**: `pytest`
+   itself exits `0`. This is the "fired before" half: a check that could
+   pass today would be lying about what the pending test is still proving.
+   This is the stage this step's one command reaches if you run it before
+   shipping anything — exit `0` is expected here too, which is why a bare
+   exit-code check alone can't tell "pending, as committed" apart from
+   "actually fixed" (read the printed text either way).
 2. **After the fix.** The attack is stopped on every re-drive attempt (3 by
    default — `MYLONITE_REDRIVE_ATTEMPTS=1` makes this a cheaper,
-   single-attempt check), so the check now **fails on purpose**, printing:
-   *The attack did not land on any re-drive attempt this run. If your fix
-   has landed, remove the `@testkit.pending_fix(...)` line above this
-   test.* That failure, on the same command, is the "resisted after" half —
-   read as a prompt to act, not a broken build.
+   single-attempt check), so the check now **fails on purpose** — a real
+   `pytest` failure, exit `1` — printing: *The attack did not land on any
+   re-drive attempt this run. If your fix has landed, remove the
+   `@testkit.pending_fix(...)` line above this test.* This is the exit code
+   this step expects right after you ship a real fix: `1` here is the
+   "resisted after" half, read as a prompt to act, not a broken build.
 3. **Marker removed.** Delete the `@testkit.pending_fix(...)` line. The test
-   is now a plain regression gate: green while the fix holds, red if the
-   attack ever works again — the thing CI depends on from here on.
+   is now a plain regression gate: exit `0` while the fix holds, exit `1` if
+   the attack ever works again — the thing CI depends on from here on.
 
 `pytest -m mylonite_pending_fix` lists every test on your branch still
 waiting on step 3. The full mechanism — including what counts as "fixed"

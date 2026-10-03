@@ -14,6 +14,10 @@ pip install "mylonite[demo]"
 mylonite demo
 ```
 
+GitHub-hosted runners (`ubuntu-latest`, `windows-latest`) don't preinstall
+`uv`. In CI, or anywhere you can't install it first, use the `pip install`
+path above — it needs only Python.
+
 Either way this replays a recorded scan against the bundled practice
 app's vulnerable and guarded builds — in-process, no network ports opened —
 and prints the differential: what got through on the unsafe build, what was
@@ -23,6 +27,12 @@ and the comparison itself are the real ones. The output names which model
 produced the recording and when. `demo --live` makes the same run with a
 live model you choose (see [step 2](2-choose-a-model.md)) instead of the
 recording.
+
+**Exit codes.** `0` on success, whether replayed or `--live`. Replay's only
+failure is `2` (a missing or corrupt fixture — reinstall `mylonite`, or add
+`--live`). `--live` adds the two codes every other live command uses: `4` if
+no provider is reachable, `3` if it runs out of budget before both builds
+finish.
 
 ## What to look for
 

@@ -23,10 +23,66 @@ reference](../target-file.md) for every field it fills in and
 [Test your own app](../test-your-app.md) for the end-to-end walkthrough this
 page summarises.
 
+`--arg` is repeatable, in order, for a server that takes more than one
+argument.
+
+**Exit codes.** `--scaffold` exits `0` once it writes the file, `2` on any
+config/usage error — a missing `--command`, an `app.yaml` that already
+exists without `--force`, or a server that fails to launch or speak MCP.
+There's no `3`/`4` here: scaffold makes no LLM call, so there's no budget or
+provider to exceed.
+
 The [first-proof bar](index.md#the-bar-this-is-measured-against) starts
 counting here, against a server that's already running — not against the
 time it takes your own server to start (a database to seed, a slow cold
 boot).
+
+## Two worked examples
+
+No server of your own handy yet? Point the same command at either of these
+— both are real, independently runnable MCP servers, not Mylonite's own
+reference app.
+
+**The official MCP memory server** (`@modelcontextprotocol/server-memory`,
+Node — needs [Node.js](https://nodejs.org/) installed so `npx` is on your
+`PATH`). It keeps a knowledge graph and stores whatever it's told to; no
+install step beyond Node, since `npx` fetches the package on first run. The
+two blocks below are the same command for two different shells, not two
+different setups — use whichever shell you're actually typing into: the bash
+block for a bash/zsh/Git-Bash/WSL/Linux/macOS shell (Git Bash provides a
+writable `/tmp` even on Windows), the PowerShell block only if you're
+invoking `mylonite` straight from PowerShell or `cmd.exe`:
+
+```bash
+mylonite scan --command npx --arg "-y" --arg "@modelcontextprotocol/server-memory" \
+  --env "MEMORY_FILE_PATH=/tmp/mylonite-memory.json" \
+  --scaffold app.yaml --scope server-memory
+```
+
+```powershell
+mylonite scan --command npx --arg "-y" --arg "@modelcontextprotocol/server-memory" `
+  --env "MEMORY_FILE_PATH=$env:TEMP\mylonite-memory.json" `
+  --scaffold app.yaml --scope server-memory
+```
+
+**Mylonite's own reference app** (`mcp-kitchen-sink`, Python — the deliberately
+vulnerable target [step 1](1-try.md) replays; this launches it as a real
+stdio subprocess instead). Install its `mcp` extra from PyPI, then point at
+the console script it ships — no arguments needed, same command on both
+platforms:
+
+```bash
+pip install "mcp-kitchen-sink[mcp]"
+mylonite scan --command mcp-kitchen-sink-vulnerable --scaffold app.yaml --scope kitchen-sink
+```
+
+```powershell
+pip install "mcp-kitchen-sink[mcp]"
+mylonite scan --command mcp-kitchen-sink-vulnerable --scaffold app.yaml --scope kitchen-sink
+```
+
+Either way, `--authorize` on every later step must equal the `--scope` value
+you scaffolded with (`server-memory` or `kitchen-sink` above).
 
 ## Next
 
