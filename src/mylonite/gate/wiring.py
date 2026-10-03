@@ -602,6 +602,33 @@ def make_open_pr_fn(
         # a caller that doesn't pass it.
         dirs = kept_dirs if kept_dirs is not None else [out_dir] * len(findings)
 
+        # #224: a bundled MCP target (mcp:<family>[:scope]) has no target.yaml
+        # of its own -- only a --target-file run ever writes one (below). The
+        # emitted test's co-located `target.yaml` requirement (see
+        # generate.wiring's own is_custom/candidate check, which only WARNS)
+        # would then fail every time CI re-drives it, with no clearer symptom
+        # than "command not found" or a launch error. Refuse before writing
+        # anything, rather than publish a workflow/PR that can never pass --
+        # the simpler of the issue's two fix directions; writing the bundled
+        # spec out as a target.yaml is a separate, larger change.
+        if (workflows or open_pr) and target_file is None:
+            missing = [
+                exploit
+                for (exploit, _report), finding_dir in zip(findings, dirs, strict=True)
+                if not exploit.target_id.startswith("reference:")
+                and not (finding_dir / "target.yaml").exists()
+            ]
+            if missing:
+                raise pr_mod.GatePrError(
+                    f"gate: {missing[0].target_id!r} has no target.yaml to commit "
+                    "alongside the gating PR/workflow (no --target-file was given, "
+                    "and none is already co-located with the kept finding). A "
+                    "bundled MCP target has no file of its own -- run `mylonite "
+                    "scan --scaffold` first to write one, then re-run `gate "
+                    "--target-file <path>`. Drop --open-pr/--workflows to write "
+                    "artifacts locally without one instead."
+                )
+
         # Write the redacted target BEFORE rendering the workflows, and read
         # its `${MYLONITE_TARGET_...}` variables back from what was actually
         # written -- rendering the workflows first left the scaffolded
@@ -609,6 +636,7 @@ def make_open_pr_fn(
         # with nothing to substitute, and `load_target_file` then raised on
         # the undefined variables in CI.
         env_refs: list[tuple[str, str]] = []
+        target_command: str | None = None
         if target_file is not None:
             # A gate PR is pushed to the operator's remote — never carry a live
             # credential from request.headers/env into that history (DCR-0019).
@@ -625,6 +653,13 @@ def make_open_pr_fn(
             for finding_dir in dirs:
                 if finding_dir != out_dir:
                     (finding_dir / "target.yaml").write_text(written_text, encoding="utf-8")
+            # P3/P5: the target's own launch command decides whether the
+            # scaffolded workflow needs a Node/uv setup step — already
+            # validated by this same gate run (generate.wiring's build_target_spec
+            # call), so this re-load can't fail on a target that got this far.
+            from mylonite.plugins._mcp.target_file import load_target_file
+
+            target_command = load_target_file(target_file).command
         wf_files = (
             write_workflows(
                 repo_root,
@@ -632,6 +667,7 @@ def make_open_pr_fn(
                 runs_on=runs_on,
                 gate_dir=out_dir,
                 target_env_vars=[var for var, _key in env_refs],
+                target_command=target_command,
             )
             if workflows
             else []
