@@ -18,6 +18,7 @@ reads as a gate test.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
@@ -57,19 +58,30 @@ def _stamp_for(source: str) -> str:
     return _STAMP.replace("\n", "\r\n") if "\r\n" in source else _STAMP
 
 
+_BOM: Final = "\ufeff"
+
+
+def _split_bom(source: str) -> tuple[str, str]:
+    """``(bom, rest)``: the header goes after a byte-order mark, never before it."""
+    return (_BOM, source[1:]) if source.startswith(_BOM) else ("", source)
+
+
 def is_unvalidated(source: str) -> bool:
     """True when ``source`` starts with the unvalidated header."""
-    return source.startswith(UNVALIDATED_MARKER)
+    return _split_bom(source)[1].startswith(UNVALIDATED_MARKER)
 
 
 def stamp_unvalidated(source: str) -> str:
     """``source`` with the unvalidated header in front (once)."""
-    return source if is_unvalidated(source) else _stamp_for(source) + source
+    if is_unvalidated(source):
+        return source
+    bom, rest = _split_bom(source)
+    return bom + _stamp_for(source) + rest
 
 
 def has_exact_stamp(source: str) -> bool:
     """True when ``source`` starts with the header exactly as Mylonite wrote it."""
-    return source.startswith(_stamp_for(source))
+    return _split_bom(source)[1].startswith(_stamp_for(source))
 
 
 def strip_unvalidated(source: str) -> str:
@@ -82,14 +94,15 @@ def strip_unvalidated(source: str) -> str:
     """
     if not is_unvalidated(source):
         return source
+    bom, rest = _split_bom(source)
     stamp = _stamp_for(source)
-    if source.startswith(stamp):
-        return source[len(stamp) :]
-    lines = source.splitlines(keepends=True)
+    if rest.startswith(stamp):
+        return bom + rest[len(stamp) :]
+    lines = rest.splitlines(keepends=True)
     end = 1
     while end < len(lines) and lines[end].rstrip("\r\n") in _STAMP_LINES:
         end += 1
-    return "".join(lines[end:])
+    return bom + "".join(lines[end:])
 
 
 def _read_report(report_path: Path) -> ValidationReport | None:
@@ -131,8 +144,18 @@ def _same_target(folder_target: Path, target_file: Path | None, report_mtime: in
     try:
         wanted = redact_target_yaml(target_file.read_text(encoding="utf-8"))
         return wanted == folder_target.read_text(encoding="utf-8")
-    except OSError:
+    except (OSError, ValueError):  # unreadable or not UTF-8: stamp; generate reports it
         return False
+
+
+def _is_reference_target(exploit_path: Path) -> bool:
+    """True when the exploit targets a bundled reference build (no target.yaml needed)."""
+    try:
+        data = json.loads(exploit_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    target_id = data.get("target_id") if isinstance(data, dict) else None
+    return isinstance(target_id, str) and target_id.startswith("reference:")
 
 
 def _proving_test(
@@ -143,8 +166,8 @@ def _proving_test(
     ``None`` (so the new test is stamped) when the folder holds more than one
     exploit, ``--prove-control`` asks for a different test than the one proved,
     the exploit or the folder's ``target.yaml`` is newer than the report
-    (replaced after the keep), ``--target-file`` names a different target, or
-    the test the report names is gone.
+    (replaced after the keep), ``--target-file`` names a different target, a
+    custom target's ``target.yaml`` is gone, or the test the report names is gone.
     """
     folder = exploit_path.parent
     report_path = folder / "validation_report.json"
@@ -154,8 +177,11 @@ def _proving_test(
     report_mtime = report_path.stat().st_mtime_ns
     if exploit_path.stat().st_mtime_ns > report_mtime:
         return None
-    if not _same_target(folder / "target.yaml", target_file, report_mtime):
+    folder_target = folder / "target.yaml"
+    if not _same_target(folder_target, target_file, report_mtime):
         return None
+    if not folder_target.is_file() and not _is_reference_target(exploit_path):
+        return None  # a custom target's target.yaml was removed after the keep
     test_path = folder / Path(report.test_filename).name
     return test_path if test_path.is_file() else None
 
