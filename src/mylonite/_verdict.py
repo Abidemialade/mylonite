@@ -25,9 +25,9 @@ leg is the evidence, not the build.
 
 from __future__ import annotations
 
-from typing import Final, Literal
+from typing import Any, Final, Literal
 
-from mylonite.contracts import ValidationReport
+from mylonite.contracts import ExploitRecord, ValidationReport
 
 VerdictLabel = Literal["KEPT", "STABLE, NOT PROVEN", "REJECTED"]
 
@@ -133,11 +133,26 @@ def verdict_reason(report: ValidationReport) -> str:
     return "the attack reproduced, but " + "; and ".join(gaps) + "."
 
 
-def next_step_after_keep(report: ValidationReport) -> str:
+def next_step_after_keep(
+    report: ValidationReport,
+    exploit: ExploitRecord | None = None,
+    *,
+    target: Any | None = None,
+) -> str:
     """The next step ``validate`` prints for a kept report.
 
     The exit code is 0 either way, but an unproven keep is not presented as a
-    finished gate: committing its test gates reproduction only."""
+    finished gate: committing its test gates reproduction only.
+
+    ``exploit`` (A3/SV1): when given and the verdict is a plain ``KEPT`` —
+    never for a STABLE, NOT PROVEN or black-box keep, which already say
+    nothing was proven — this is preceded by the same severity, impact and
+    suggested-fix lines the gate PR body opens with
+    (:func:`mylonite.gate.mitigation.finding_block`, reused here rather than
+    re-derived), so the fix under a kept finding is never exclusive to the
+    gate PR. Imported lazily: ``gate.mitigation`` imports this module at
+    load time, so importing it back at module scope here would be circular.
+    """
     if is_black_box_keep(report):
         return (
             "Next: committing this test gates reproduction only, on the LLM judge's word; "
@@ -148,7 +163,13 @@ def next_step_after_keep(report: ValidationReport) -> str:
             "Next: committing this test gates reproduction only; add a guarded side "
             "or an effect_probe and re-run `mylonite validate` to prove a safeguard."
         )
-    return (
+    next_line = (
         "Next: commit the generated test + fixtures so CI can gate on it "
         "(see `mylonite gate --help`)."
     )
+    if exploit is None:
+        return next_line
+    from mylonite.gate.mitigation import finding_block
+
+    block = "\n".join(finding_block(exploit, report, target=target))
+    return f"{block}\n\n{next_line}"

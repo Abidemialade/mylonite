@@ -3045,6 +3045,35 @@ def test_validate_kept_true_exit_0(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert "KEPT" in result.output
 
 
+def test_validate_kept_shows_severity_impact_and_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A3/SV1: a plain KEPT verdict shows severity, the deterministic impact
+    sentence and the suggested fix -- the same facts the gate PR body opens
+    with, reused (mylonite.gate.mitigation.finding_block) rather than
+    re-derived -- before the "Next: commit" line."""
+    from mylonite.gate.mitigation import impact_sentence
+
+    out_dir = _generated_dir(tmp_path)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
+    monkeypatch.setattr("mylonite.cli._provider_preflight", lambda *_, **__: True)
+    _patch_validator(monkeypatch, kept=True, mutation_score=1.0)
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    # _sample_exploit()'s pattern_id is a bundled W2 seed.
+    assert "Severity: High" in result.output
+    assert f"Impact: {impact_sentence('W2')}" in result.output
+    assert (
+        "Suggested fix (Mylonite proves and gates the weakness; it does not patch your code):"
+        in result.output
+    )
+    severity_at = result.output.index("Severity: High")
+    fix_at = result.output.index("Suggested fix")
+    next_at = result.output.index("Next: commit the generated test")
+    assert severity_at < fix_at < next_at
+
+
 def test_validate_stable_not_proven_does_not_say_commit_to_gate(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3060,6 +3089,10 @@ def test_validate_stable_not_proven_does_not_say_commit_to_gate(
     assert "STABLE, NOT PROVEN" in result.output
     assert "so CI can gate on it" not in result.output
     assert "gates reproduction only" in result.output
+    # A3: the severity/impact/fix block is shown only under a plain KEPT --
+    # an unproven keep already says nothing was proven, so it stays bare.
+    assert "Severity:" not in result.output
+    assert "Suggested fix" not in result.output
 
 
 def test_validate_kept_removes_the_unvalidated_header(
@@ -3501,6 +3534,108 @@ def test_scan_custom_persists_target_yaml_and_next_hint(
         yaml.safe_load(source)
     )
     assert "Next: mylonite generate" in result.output
+    target_registry.clear_runtime_targets()
+
+
+def test_scan_shows_severity_impact_and_fix_sorted_most_severe_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A3/SV1: every FOUND exploit gets a severity/impact/suggested-fix block
+    -- the same facts (reused, not re-derived) the gate PR body opens with --
+    and a scan with more than one finding lists the most severe one first,
+    before the "Next: mylonite generate" hint."""
+    _skip_uncoverable_refusal(monkeypatch)
+    from mylonite.contracts._types import AdapterResponse, ComplianceTags, ExploitRecord, Payload
+    from mylonite.gate.mitigation import impact_sentence
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.scan.engine import ScanEngine
+
+    target_registry.clear_runtime_targets()
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    def _exploit(pattern_id: str, weakness: str) -> ExploitRecord:
+        return ExploitRecord(
+            target_id="mcp:myapp",
+            pattern_id=pattern_id,
+            payload=Payload(
+                pattern_id=pattern_id,
+                channel="user-message",
+                body="x",
+                metadata={"weakness": weakness},
+            ),
+            response=AdapterResponse(payload_pattern_id=pattern_id, raw_response="", tool_calls=[]),
+            success_reason="test",
+            compliance=ComplianceTags(),
+        )
+
+    # "a-w1-low" sorts first by pattern_id but is W1 (Medium); it must not
+    # lead the scan output ahead of the W4 (High) finding.
+    low = _exploit("a-w1-low", "W1")
+    high = _exploit("b-w4-high", "W4")
+
+    async def _fake_run(self: Any) -> Any:  # patched: no subprocess / no LLM
+        from mylonite.contracts._types import ScanAttempt, ScanReport
+        from mylonite.scan.engine import ScanResult
+
+        attempts = [
+            ScanAttempt(
+                seed_id=e.pattern_id,
+                pattern_id=e.pattern_id,
+                outcome="finding",
+                verdict_mechanism="predicate",
+                verdict_reason="synthetic verdict",
+            )
+            for e in (low, high)
+        ]
+        report = ScanReport(
+            target_id="mcp:myapp",
+            attack_modules=["mylonite.prompt-injection"],
+            provider="anthropic",
+            model="synthetic-model",
+            elapsed_seconds=0.1,
+            attempts=attempts,
+            findings_count=2,
+            aborted=None,
+            single_run=True,
+            mylonite_version="0.0.0-test",
+        )
+        return ScanResult(report=report, exploits=[low, high])
+
+    monkeypatch.setattr(ScanEngine, "run", _fake_run)
+
+    source = _MINIMAL_TARGET_YAML
+    target_yaml = tmp_path / "open.yaml"
+    target_yaml.write_text(source, encoding="utf-8")
+    scan_root = tmp_path / "scans"
+
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--target-file",
+            str(target_yaml),
+            "--authorize",
+            "myapp",
+            "--output-dir",
+            str(scan_root),
+            "--allow-no-seed-arm",
+        ],
+    )
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    out = result.output
+    assert "Finding: b-w4-high" in out
+    assert "Finding: a-w1-low" in out
+    assert "Severity: High" in out
+    assert "Severity: Medium" in out
+    assert f"Impact: {impact_sentence('W4')}" in out
+    assert f"Impact: {impact_sentence('W1')}" in out
+    assert (
+        "Suggested fix (Mylonite proves and gates the weakness; it does not patch your code):"
+        in out
+    )
+    # Most severe first, both blocks before the "Next:" hint.
+    assert out.index("Finding: b-w4-high") < out.index("Finding: a-w1-low")
+    assert out.index("Finding: a-w1-low") < out.index("Next: mylonite generate")
     target_registry.clear_runtime_targets()
 
 

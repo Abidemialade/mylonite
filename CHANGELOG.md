@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Your own safeguard stopped it" is still said only when the differential
   measured a real `control_env`, never Mylonite's boundary stand-in.
 
+- **`scan` and `validate` show the fix too, not only the gate PR.** `scan`
+  now prints a severity, a one-sentence impact statement and a suggested
+  fix under every finding, most severe first, before the
+  `Next: mylonite generate` hint. `validate` prints the same block under a
+  plain KEPT verdict, before the "Next: commit" line (an unproven keep still
+  shows none of it, since nothing was proven yet). Both reuse the exact
+  functions the gate PR body uses — the fix is always a suggestion, and
+  neither surface says "your safeguard stopped it".
+
 ### Fixed
 
 - **The gate PR's kill matrix no longer shows an untested seed as a miss.**

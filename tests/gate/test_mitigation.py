@@ -684,3 +684,55 @@ def test_severity_sort_kept_handles_empty_input():
     from mylonite.gate.mitigation import severity_sort_kept
 
     assert severity_sort_kept([], []) == ([], [])
+
+
+def test_sort_exploits_by_severity_orders_most_severe_first():
+    """SV1: the same most-severe-first order `scan`'s end-of-run findings
+    use, for a plain list of exploits (no ValidationReport yet)."""
+    from mylonite.gate.mitigation import sort_exploits_by_severity
+
+    w1 = _exploit_for("tool-description-summary-smuggle")  # Medium
+    w4 = _exploit_for("excessive-agency-send-email-direct-unconfirmed")  # High
+    assert [e.pattern_id for e in sort_exploits_by_severity([w1, w4])] == [
+        "excessive-agency-send-email-direct-unconfirmed",
+        "tool-description-summary-smuggle",
+    ]
+
+
+def test_finding_block_is_verdict_free_severity_impact_then_suggested_fix():
+    """A3: the same facts the gate PR body opens with (severity, the
+    deterministic impact sentence, then recommend()'s suggestion), reused
+    rather than re-derived, for a surface (scan, with no ValidationReport
+    yet) that has no KEPT/REJECTED verdict to show at all."""
+    from mylonite.gate.mitigation import finding_block, impact_sentence
+
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")  # W4
+    lines = finding_block(ex)
+    block = "\n".join(lines)
+    assert lines[0] == "Severity: High"
+    assert lines[1] == f"Impact: {impact_sentence('W4')}"
+    assert (
+        "Suggested fix (Mylonite proves and gates the weakness; it does not patch your code):"
+        in block
+    )
+    assert "confirmation_required" in block  # the W4 recommend() sketch, rendered
+    # Never overclaims a fix, and never claims the safeguard without a
+    # proven control_env (finding_block never calls recommend() with a
+    # KEPT control-efficacy report, so that claim text cannot appear here).
+    assert "we fixed" not in block.lower()
+    assert "carries the security" not in block
+    severity_at = block.index("Severity:")
+    impact_at = block.index("Impact:")
+    fix_at = block.index("Suggested fix")
+    assert severity_at < impact_at < fix_at
+
+
+def test_finding_block_degrades_gracefully_with_no_report_or_target():
+    """``recommend()`` already handles ``report=None``/``target=None``; this
+    just confirms ``finding_block`` passes both straight through instead of
+    requiring either."""
+    from mylonite.gate.mitigation import finding_block
+
+    ex = _exploit_for("indirect-injection-note-body-direct")
+    lines = finding_block(ex, None, target=None)
+    assert lines  # never raises, never empty

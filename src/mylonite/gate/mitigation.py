@@ -155,6 +155,16 @@ def severity_for_exploit(exploit: ExploitRecord) -> str:
     return severity_for(weakness_class_for(exploit), effect)
 
 
+def _severity_sort_key(exploit: ExploitRecord) -> tuple[int, str]:
+    """Most-severe-first, tie-broken by ``pattern_id`` — the single ordering
+    every severity-sorted surface (the gate PR body, `scan`'s end-of-run
+    findings) uses, so they agree on which finding is "first"."""
+    return (
+        _SEVERITY_RANK.get(severity_for_exploit(exploit), len(_SEVERITY_RANK)),
+        exploit.pattern_id,
+    )
+
+
 def severity_sort_kept(
     kept: list[tuple[ExploitRecord, ValidationReport]], kept_dirs: list[Path]
 ) -> tuple[list[tuple[ExploitRecord, ValidationReport]], list[Path]]:
@@ -169,13 +179,55 @@ def severity_sort_kept(
         return kept, kept_dirs
     paired = sorted(
         zip(kept, kept_dirs, strict=True),
-        key=lambda item: (
-            _SEVERITY_RANK.get(severity_for_exploit(item[0][0]), len(_SEVERITY_RANK)),
-            item[0][0].pattern_id,
-        ),
+        key=lambda item: _severity_sort_key(item[0][0]),
     )
     new_kept, new_dirs = zip(*paired, strict=True)
     return list(new_kept), list(new_dirs)
+
+
+def sort_exploits_by_severity(exploits: list[ExploitRecord]) -> list[ExploitRecord]:
+    """The same most-severe-first order as :func:`severity_sort_kept`, for a
+    plain list of exploits (`scan`'s end-of-run findings, SV1)."""
+    return sorted(exploits, key=_severity_sort_key)
+
+
+def finding_block(
+    exploit: ExploitRecord,
+    report: ValidationReport | None = None,
+    *,
+    target: Any | None = None,
+) -> list[str]:
+    """Severity, impact and suggested-fix lines for one finding (A3/SV1).
+
+    The same facts the gate PR body opens with — reused here, not
+    re-derived, so every surface that shows a finding states them the same
+    way: `scan`'s end-of-run summary (one block per FOUND exploit, no
+    ``report`` yet) and `validate`'s verdict panel (under a KEPT verdict
+    only, with its ``report``). ``recommend()`` already degrades gracefully
+    with ``report=None`` — see its own ``report is not None`` checks — so
+    this never needs a special case for the scan-time call.
+
+    The fix is always introduced as a *suggestion*: "Mylonite proves and
+    gates the weakness; it does not patch your code" is the same disclaimer
+    the PR body states, so neither surface ever reads as "Mylonite fixed
+    this". ``render_markdown(rec)`` states what to implement (confidence,
+    evidence, the tiered prescriptions); it never claims "your own
+    safeguard stops it" either way — that claim is made only in the gate PR
+    body's control-efficacy framing, gated there on a proven server-layer
+    ``control_env``, and is not repeated here.
+    """
+    wc = weakness_class_for(exploit)
+    from mylonite.gate.recommend import recommend, render_markdown
+
+    rec = recommend(exploit, report, target=target)
+    return [
+        f"Severity: {severity_for_exploit(exploit)}",
+        f"Impact: {impact_sentence(wc)}",
+        "",
+        "Suggested fix (Mylonite proves and gates the weakness; it does not patch your code):",
+        "",
+        render_markdown(rec).rstrip(),
+    ]
 
 
 def _own_seed_pattern_id(report: ValidationReport) -> str | None:
