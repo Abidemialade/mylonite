@@ -219,7 +219,7 @@ def _emit_generated_test(
     validated_target_files: set[Path] | None = None,
     scan_report_cache: dict[Path, dict[str, str] | None] | None = None,
     redacted_target_cache: dict[Path, str] | None = None,
-    unvalidated: bool = False,
+    proven_by: Path | None = None,
 ) -> None:
     """Emit one regression test (+ co-located exploit/fixtures/target) for one
     exploit, echoing the per-test ``Wrote …`` lines and next-step guidance.
@@ -248,12 +248,17 @@ def _emit_generated_test(
     call reads+redacts independently — the original, always-correct
     behaviour.
 
-    ``unvalidated`` puts the UNVALIDATED header on the test and prints a line
-    saying so (see :mod:`mylonite.generate.provenance`).
+    The test gets the UNVALIDATED header, and a line saying so is printed,
+    unless ``proven_by`` names a KEPT test it matches exactly (see
+    :mod:`mylonite.generate.provenance`).
     """
     from mylonite._redaction import redact_target_yaml, redact_value
     from mylonite._target_env import echo_env_notice
-    from mylonite.generate.provenance import announce_unvalidated, stamp_unvalidated
+    from mylonite.generate.provenance import (
+        announce_unvalidated,
+        source_is_proven,
+        stamp_unvalidated,
+    )
     from mylonite.plugins._reference.reference_pytest_generator import (
         ReferencePytestGenerator,
     )
@@ -274,6 +279,8 @@ def _emit_generated_test(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     test_path = out_dir / generated.filename
+    # Compared before the write: regenerating in place overwrites the proven test.
+    unvalidated = not source_is_proven(generated.source, proven_by)
     source = stamp_unvalidated(generated.source) if unvalidated else generated.source
     test_path.write_text(source, encoding="utf-8")
 
