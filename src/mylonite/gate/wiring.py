@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import hashlib
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
@@ -567,6 +568,54 @@ def _gate_branch(findings: list[tuple[Any, Any]]) -> str:
     return f"mylonite/gate-{digest}"
 
 
+def _safe_to_stage_pre_existing_target(path: Path, repo_root: Path) -> bool:
+    """Whether a ``target.yaml`` this run did NOT just write (``target_file``
+    was ``None``) is safe to ``git add`` anyway.
+
+    Two independent reasons either one is enough:
+
+    1. **Already tracked by git** (``git ls-files``) -- it was already
+       committed, by a previous ``--target-file`` run or by hand, so
+       staging it again (even unchanged) adds nothing new to history.
+    2. **Passes the redaction check** -- re-running it through
+       :func:`mylonite._redaction.redact_target_yaml` changes nothing,
+       meaning it holds no raw secret-shaped value redaction would have
+       masked.
+
+    Without this, a hand-placed or stale file this run never touched --
+    possibly describing a different target, or holding a literal header
+    value nobody ever redacted -- would be committed and pushed in the
+    gating PR right alongside the kept finding.
+    """
+    if not path.is_file():
+        return False
+    try:
+        rel = path.resolve().relative_to(repo_root.resolve())
+    except ValueError:
+        rel = path
+    # `--error-unmatch` exits non-zero both outside a repository (no
+    # `.git` to find) and inside one for a path git has never tracked --
+    # either way, a clean, expected "not tracked" signal, never raised.
+    tracked = (
+        _run_git(["git", "ls-files", "--error-unmatch", str(rel)], cwd=str(repo_root)).returncode
+        == 0
+    )
+    if tracked:
+        return True
+    from mylonite._redaction import redact_target_yaml
+
+    text = path.read_text(encoding="utf-8")
+    return redact_target_yaml(text) == text
+
+
+def _run_git(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+    """Indirection (mirrors ``gate.pr._default_run``) so the literal
+    ``["git", ...]`` the caller passes never appears directly at a
+    ``subprocess.run`` call site -- ruff's S607 flags a literal partial
+    executable path there, but not one reached through a parameter."""
+    return subprocess.run(cmd, text=True, capture_output=True, check=False, **kwargs)  # noqa: S603
+
+
 def make_open_pr_fn(
     *,
     model: str,
@@ -730,12 +779,19 @@ def make_open_pr_fn(
             # the #224 refusal above treats that pre-existing file as
             # satisfying the co-location requirement, so a PR that ships
             # without staging it would leave the committed test unable to
-            # load one on a fresh checkout.
+            # load one on a fresh checkout. Only when it's safe to (see
+            # _safe_to_stage_pre_existing_target): a hand-placed or stale
+            # file this run never wrote could hold a secret that was never
+            # redacted, or describe a different target entirely.
             finding_target = finding_dir / "target.yaml"
-            if target_file is not None or finding_target.exists():
+            if target_file is not None or _safe_to_stage_pre_existing_target(
+                finding_target, repo_root
+            ):
                 add_paths.append(finding_target)
         root_target = out_dir / "target.yaml"
-        if (target_file is not None or root_target.exists()) and out_dir not in dirs:
+        if out_dir not in dirs and (
+            target_file is not None or _safe_to_stage_pre_existing_target(root_target, repo_root)
+        ):
             add_paths.append(root_target)
         # The reference-target differential leg records each finding's replay
         # fixtures in that finding's own directory -- committed so the emitted
