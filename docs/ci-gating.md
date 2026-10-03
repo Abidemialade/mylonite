@@ -134,9 +134,14 @@ is in [Reading the results](reading-results.md#exit-codes-for-ci).
 run. A kept finding now exits `9`. A CI script that treated `0` as "gated" needs
 to check for `9`; one that treats any non-zero exit as a failure now fails when
 `gate` keeps a finding, which is the point of a gate. The scaffolded discovery
-workflow and the gate action run `gate --open-pr` as their last step and don't
-yet read these codes, so for now a night that keeps a finding (`9`) or finds only
-candidates (`10`) shows as a failed run.
+workflow and `gate-action` read these codes: `0`, `9` and `10` are a *successful*
+run (a `::notice::` for `0`/`9`, a `::warning::` for `10` naming how to prove each
+candidate), and only `1`-`8` fails the job — an infrastructure problem (config,
+budget, provider, the PR step itself), not a result of the scan. `gate-action`
+also exposes the raw `exit-code` and a `result` output (`clean`/`kept`/
+`candidates`), and an opt-in `fail-on` input (`none` by default, or `kept`/
+`candidates`) for a caller that wants a red signal on a specific result — see
+[The reusable Action](#the-reusable-action).
 
 A finding that was generated and validated but not kept is still named in
 `PR_BODY.md`, with the reason, under "Other findings (not gated)" — it isn't
@@ -486,11 +491,13 @@ satisfy automatically but a local or non-GitHub run must provide itself:
   command uses the same base. Running from a feature branch? Pass `--base`:
   the gate branch is cut from the commit you have checked out, so against the
   default branch the PR also carries your feature branch's unmerged commits.
-- **A fresh gate branch.** If the gate branch (`mylonite/gate-…`) already
-  exists from an earlier run, `git checkout -b` fails and `gate` stops on exit
-  code `8`. It leaves that branch and its commits alone; it deletes a branch
-  on rollback only when this run created it. Push or delete the old branch,
-  then re-run.
+- **A gate branch from an earlier run.** If the gate branch (`mylonite/gate-…`)
+  already exists locally — a re-run that re-found the same finding, most often
+  on a self-hosted runner with a persistent workspace — `gate` does not touch
+  it: no checkout, no new commit, no delete. It reports the finding as already
+  proposed and exits `9`, the same as a freshly kept one; see that branch (or
+  its PR) instead of opening a new one. A `checkout -b` failure for any OTHER
+  reason (a locked ref, a hook) still stops `gate` on exit code `8`.
 - **`.mylonite/gate/` (or your configured `--out`) must actually be
   committed.** `gate` writes the test, the exploit, and your `target.yaml`
   there, then commits and pushes them as part of the PR — but if *your* repo's
@@ -527,6 +534,29 @@ The action also configures a git identity before it calls `mylonite gate
 --open-pr` (a hosted runner has none by default, so the commit would
 otherwise fail), and sets up Node or installs `uv` on its own when your
 target file's `command:` needs one.
+
+**The action's own step succeeds on `gate`'s exit `0`, `9` and `10`** — the
+same mapping the scaffolded discovery workflow uses — and fails only on `1`-`8`
+(an infrastructure problem). It prints a `::notice::` for a clean or kept run
+and a `::warning::` for a candidates-only one, and sets two outputs: `exit-code`
+(the raw code) and `result` (`clean`, `kept` or `candidates`; unset on an
+infrastructure failure, which fails the step directly). A caller that wants a
+red check on a specific result reads the output —
+`steps.<id>.outputs.result == 'kept'` — or sets the optional `fail-on` input
+(`none` by default, or `kept`/`candidates`) to have the step itself exit
+non-zero on that result:
+
+```yaml
+- uses: Abidemialade/mylonite/gate-action@v0.11.0
+  id: gate
+  with:
+    target-file: .mylonite/gate/target.yaml
+    authorize: ${{ vars.MYLONITE_AUTHORIZE }}
+    model: anthropic/claude-haiku-4-5
+    api-key: ${{ secrets.MYLONITE_API_KEY }}
+    fail-on: kept   # turn this job red when a proven finding was gated
+- run: echo "${{ steps.gate.outputs.result }}"
+```
 
 **The tag is the release.** The action lives in this repository
 (`gate-action/action.yml`), so every Mylonite release tag `vX.Y.Z` is also an

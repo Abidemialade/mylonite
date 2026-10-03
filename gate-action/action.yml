@@ -33,6 +33,17 @@ inputs:
     description: "Python to set up."
     required: false
     default: "3.12"
+  fail-on:
+    description: "Fail this step's own exit code when `mylonite gate` lands on a given result: 'none' (default -- always exits 0, except on an infrastructure failure, which always fails), 'kept' (a proven finding was gated) or 'candidates' (only unproven candidates were found)."
+    required: false
+    default: "none"
+outputs:
+  exit-code:
+    description: "mylonite gate's raw exit code: 0 (clean), 9 (kept), 10 (candidates), or another code on an infrastructure failure (config, budget, provider, the PR step itself)."
+    value: ${{ steps.gate.outputs.exit-code }}
+  result:
+    description: "clean (exit 0, nothing found), kept (exit 9, a proven finding was gated) or candidates (exit 10, only unproven candidates were found -- nothing committed). Unset when the step failed on an infrastructure code."
+    value: ${{ steps.gate.outputs.result }}
 runs:
   using: "composite"
   steps:
@@ -197,6 +208,7 @@ runs:
         git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git config user.name "github-actions[bot]"
     - name: Run mylonite gate
+      id: gate
       shell: bash
       # Inputs travel through env, never through `${{ }}` inside `run:`. GitHub
       # substitutes those expressions textually BEFORE bash parses the script,
@@ -222,6 +234,7 @@ runs:
         # environment, never turned into a CLI flag or interpolated into
         # `run:`. Empty (the default) when the input isn't set.
         MYLONITE_LLM_HEADERS: ${{ inputs.llm-headers }}
+        FAIL_ON: ${{ inputs.fail-on }}
       run: |
         # #198: both `mode` and `runs-on` are deprecated. This action never
         # passes --workflows, so --runs-on has nothing to scaffold with, and
@@ -260,4 +273,29 @@ runs:
         if [ "$OPEN_PR" = "true" ]; then
           args+=(--open-pr)
         fi
+        # mylonite gate's own exit code separates a clean run (0), a kept
+        # finding (9, including one already proposed by an earlier run) and
+        # unproven candidates only (10) from an infrastructure failure (any
+        # other code -- config, budget, provider, the PR step itself). The
+        # first three are a successful RUN of this action; only the caller,
+        # via fail-on, decides whether any of them should fail the STEP.
+        set +e
         mylonite gate "${args[@]}"
+        code=$?
+        set -e
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        case "$code" in
+          0)  result=clean ;;
+          9)  result=kept ;;
+          10) result=candidates ;;
+          *)  exit "$code" ;;
+        esac
+        echo "result=$result" >> "$GITHUB_OUTPUT"
+        case "$result" in
+          clean)      echo "::notice::Mylonite: nothing found." ;;
+          kept)       echo "::notice::Mylonite kept a proven finding; see the gate pull request." ;;
+          candidates) echo "::warning::Mylonite found unproven candidates (not committed); the log says how to prove each." ;;
+        esac
+        if [ "$FAIL_ON" = "$result" ]; then
+          exit "$code"
+        fi

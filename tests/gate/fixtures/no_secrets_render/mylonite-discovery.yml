@@ -44,7 +44,10 @@ jobs:
         # it, so a value holding a quote or `;` would become shell syntax.
         # The credential/model env vars are scoped to this one step -- the
         # step that actually makes a live model call and opens the PR --
-        # not the whole job.
+        # not the whole job. `shell: bash` is explicit, not the job default,
+        # because this job's `runs-on:` above can be a self-hosted Windows
+        # label, whose default shell is pwsh.
+        shell: bash
         env:
           MYLONITE_AUTHORIZE: ${{ vars.MYLONITE_AUTHORIZE }}
           MYLONITE_MODEL: ${{ vars.MYLONITE_MODEL || 'anthropic/claude-haiku-4-5-20251001' }}
@@ -54,6 +57,15 @@ jobs:
           # Optional: extra LLM request headers (e.g. a workspace id), as
           # NAME=VALUE pairs. Empty when the repository secret isn't set.
           MYLONITE_LLM_HEADERS: ${{ secrets.MYLONITE_LLM_HEADERS }}
-        run: >
-          mylonite gate --target-file .mylonite/gate/target.yaml
-          --authorize "$MYLONITE_AUTHORIZE" --open-pr
+        run: |
+          set +e
+          mylonite gate --target-file .mylonite/gate/target.yaml \
+            --authorize "$MYLONITE_AUTHORIZE" --open-pr
+          code=$?
+          set -e
+          case "$code" in
+            0)  echo "::notice::Mylonite discovery: nothing found." ;;
+            9)  echo "::notice::Mylonite kept a proven finding; see the gate pull request." ;;
+            10) echo "::warning::Mylonite found unproven candidates (not committed); the log says how to prove each." ;;
+            *)  exit "$code" ;;
+          esac
