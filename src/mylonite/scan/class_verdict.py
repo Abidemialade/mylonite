@@ -74,7 +74,8 @@ class CalibrationSummary:
     plugin layer.
     """
 
-    #: ``certified`` | ``failed`` | ``no_probe`` | ``not_authorized``.
+    #: ``certified`` | ``confirm_only`` | ``failed`` | ``no_probe`` | ``not_authorized``.
+    #: Only ``certified`` is calibrated.
     status: str
     #: The probe's own code (``MYL-INC-002`` to ``MYL-INC-005``), if any.
     reason_code: str | None

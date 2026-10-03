@@ -251,6 +251,31 @@ Select the record by a fixed value, or use a verify tool that takes no arguments
 Calibration is recorded per launch, so a result from the default launch is not reused
 for a `vulnerable_launch` twin.
 
+On a memory-style store (a knowledge graph, a key-value store) the probe reads back the
+one record `seed_arm` writes, so no consequential tool's control write can show up in it.
+When no consequential tool passes, and the probe neither changed on its own nor failed to
+read, calibration checks the probe on that record instead, in this order:
+
+1. Two verify reads before the plant, with no change between them.
+2. The plant through `seed_arm`, carrying a fresh `myl-cal-` token. It is the seed
+   control's own plant, so one record serves both. When the seed control has no recall
+   tool and never plants, this check plants the record itself, which leaves one more
+   `myl-cal-` record behind.
+3. A verify read that must show the planted token.
+4. A second verify read that must not grow and must still show the token. An error or
+   empty reply fails here.
+5. A read through the same verify tool with a different, never-planted token in place of
+   each string value of `verify_args_template`. It must succeed and return a non-empty
+   reply without that token. An error, an empty reply or a raised call fails, and so does
+   a reply that echoes the token. A `verify_args_template` with no string value fails,
+   because no token can be sent.
+
+Passing it reads `calibration: confirm_only [MYL-INC-003]`, never
+`certified`: the probe can confirm a planted record appears; it cannot clear a call that
+changed nothing, because the plant shows only that it sees writes to the record it reads.
+The earlier code stays on the result, and a scan treats `confirm_only` exactly like a
+probe that failed calibration, so no verdict changes.
+
 ## never_call: tools Mylonite must never call
 
 A live run drives your real tools, so point it at a test instance or a seeded copy, never

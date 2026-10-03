@@ -420,7 +420,10 @@ Each class reads one of four ways:
 
 The codes in brackets are [reason codes](reason-codes.md). The probe's calibration code
 appears on a class with an attempt that ran uncalibrated, and the seed control's code on
-W2. Calibration codes never change a status. The same summary is written to
+W2. `confirm_only` means the probe passed only on the record the seed plants (a
+memory-style store, see [Calibration](target-file.md#calibration)): it can confirm a
+planted record appears; it cannot clear a call that changed nothing. Every attempt reads
+it as uncalibrated, the same as `failed`, and keeps the code in brackets. Calibration codes never change a status. The same summary is written to
 `verdicts.json` in the scan directory: each class with its status, codes, proof levels,
 counts and findings by [evidence tier](#evidence-tier), plus the calibration certificate. `mylonite report` on that directory reads
 it back and prints the same block. Scans with no trace outcome (reference and REST
