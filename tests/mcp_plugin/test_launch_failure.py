@@ -17,7 +17,7 @@ import pytest
 from mylonite.contracts import Payload
 from mylonite.plugins._mcp._session_adapter import MCPSessionAdapterBase
 from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter
-from mylonite.scan._types import AdapterInvocationSkipped
+from mylonite.scan._types import AdapterDescribeFailed, AdapterInvocationSkipped
 
 
 class _MissingBinarySessionCM:
@@ -66,6 +66,21 @@ async def test_launch_failure_reason_names_the_cause_and_the_command(
     assert excinfo.value.attempt_metadata["reason"] == "launch_failure"
 
 
+def _custom_stdio_adapter(
+    args: list[str], monkeypatch: pytest.MonkeyPatch, *, family: str = "custom-launch-secret"
+) -> MCPStdioAdapter:
+    """A custom stdio target with the given ``args:``, wired to fail its launch."""
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+
+    target_registry.clear_runtime_targets()
+    tf = TargetFile(family=family, command="python", args=args)
+    target_registry.register_target(build_target_spec(tf))
+    adapter = MCPStdioAdapter(family=family, scope=None)
+    monkeypatch.setattr(adapter, "_session", lambda **_: _MissingBinarySessionCM())
+    return adapter
+
+
 @pytest.mark.asyncio
 async def test_launch_failure_does_not_leak_a_credential_from_the_launch_args(
     monkeypatch: pytest.MonkeyPatch,
@@ -76,24 +91,65 @@ async def test_launch_failure_does_not_leak_a_credential_from_the_launch_args(
     shape `npx some-server --api-key=...`), which is why the gate redacts
     target.yaml before committing it (DCR-0019). The remote adapter's own
     `_describe_data_sources` is deliberately host-only for the same reason --
-    "never the full URL with query/credentials/userinfo". The stdio one returns
-    the command and args verbatim, so the string must be redacted before it is
-    spliced into a message that lands in ScanAttempt.verdict_reason and, from
-    there, in scan_report.json and a committed gate branch.
+    "never the full URL with query/credentials/userinfo". The stdio launch-
+    failure message never prints an arg value at all (#195 review finding --
+    see `MCPStdioAdapter._launch_failure_summary`): only the executable and
+    an argument count reach `ScanAttempt.verdict_reason` and, from there,
+    `scan_report.json` and a committed gate branch.
     """
     secret = "sk-ant-" + "f" * 40  # pragma: allowlist secret — a fake, all-f test fixture
-    adapter = MCPStdioAdapter(family="fetch", scope=None)
-    monkeypatch.setattr(adapter, "_session", lambda **_: _MissingBinarySessionCM())
-    monkeypatch.setattr(
-        adapter,
-        "_describe_data_sources",
-        lambda: [f"MCP stdio: npx some-mcp-server --api-key={secret}"],
-    )
+    try:
+        adapter = _custom_stdio_adapter(["some-mcp-server", f"--api-key={secret}"], monkeypatch)
 
-    with pytest.raises(AdapterInvocationSkipped) as excinfo:
-        await adapter.invoke(Payload(pattern_id="p", channel="tool-result", body="x"))
+        with pytest.raises(AdapterInvocationSkipped) as excinfo:
+            await adapter.invoke(Payload(pattern_id="p", channel="tool-result", body="x"))
 
-    reason = excinfo.value.reason
-    assert secret not in reason
-    # ...while the part that answers "which command?" survives.
-    assert "npx some-mcp-server" in reason
+        reason = excinfo.value.reason
+        assert secret not in reason
+        assert "some-mcp-server" not in reason  # no arg text at all, not even a bare name
+        # ...while the part that answers "which command?" survives.
+        assert "python" in reason
+    finally:
+        from mylonite.plugins._mcp import target_registry
+
+        target_registry.clear_runtime_targets()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(["--password", "hunter2verylongfakepassword"], id="two-argv-items"),
+        pytest.param(["--password=hunter2verylongfakepassword"], id="equals-joined"),
+    ],
+)
+async def test_launch_failure_withholds_a_credential_with_no_provider_shape(
+    args: list[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#195 review finding: `redact()` only catches a `key=value`/`key: value`
+    shape or a provider-shaped token (`sk-…`, `AKIA…`, ...) -- a credential
+    passed as TWO separate argv items (no separator at all) with an
+    unremarkable value slips through `redact()` untouched; even the
+    `=`-joined form has no provider-recognisable shape here. Both the
+    pre-existing `invoke()` launch-failure path and the new `describe()` one
+    must withhold it on both forms, because neither relies on `redact()`
+    catching the value -- neither ever prints an arg value at all.
+    """
+    fake_value = "hunter2verylongfakepassword"  # pragma: allowlist secret
+    adapter = _custom_stdio_adapter(args, monkeypatch)
+    try:
+        with pytest.raises(AdapterInvocationSkipped) as invoke_excinfo:
+            await adapter.invoke(Payload(pattern_id="p", channel="tool-result", body="x"))
+        invoke_reason = invoke_excinfo.value.reason
+        assert fake_value not in invoke_reason
+        assert "--password" not in invoke_reason
+
+        with pytest.raises(AdapterDescribeFailed) as describe_excinfo:
+            await adapter.describe()
+        describe_message = str(describe_excinfo.value)
+        assert fake_value not in describe_message
+        assert "--password" not in describe_message
+    finally:
+        from mylonite.plugins._mcp import target_registry
+
+        target_registry.clear_runtime_targets()

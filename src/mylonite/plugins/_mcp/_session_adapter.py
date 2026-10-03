@@ -466,6 +466,25 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
     def _describe_data_sources(self) -> list[str]:
         return [f"MCP target: {self._target_id()}"]
 
+    def _launch_failure_summary(self) -> str:
+        """Redacted, value-FREE summary of what this adapter tried to launch or
+        connect to, for a launch-failure message (a missing executable, a
+        typo'd ``command:``, a server that exits immediately).
+
+        Base/default: the adapter's own :meth:`_describe_data_sources`,
+        redacted -- fine for a transport with nothing beyond a host to show
+        (the remote/SSE/HTTP adapter's own override is host-only already, no
+        args). :class:`MCPStdioAdapter` overrides this: ``redact()`` only
+        catches a ``key=value``/``key: value`` shape or a provider-shaped
+        token (``sk-…``, ``AKIA…``, …) -- a credential passed as two separate
+        argv items (``--password``, ``<value>``) with an unremarkable value
+        slips through untouched. Rather than widen ``redact()`` to a riskier
+        general space-separated heuristic, the stdio override never prints an
+        arg VALUE here at all: the executable (still redacted, belt-and-braces)
+        plus how many arguments it had, nothing else.
+        """
+        return redact("; ".join(self._describe_data_sources()))
+
     def _describe_notes(self) -> str:
         return f"MCP target — family={self._family!r}, scope={self._scope!r}."
 
@@ -860,23 +879,23 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             # nothing read it -- ScanEngine persists only ["exception"] -- so
             # classifying a failure correctly changed nothing the operator saw.
             # For a launch failure also name the command that could not be
-            # started: _describe_data_sources() already formats exactly that
-            # string, and "which command?" is the operator's first question.
+            # started: _launch_failure_summary() names the executable
+            # (redacted) and how many arguments it had -- never a value --
+            # and "which command?" is the operator's first question.
             where = ""
             if reason == "launch_failure":
                 # Broad by design: this is diagnostic decoration on an error path
                 # that is already failing. A fault while describing the target
                 # must never replace or mask the real error being reported.
                 try:
-                    # REDACT. The stdio adapter's _describe_data_sources returns
-                    # the command and its rendered args verbatim, and a target's
-                    # args routinely carry a secret as a CLI flag (`npx server
-                    # --api-key=...`) -- which is why the gate redacts target.yaml
-                    # before committing it (DCR-0019) and why the remote adapter's
-                    # own override is deliberately host-only. This string lands in
-                    # ScanAttempt.verdict_reason, so it reaches scan_report.json
-                    # and a committed gate branch.
-                    where = f" [{redact('; '.join(self._describe_data_sources()))}]"
+                    # NEVER an arg value -- see _launch_failure_summary's own
+                    # docstring for why redact() alone isn't enough here (a
+                    # two-argv-item credential like `--password <value>` has
+                    # no `=`/`:` separator and no provider-shaped prefix for
+                    # redact()'s pattern to catch). This string lands in
+                    # ScanAttempt.verdict_reason, so it reaches
+                    # scan_report.json and a committed gate branch.
+                    where = f" [{self._launch_failure_summary()}]"
                 except Exception:
                     where = ""
             raise AdapterInvocationSkipped(

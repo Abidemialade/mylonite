@@ -82,7 +82,11 @@ def test_check_against_a_non_json_stdout_server_prints_no_traceback(tmp_path: Pa
     assert "Failed to parse JSONRPC message" not in out, out
     assert "Traceback (most recent call last)" not in out, out
     # The real failure (the server closed the connection) still reaches the
-    # operator as a clean, one-line error that names the command -- this
-    # isn't a silent swallow (#210).
+    # operator as a clean, one-line error that names the executable -- this
+    # isn't a silent swallow (#210). Never the script path/arg value itself
+    # (#195 review finding): only the executable and an argument count.
     assert "could not launch or connect to the target" in out, out
-    assert str(server) in out or server.as_posix() in out, out
+    assert sys.executable in out
+    assert str(server) not in out
+    assert server.as_posix() not in out
+    assert "1 argument(s), values withheld" in out

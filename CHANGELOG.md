@@ -52,9 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     garbage line; that logger is now quiet, and the real connection
     failure still reaches the operator as one clear line.
   - A target launch failure (a typo'd `command:`, a binary not on `PATH`,
-    a server that exits immediately) now names the command and args that
-    failed to start, redacted — never a credential value or a bare,
-    unnamed exception.
+    a server that exits immediately) now names the command that failed to
+    start — redacted, and never followed by an argument value (only an
+    argument count) — instead of a bare, unnamed exception. The same change
+    applies to the pre-existing launch-failure message a live attack attempt
+    already showed: neither message ever shows an argument value now, since
+    a credential passed as two separate `--flag value` CLI args has no
+    `=`/`:` shape for redaction to catch.
   - `gate` gained `--allow-no-seed-arm`, matching `scan`'s flag: a custom
     target declaring an indirect-injection class like W2 with no
     `seed_arm` can now be gated (those seeds report NOT TESTED) instead of
