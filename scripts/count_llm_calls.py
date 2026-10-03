@@ -221,8 +221,18 @@ def run_reference_gate(out_dir: Path, *, root: Path = ROOT) -> GateRun:
         open_pr=False,
     )
     # The emitted test replays the single-seed guarded set. Recording it is a
-    # live operation, so it comes from the committed example.
-    shutil.copytree(example / "fixtures", out_dir / "fixtures", dirs_exist_ok=True)
+    # live operation, so it comes from the committed example. Each recording
+    # takes the short name a fresh recording gets today, so the gate dir has
+    # the layout a new gate writes (and fits a deep Windows checkout).
+    from mylonite._replay import FIXTURE_NAME_LENGTH
+
+    fixtures = out_dir / "fixtures"
+    fixtures.mkdir(parents=True, exist_ok=True)
+    for src in (example / "fixtures").iterdir():
+        name = src.name
+        if len(src.stem) == 64:
+            name = src.stem[:FIXTURE_NAME_LENGTH] + src.suffix
+        shutil.copyfile(src, fixtures / name)
     return GateRun(
         result=result,
         out_dir=out_dir,

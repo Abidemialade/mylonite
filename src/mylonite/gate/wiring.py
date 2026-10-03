@@ -27,7 +27,7 @@ import typer
 from mylonite._cli_io import echo_err, echo_exc
 from mylonite.contracts.exec_context import ExecContext
 from mylonite.exit_codes import EXIT_CONFIG, EXIT_PR_FAILED
-from mylonite.gate.orchestrator import ScanOutcomeBundle
+from mylonite.gate.orchestrator import ScanOutcomeBundle, exploit_filename_for
 from mylonite.generate.wiring import _dispatch_emit, _map_compliance
 from mylonite.scan.assembly import (
     build_scan_engine,
@@ -329,6 +329,9 @@ def make_validate_fn(
                 # without matching recordings, and the validator's copy of the
                 # test landed at the gate root, where pytest could not collect it.
                 record_fixtures_dir=finding_dir / "fixtures",
+                # The exploit file the gate's test loads, named after the
+                # finding's short id like the test file itself.
+                record_exploit_filename=exploit_filename_for(generated.filename),
                 progress_cb=lambda msg: echo_err(f"  … {msg}"),
             )
             with llm_scope(policy=effective_policy):
@@ -594,8 +597,8 @@ def make_open_pr_fn(
         repo_root = pr_mod.resolve_repo_root() if (open_pr or workflows) else Path.cwd()
         # kept_dirs names the exact directory each finding in `findings` was
         # written to (run_gate's own bookkeeping, never re-derived here) --
-        # `out_dir` itself for a single-finding run, `out_dir/<slug>` per
-        # finding for a multi-finding one. Falls back to `[out_dir] * n` for
+        # `out_dir` itself for a single-finding run, `out_dir/<id>` per
+        # finding (its short id) for a multi-finding one. Falls back to `[out_dir] * n` for
         # a caller that doesn't pass it.
         dirs = kept_dirs if kept_dirs is not None else [out_dir] * len(findings)
 
@@ -615,7 +618,7 @@ def make_open_pr_fn(
             env_refs = target_env_refs(written_text)
             # The emitted test's `here = Path(__file__).parent` loads
             # `target.yaml` from ITS OWN directory, not the gate root. A
-            # multi-finding run puts each kept test under out_dir/<slug>/,
+            # multi-finding run puts each kept test under out_dir/<id>/,
             # so each needs its own (already-redacted) copy too — the root
             # copy stays for the discovery workflow's `--target-file
             # out_dir/target.yaml`.
@@ -648,9 +651,9 @@ def make_open_pr_fn(
         # (rather than whole directories) also means a stray file left in a
         # finding's own directory by something else can't ride along either.
         add_paths: list[Path] = []
-        for (exploit, report), finding_dir in zip(findings, dirs, strict=True):
+        for (_exploit, report), finding_dir in zip(findings, dirs, strict=True):
             add_paths.append(finding_dir / report.test_filename)
-            add_paths.append(finding_dir / f"exploit_{exploit.pattern_id}.json")
+            add_paths.append(finding_dir / exploit_filename_for(report.test_filename))
             add_paths.append(finding_dir / "validation_report.json")
             if target_file is not None:
                 add_paths.append(finding_dir / "target.yaml")

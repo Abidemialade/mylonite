@@ -509,6 +509,7 @@ class DifferentialValidator(ValidatorBase):
         completion_fn: CompletionFn | None = None,
         run_build: bool = True,
         record_fixtures_dir: Path | None = None,
+        record_exploit_filename: str | None = None,
         metamorphic_strategies: list[str] | None = None,
         metamorphic_robustness_threshold: float = 0.6,
         metamorphic_max_llm_calls: int = 120,
@@ -594,6 +595,9 @@ class DifferentialValidator(ValidatorBase):
         self._completion_fn = completion_fn
         self._run_build = run_build
         self._record_fixtures_dir = record_fixtures_dir
+        # The exploit file name the recorded test loads; `gate` names it after
+        # the finding's short id. None keeps `exploit_<pattern_id>.json`.
+        self._record_exploit_filename = record_exploit_filename
         # Metamorphic perturbation strategies. Gates ``kept`` (M2) — see the
         # ``kept =`` computation below and ``_metamorphic_outcome``'s docstring.
         # Default = all built-in deterministic transforms; a caller can restrict
@@ -1970,12 +1974,14 @@ class DifferentialValidator(ValidatorBase):
         )
 
         # 3. Co-locate the on-disk test + exploit NEXT TO the recorded fixtures so
-        #    the emitted test (`here/"exploit_<pid>.json"`, `here/"fixtures"`)
-        #    resolves its data.
+        #    the emitted test (`here/"exploit_<pid>.json"`, or the name `gate`
+        #    passed in, and `here/"fixtures"`) resolves its data.
         artefact_dir = fixtures_dir.parent
         test_path = artefact_dir / test.filename
         test_path.write_text(test.source, encoding="utf-8")
-        exploit_path = artefact_dir / f"exploit_{exploit.pattern_id}.json"
+        exploit_path = artefact_dir / (
+            self._record_exploit_filename or f"exploit_{exploit.pattern_id}.json"
+        )
         # Redacted like every other copy of the exploit record: this file is
         # committed by `gate` and `validate` (#223). The emitted test reads only
         # `pattern_id` and the exec-context keys, which redaction never touches.

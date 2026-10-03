@@ -2967,6 +2967,13 @@ def gate(
     out = resolve_gate_out_dir_or_exit(
         out, open_pr=open_pr, workflows=workflows, pr_mod=pr_mod, base=base
     )
+    # A gate dir Windows cannot write fails only after the scan and the
+    # validation were paid for. Refuse it here, before any model or target.
+    from mylonite.gate.orchestrator import gate_path_problem
+
+    if (path_problem := gate_path_problem(out)) is not None:
+        echo_err(path_problem)
+        raise typer.Exit(code=EXIT_CONFIG)
 
     # No default provider or model: stop with
     # EXIT_PROVIDER and the registry-built choose-a-model line when nothing

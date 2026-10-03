@@ -66,7 +66,7 @@ def test_the_gate_keeps_the_generated_test(gate_run: Any) -> None:
 
 
 def test_the_emitted_test_passes_offline(gate_run: Any) -> None:
-    emitted = sorted(gate_run.out_dir.glob("test_security_*.py"))
+    emitted = sorted(gate_run.out_dir.glob("test_*.py"))
     assert len(emitted) == 1, f"expected one emitted test, found {emitted}"
     result = run_test_file(emitted[0])
     assert result.passed, f"exit_code={result.exit_code}: {result.detail}"

@@ -11,7 +11,14 @@ from mylonite.contracts._types import (
     ValidationOutcome,
     ValidationReport,
 )
-from mylonite.gate.orchestrator import GateResult, ScanOutcomeBundle, run_gate
+from mylonite.gate.orchestrator import (
+    GateResult,
+    ScanOutcomeBundle,
+    _finding_id,
+    exploit_filename_for,
+    gate_test_filename,
+    run_gate,
+)
 from mylonite.scan.coverage import AbortReason, Coverage, ScanOutcome
 
 
@@ -119,6 +126,19 @@ def _exploit(pattern_id: str = "indirect-injection-note-body-direct"):
     )
 
 
+def _fid(pattern_id: str = "indirect-injection-note-body-direct") -> str:
+    """The short id the gate gives ``_exploit(pattern_id)`` (no weakness tag)."""
+    return _finding_id(_exploit(pattern_id))
+
+
+def _test_name(pattern_id: str = "indirect-injection-note-body-direct") -> str:
+    return gate_test_filename(_fid(pattern_id))
+
+
+def _exploit_name(pattern_id: str = "indirect-injection-note-body-direct") -> str:
+    return exploit_filename_for(_test_name(pattern_id))
+
+
 def test_run_gate_kept_assembles_and_invokes_pr(tmp_path):
     ex = _exploit()
     report = ValidationReport(
@@ -159,10 +179,8 @@ def test_run_gate_kept_assembles_and_invokes_pr(tmp_path):
     )
     assert isinstance(result, GateResult)
     assert result.exit_code == 0
-    assert (tmp_path / ".mylonite" / "gate" / "test_security_x.py").exists()
-    assert (
-        tmp_path / ".mylonite" / "gate" / "exploit_indirect-injection-note-body-direct.json"
-    ).exists()
+    assert (tmp_path / ".mylonite" / "gate" / _test_name()).exists()
+    assert (tmp_path / ".mylonite" / "gate" / _exploit_name()).exists()
     assert "Suggested mitigation" in pr_calls["body"]
     assert pr_calls["open_pr"] is False
 
@@ -209,7 +227,7 @@ def test_validation_report_is_on_disk_before_the_pr_step_runs(tmp_path):
     assert seen["report_on_disk"] is True
     # and it survives the failure, alongside the other two artefacts
     assert (out_dir / "validation_report.json").exists()
-    assert (out_dir / "test_security_x.py").exists()
+    assert (out_dir / _test_name()).exists()
     persisted = json.loads((out_dir / "validation_report.json").read_text(encoding="utf-8"))
     assert persisted["kept"] is True
 
@@ -639,19 +657,16 @@ def test_run_gate_processes_every_exploit_in_pattern_id_order(tmp_path):
     assert "a-pattern" in pr_calls["body"]
     assert "not kept" in pr_calls["body"].lower() or "rejected" in pr_calls["body"].lower()
 
-    # Multi-finding: each gets its own subdirectory (mirrors `generate`'s
-    # existing multi-finding convention) so the two tests can't clobber
-    # each other on disk.
-    from mylonite.generate.wiring import _slugify_pattern
-
-    assert (out_dir / _slugify_pattern("b-pattern") / "test_security_b-pattern.py").exists()
-    assert (out_dir / _slugify_pattern("b-pattern") / "validation_report.json").exists()
+    # Multi-finding: each gets its own subdirectory, named by its short id,
+    # so the two tests can't clobber each other on disk.
+    assert (out_dir / _fid("b-pattern") / _test_name("b-pattern")).exists()
+    assert (out_dir / _fid("b-pattern") / "validation_report.json").exists()
     # A REJECTED finding's test must never sit anywhere under out_dir -- it's
     # relocated to a SIBLING directory, evidence kept locally but never gated.
-    assert not (out_dir / _slugify_pattern("a-pattern")).exists()
-    rejected_root = out_dir.parent / f"{out_dir.name}-rejected"
-    assert (rejected_root / _slugify_pattern("a-pattern") / "test_security_a-pattern.py").exists()
-    assert not (rejected_root / _slugify_pattern("a-pattern") / "validation_report.json").exists()
+    assert not (out_dir / _fid("a-pattern")).exists()
+    rejected_root = out_dir.parent / f"{out_dir.name}-rej"
+    assert (rejected_root / _fid("a-pattern") / _test_name("a-pattern")).exists()
+    assert not (rejected_root / _fid("a-pattern") / "validation_report.json").exists()
 
 
 def test_run_gate_a_single_kept_finding_stays_flat_no_subdir(tmp_path):
@@ -671,8 +686,8 @@ def test_run_gate_a_single_kept_finding_stays_flat_no_subdir(tmp_path):
         open_pr=False,
     )
     assert result.exit_code == 0
-    assert (out_dir / "test_security_solo.py").exists()
-    assert not (out_dir / "solo_pattern").exists()
+    assert (out_dir / _test_name("solo-pattern")).exists()
+    assert not (out_dir / _fid("solo-pattern")).exists()
 
 
 def test_run_gate_prints_validating_each_and_kept_rejected_summary(tmp_path, capsys):
@@ -898,18 +913,19 @@ def test_run_gate_git_add_paths_never_include_a_rejected_finding(tmp_path, monke
     assert manual_command_file.exists()
     # The rejected finding's test is on disk (for local debugging) but
     # relocated to a sibling directory, outside the committed tree entirely.
-    rejected_root = out_dir.parent / f"{out_dir.name}-rejected"
-    assert (rejected_root / "a_pattern" / "test_security_a-pattern.py").exists()
-    assert not (out_dir / "a_pattern").exists()
-    assert (out_dir / "b_pattern" / "test_security_b-pattern.py").exists()
+    rejected_root = out_dir.parent / f"{out_dir.name}-rej"
+    assert (rejected_root / _fid("a-pattern") / _test_name("a-pattern")).exists()
+    assert not (out_dir / _fid("a-pattern")).exists()
+    assert (out_dir / _fid("b-pattern") / _test_name("b-pattern")).exists()
 
-    # The printed `git add` command names only the kept finding's slug --
-    # not the rejected one, even though its slug legitimately appears
+    # The printed `git add` command names only the kept finding's id --
+    # not the rejected one, even though its id legitimately appears
     # elsewhere in the output (the "evidence kept at ..." debug line).
     printed = capsys.readouterr().out
     add_line = next(line for line in printed.splitlines() if "git add" in line)
-    assert "b_pattern" in add_line
-    assert "a_pattern" not in add_line
+    assert _fid("b-pattern") in add_line
+    assert _exploit_name("b-pattern") in add_line
+    assert _fid("a-pattern") not in add_line
 
 
 def test_run_gate_single_rejected_finding_prints_the_line_once(tmp_path, capsys):
@@ -932,16 +948,15 @@ def test_run_gate_single_rejected_finding_prints_the_line_once(tmp_path, capsys)
     assert out.count("REJECTED (not kept)") == 1
 
 
-def test_slugs_for_dedupes_colliding_pattern_ids():
-    """Two different pattern_ids that slugify to the same string (`a.b` and
-    `a_b` both -> `a_b`) must not collide -- the second gets a deterministic
-    numeric suffix instead of silently overwriting the first."""
-    from mylonite.gate.orchestrator import _slugs_for
+def test_finding_ids_dedupe_colliding_short_ids(monkeypatch):
+    """Two different pattern_ids whose short ids collide must not share a
+    folder -- the second gets a deterministic numeric suffix instead of
+    silently overwriting the first."""
+    from mylonite.gate import orchestrator
 
-    exploits = [_exploit("a.b"), _exploit("a_b")]
-    slugs = _slugs_for(exploits)
-    assert slugs == ["a_b", "a_b-2"]
-    assert len(set(slugs)) == len(slugs)
+    monkeypatch.setattr(orchestrator, "_finding_id", lambda _e: "f-abcdef")
+    ids = orchestrator._finding_ids([_exploit("a.b"), _exploit("a_b")])
+    assert ids == ["f-abcdef", "f-abcdef-2"]
 
 
 def test_run_gate_budget_abort_uses_gate_specific_hint_not_scan_wording(tmp_path, capsys):
@@ -1122,20 +1137,20 @@ def test_a_single_rejected_finding_moves_only_its_own_files(tmp_path):
 
     for path, text in earlier.items():
         assert path.read_text(encoding="utf-8") == text, path
-    assert not (out_dir / "test_security_a.py").exists()
-    assert not (out_dir / "exploit_a-pattern.json").exists()
-    evidence = out_dir.parent / f"{out_dir.name}-rejected" / "a_pattern"
-    assert (evidence / "test_security_a.py").exists()
-    assert (evidence / "exploit_a-pattern.json").exists()
+    assert not (out_dir / _test_name("a-pattern")).exists()
+    assert not (out_dir / _exploit_name("a-pattern")).exists()
+    evidence = out_dir.parent / f"{out_dir.name}-rej" / _fid("a-pattern")
+    assert (evidence / _test_name("a-pattern")).exists()
+    assert (evidence / _exploit_name("a-pattern")).exists()
 
     # A second rejected run keeps out_dir intact AND leaves the first run's
     # evidence for a different finding where it was.
     _run_single_rejected(out_dir, "b-pattern", "test_security_b.py")
     for path, text in earlier.items():
         assert path.read_text(encoding="utf-8") == text, path
-    assert (evidence / "test_security_a.py").exists()
+    assert (evidence / _test_name("a-pattern")).exists()
     assert (
-        out_dir.parent / f"{out_dir.name}-rejected" / "b_pattern" / "test_security_b.py"
+        out_dir.parent / f"{out_dir.name}-rej" / _fid("b-pattern") / _test_name("b-pattern")
     ).exists()
 
 
@@ -1284,7 +1299,7 @@ def _run_gate_with_secret(tmp_path, report: ValidationReport) -> dict:
 
 def test_gate_exploit_json_is_redacted_before_it_is_written(tmp_path):
     _run_gate_with_secret(tmp_path, _kept_report())
-    path = tmp_path / ".mylonite" / "gate" / "exploit_indirect-injection-note-body-direct.json"
+    path = tmp_path / ".mylonite" / "gate" / _exploit_name()
     text = path.read_text(encoding="utf-8")
     assert _FAKE_KEY not in text
     assert "***REDACTED***" in text
@@ -1318,7 +1333,7 @@ def test_gate_rewrites_a_redacted_exploit_after_the_validator_writes_its_own(tmp
     kept finding and a rejected one."""
     for kept in (True, False):
         out = tmp_path / f"kept-{kept}"
-        path = out / ".mylonite" / "gate" / "exploit_indirect-injection-note-body-direct.json"
+        path = out / ".mylonite" / "gate" / _exploit_name()
 
         def overwriting_validate(test, _finding_dir, _path=path, _kept=kept):
             _path.write_text(test.exploit.model_dump_json(), encoding="utf-8")
@@ -1348,7 +1363,7 @@ def test_gate_rewrites_a_redacted_exploit_even_when_the_validator_raises(tmp_pat
     """If validation raises after the validator wrote its own unredacted copy,
     the file left on disk is still redacted and the error still surfaces."""
     out_dir = tmp_path / ".mylonite" / "gate"
-    path = out_dir / "exploit_indirect-injection-note-body-direct.json"
+    path = out_dir / _exploit_name()
 
     def raising_validate(test, _finding_dir):
         path.write_text(test.exploit.model_dump_json(), encoding="utf-8")
@@ -1396,7 +1411,8 @@ def _gate_once(tmp_path, exploit):
         open_pr=False,
     )
     assert result.exit_code == 0
-    on_disk = json.loads((out / f"exploit_{exploit.pattern_id}.json").read_text("utf-8"))
+    name = exploit_filename_for(gate_test_filename(_finding_id(exploit)))
+    on_disk = json.loads((out / name).read_text("utf-8"))
     # The validator never sees the pending tag: it only shapes the emitted test.
     assert seen["validated"] == exploit
     return seen["exploit"], on_disk
@@ -1455,7 +1471,10 @@ def test_run_gate_hands_validate_fn_the_directory_each_test_was_written_to(tmp_p
     if len(patterns) == 1:
         assert seen == {"solo-pattern": out_dir}
     else:
-        assert seen == {"a-pattern": out_dir / "a_pattern", "b-pattern": out_dir / "b_pattern"}
+        assert seen == {
+            "a-pattern": out_dir / _fid("a-pattern"),
+            "b-pattern": out_dir / _fid("b-pattern"),
+        }
 
 
 def _record_then_reject(generated, finding_dir):
@@ -1491,10 +1510,10 @@ def test_a_rejected_findings_own_fixtures_move_to_the_rejected_evidence(tmp_path
         open_pr=False,
     )
 
-    assert not (out_dir / "a_pattern").exists()
-    rejected = tmp_path / ".mylonite" / "gate-rejected" / "a_pattern"
+    assert not (out_dir / _fid("a-pattern")).exists()
+    rejected = tmp_path / ".mylonite" / "gate-rej" / _fid("a-pattern")
     assert (rejected / "fixtures" / "rec.json").is_file()
-    assert (rejected / "test_a-pattern.py").is_file()
+    assert (rejected / _test_name("a-pattern")).is_file()
 
 
 def test_a_rejected_single_finding_leaves_the_gate_root_fixtures_alone(tmp_path):
@@ -1512,12 +1531,16 @@ def test_a_rejected_single_finding_leaves_the_gate_root_fixtures_alone(tmp_path)
     )
 
     assert (out_dir / "fixtures" / "rec.json").is_file()
-    assert not (tmp_path / ".mylonite" / "gate-rejected" / "solo" / "fixtures").exists()
+    assert not (tmp_path / ".mylonite" / "gate-rej" / _fid("solo") / "fixtures").exists()
 
 
-def test_colliding_slugs_get_distinct_test_file_names(tmp_path):
-    """Two pattern_ids that slug the same land in `a_b/` and `a_b-2/`; their
-    test files must not share a name, or pytest cannot collect both."""
+def test_colliding_ids_get_distinct_test_file_names(tmp_path, monkeypatch):
+    """Two pattern_ids whose short ids collide land in `<id>/` and `<id>-2/`;
+    their test files must not share a name, or pytest cannot collect both,
+    whatever name the generator chose."""
+    from mylonite.gate import orchestrator
+
+    monkeypatch.setattr(orchestrator, "_finding_id", lambda _e: "f-abcdef")
     out_dir = tmp_path / ".mylonite" / "gate"
     seen: list[str] = []
 
@@ -1539,6 +1562,6 @@ def test_colliding_slugs_get_distinct_test_file_names(tmp_path):
         open_pr=False,
     )
 
-    assert seen == ["test_security_a_b.py", "test_security_a_b_2.py"]
-    assert (out_dir / "a_b" / "test_security_a_b.py").is_file()
-    assert (out_dir / "a_b-2" / "test_security_a_b_2.py").is_file()
+    assert seen == ["test_f-abcdef.py", "test_f-abcdef-2.py"]
+    assert (out_dir / "f-abcdef" / "test_f-abcdef.py").is_file()
+    assert (out_dir / "f-abcdef-2" / "test_f-abcdef-2.py").is_file()
