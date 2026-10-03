@@ -6412,6 +6412,87 @@ def test_gate_llm_not_configured_never_constructs_the_adapter(
         target_registry.clear_runtime_targets()
 
 
+@pytest.mark.parametrize("flag", ["--open-pr", "--workflows"])
+def test_gate_bundled_mcp_target_with_pr_flag_refuses_before_any_launch(
+    flag: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#224: a bundled `mcp:<family>[:scope]` target has no `target.yaml` of
+    its own for `gate` to commit, so a scaffolded workflow or gating PR for
+    one can never launch the target in CI. Combined with `--open-pr` or
+    `--workflows`, `gate` must refuse up front -- before the adapter is
+    built, before the LLM-configured check, and with no provider key set --
+    rather than spend a whole scan on a run that can never pass. Spies on
+    `_build_adapter_for_mcp` (the mcp-route adapter constructor) to prove the
+    target is never launched.
+
+    Runs inside a fresh, clean git repo (`--open-pr`'s own, earlier,
+    dirty-tree check must not be what's firing here).
+    """
+    import subprocess
+
+    import mylonite.cli as cli_module
+    from mylonite.plugins._mcp import target_registry
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    monkeypatch.chdir(repo)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    target_registry.clear_runtime_targets()
+
+    calls: list[Any] = []
+    monkeypatch.setattr(
+        cli_module,
+        "_build_adapter_for_mcp",
+        lambda *a, **kw: calls.append((a, kw)),
+    )
+
+    try:
+        result = runner.invoke(app, ["gate", "mcp:fetch", "--authorize", "fetch", flag])
+        assert result.exit_code == EXIT_CONFIG, result.output
+        stderr = result.stderr or result.output
+        assert "target file" in stderr.lower()
+        assert "scan --scaffold" in stderr
+        assert calls == [], f"target must never be launched; got {calls}"
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+def test_gate_bundled_mcp_target_without_pr_flags_is_unaffected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The non-PR path (`gate mcp:<family>` with neither `--open-pr` nor
+    `--workflows`) must keep working unchanged: the new #224 refusal is keyed
+    on those two flags, so a plain print-mode gate run proceeds past routing
+    to the next pre-flight check (here, the LLM-configured check, since no
+    provider key is set) instead of being refused for the target's shape.
+    """
+    import mylonite.cli as cli_module
+    from mylonite.plugins._mcp import target_registry
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    target_registry.clear_runtime_targets()
+
+    real_build_adapter_for_mcp = cli_module._build_adapter_for_mcp
+    calls: list[Any] = []
+
+    def _spy(*args: Any, **kwargs: Any) -> Any:
+        calls.append((args, kwargs))
+        return real_build_adapter_for_mcp(*args, **kwargs)
+
+    monkeypatch.setattr(cli_module, "_build_adapter_for_mcp", _spy)
+
+    try:
+        result = runner.invoke(app, ["gate", "mcp:fetch", "--authorize", "fetch"])
+        assert result.exit_code == EXIT_CONFIG, result.output
+        stderr = result.stderr or result.output
+        # Reaches the LLM-configured check, not the #224 target-file refusal.
+        assert "llm credential" in stderr.lower() or "not configured" in stderr.lower()
+        assert "scan --scaffold" not in stderr
+    finally:
+        target_registry.clear_runtime_targets()
+
+
 def test_gate_bundled_mcp_route_validates_a_real_finding(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

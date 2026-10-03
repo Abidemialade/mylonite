@@ -234,10 +234,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   secret you already export, e.g. `${{ secrets.MYLONITE_API_KEY }}`); an
   older pinned tag keeps working unchanged.
 - **A bundled MCP target (`mcp:<family>[:scope]`, no `--target-file`)
-  refuses `--open-pr`/`--workflows` instead of publishing a workflow that
-  can never pass.** It has no `target.yaml` of its own, so the emitted
-  test's load of one failed every time CI re-drove it. `gate` now says so
-  up front and points at `mylonite scan --scaffold`.
+  refuses `--open-pr`/`--workflows` before the scan runs, not only after
+  it.** It has no `target.yaml` of its own, so the emitted test's load of
+  one failed every time CI re-drove it. The refusal used to fire only once
+  the whole scan/validate run had already finished, at the PR-opening
+  step — so a run that could never pass still spent its full model budget
+  first. `gate` now checks the target shape against `--open-pr`/`--workflows`
+  up front, before any model call or target launch, and points at
+  `mylonite scan --scaffold`. Dropping both flags still gates a bundled
+  target and writes its artefacts locally, unchanged. Inline `mcp:custom`
+  targets were already refused outright by `gate` for an unrelated reason
+  (no `--command`/`--arg` wiring), so they never reach this problem. (#224)
 - **The scaffolded workflows and `gate-action` are hardened the way this
   repository's own CI already is.** Actions are pinned by commit SHA at
   the same major version this repository's own `.github/workflows` use

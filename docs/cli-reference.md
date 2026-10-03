@@ -464,7 +464,12 @@ blocking the whole run, the same meaning the flag has on `scan`.
 2. On Windows without long paths, the output path check, exiting `2` (see
    [Windows path length](ci-gating.md#windows-path-length)).
 3. The target, `--authorize`, model, provider key and uncoverable-class checks, each
-   exiting `2`.
+   exiting `2`. A bundled `mcp:<family>[:scope]` target combined with `--open-pr` or
+   `--workflows` is refused here too, before the scan runs: that target has no
+   `target.yaml` of its own for the gate to commit, so the scaffolded workflow could
+   never launch it in CI. Run `mylonite scan --scaffold <path>` to write one, then
+   gate with `--target-file <path>` instead. Dropping both flags still gates the
+   bundled target and writes its artefacts locally, unchanged.
 
 So when both kinds of problem are present, the exit-`8` error is the one you see first.
 

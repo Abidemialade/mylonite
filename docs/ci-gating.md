@@ -485,10 +485,13 @@ job would fail to launch your target with no clearer message than "command
 not found".
 
 **A bundled MCP target (`mcp:<family>[:scope]`, no `--target-file`) refuses
-`--open-pr`/`--workflows` outright.** It has no `target.yaml` of its own, so
-the committed test's `target.yaml` load would fail every time CI re-drives
-it. Run `mylonite scan --scaffold` first to write one, then gate with
-`--target-file <path>` instead.
+`--open-pr`/`--workflows` outright, before the scan starts.** It has no
+`target.yaml` of its own, so the committed test's `target.yaml` load would
+fail every time CI re-drives it. `gate` checks for this up front — before any
+model call or target launch — rather than spend a whole run only to refuse at
+the end. Run `mylonite scan --scaffold` first to write one, then gate with
+`--target-file <path>` instead. Dropping `--open-pr`/`--workflows` still
+gates a bundled target and writes its artefacts locally, unchanged.
 
 **No default model, so both workflows pin the one `gate --workflows` used —
 but what that controls is NOT the same in each.** There is no default
