@@ -187,3 +187,57 @@ def test_a_declared_consequential_tool_is_never_a_verdict_read() -> None:
     entry = _by_name(tool_inventory([_tool("list_notes")], control_config=cc))["list_notes"]
     assert entry.verdict_read is False
     assert treated_as_text(entry) == "yes (declared)"
+
+
+@pytest.mark.parametrize(
+    "cc",
+    [
+        SimpleNamespace(consequential_tools=[], egress_tools=["web_fetch"], read_tool_names=[]),
+        SimpleNamespace(
+            consequential_tools=["list_notes"], egress_tools=["web_fetch"], read_tool_names=[]
+        ),
+        None,
+    ],
+)
+def test_verdict_read_flag_uses_the_list_the_scan_passes(cc: Any) -> None:
+    """The scan hands the verdict's read check declared consequential plus
+    declared egress tools; a declared egress tool named like a read is a dispatch."""
+    from mylonite.scan.effect_verdict import is_read_tool
+
+    tools = [_tool("web_fetch", {"url": {"type": "string"}}), _tool("list_notes")]
+    runtime_list = tuple(cc.consequential_tools) + tuple(cc.egress_tools) if cc is not None else ()
+    for entry in tool_inventory(tools, control_config=cc):
+        assert entry.verdict_read is is_read_tool(
+            entry.name, consequential_tool_names=runtime_list
+        ), entry.name
+    if cc is not None:
+        web_fetch = _by_name(tool_inventory(tools, control_config=cc))["web_fetch"]
+        assert web_fetch.verdict_read is False
+        assert "reads" not in treated_as_text(web_fetch)
+
+
+@pytest.mark.parametrize("declared", [None, frozenset({"pull_data"})])
+def test_egress_role_matches_the_live_egress_control(declared: frozenset[str] | None) -> None:
+    tools = [
+        _tool("web_fetch"),
+        _tool("pull_data"),
+        _tool("reach_out", openWorldHint=True),
+        _tool("stay_home", openWorldHint=False),
+        _tool("frobnicate_thing"),
+        _tool("notify", {"webhook_url": {"type": "string"}}),
+    ]
+    control = make_control("W3", egress_tools=declared)
+    for t in tools:
+        control.observe_description(
+            SimpleNamespace(name=t.name, annotations=t.annotations)  # type: ignore[arg-type]
+        )
+    cc = SimpleNamespace(
+        consequential_tools=[], egress_tools=sorted(declared or []), read_tool_names=[]
+    )
+    for entry in tool_inventory(tools, control_config=cc):
+        # The schema tier stands in for the runtime's argument check: feed the
+        # destination-shaped value the parameter would carry.
+        args = {"webhook_url": "https://hooks.example.net/x"} if entry.name == "notify" else {}
+        applies, reason, _dest = control._classify(entry.name, args)  # type: ignore[attr-defined]
+        has_egress = any(r.role == "egress" for r in entry.roles)
+        assert has_egress is (applies and reason != "fail-closed default"), entry.name

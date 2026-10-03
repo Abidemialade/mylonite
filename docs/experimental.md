@@ -60,7 +60,7 @@ attack actually lands.
 After the findings, `check` prints the same tool inventory `scan --scaffold` writes into
 the target file: every tool with its role, where the role came from, and whether the
 scan's confirm gate treats it as consequential. It then names any tool with an unknown
-role, which the scan treats as consequential. Like the unpinned-descriptions advisory, the
+role, which the scan treats as consequential. To confirm them, list every consequential tool under `control_config.consequential_tools`, including the ones already recognised: every tool left off that list is then treated as not consequential. Like the unpinned-descriptions advisory, the
 inventory and the unknown-role line are not structural findings and never gate
 `--enforce`: most servers have such a tool on first contact.
 

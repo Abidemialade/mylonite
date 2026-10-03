@@ -21,7 +21,8 @@ readers and declared lists:
   as ``budget_report``; the inventory shows that rather than smoothing it over.
 
 A tool that no tier recognises is "unknown", and the confirm-gate control
-already treats it as consequential (the fail-closed default). The inventory
+already treats it as consequential (the fail-closed default); the egress
+control likewise refuses an unknown tool's call that carries no destination. The inventory
 shows that instead of hiding it.
 """
 
@@ -164,7 +165,11 @@ def tool_inventory(tools: Sequence[Any], *, control_config: Any = None) -> list[
                     name,
                     read_tool_names=declared_read or (),
                     annotations=annotations,
-                    consequential_tool_names=declared_consequential or (),
+                    # The list the scan passes: declared consequential plus
+                    # declared egress tools. The seed's own tool is added per
+                    # attempt and cannot be known here; see treated_as_text.
+                    consequential_tool_names=(declared_consequential or frozenset())
+                    | (declared_egress or frozenset()),
                 ),
             )
         )
@@ -197,7 +202,7 @@ def treated_as_text(entry: InventoryEntry) -> str:
     if entry.verdict_read:
         # The confirm gate guards it, but the verdict does not count a call to
         # it as a dispatch: say so instead of letting the two disagree silently.
-        text += "; the verdict counts its calls as reads"
+        text += "; the verdict counts its calls as reads unless a seed targets this tool"
     return text
 
 
@@ -206,18 +211,20 @@ def inventory_comment_lines(entries: Sequence[InventoryEntry]) -> list[str]:
     lines = [
         "# Tool inventory (no model call): each tool's role, where the role came from",
         "# (declared / annotation / schema / name / unknown), and whether the scan's",
-        "# confirm gate treats it as consequential. Unknown counts as consequential.",
+        "# confirm gate treats it as consequential. Unknown counts as consequential",
+        "# (and the egress control guards it too).",
     ]
     for e in entries:
         lines.append(f"#   {e.name}: {role_text(e)}; consequential: {treated_as_text(e)}")
     unknown = unknown_tools(entries)
     if unknown:
         lines.append(
-            f"# {len(unknown)} tool(s) have an unknown role. To confirm them, list the "
-            "consequential ones under"
+            f"# {len(unknown)} tool(s) have an unknown role. To confirm them, list every "
+            "consequential tool under"
         )
         lines.append(
             "# control_config.consequential_tools; every tool left off that list is then "
-            "treated as not consequential."
+            "treated as not"
         )
+        lines.append("# consequential, so include the ones already recognised.")
     return lines

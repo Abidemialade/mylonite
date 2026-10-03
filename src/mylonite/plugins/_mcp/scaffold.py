@@ -318,7 +318,7 @@ def _render_target_scaffold(
     # Every tool with its role and that role's source, from the same inventory
     # `mylonite check` prints. Comments only: the scan reads nothing from it.
     inventory_block = (
-        "\n".join(inventory_comment_lines(tool_inventory(tools))) + "\n" if tools else ""
+        "\n" + "\n".join(inventory_comment_lines(tool_inventory(tools))) + "\n" if tools else ""
     )
     sink_hint = (
         f"# Consequential-action tools detected (W4 candidates): {', '.join(consequential_tools)}.\n"
