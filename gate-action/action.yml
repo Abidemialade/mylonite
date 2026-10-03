@@ -11,7 +11,7 @@ inputs:
     description: "LiteLLM model id (provider-prefixed, e.g. anthropic/claude-haiku-4-5). No default -- see docs/cli-reference.md for the approved providers."  # allow-literal: example
     required: true
   api-key:
-    description: "Your LLM provider's API key (e.g. secrets.MYLONITE_API_KEY). Mapped automatically to the credential variable the chosen model's provider needs -- never hardcoded to one provider."
+    description: "Your LLM provider's API key (e.g. secrets.MYLONITE_API_KEY). Mapped automatically to the credential variable the chosen model's provider needs -- never hardcoded to one provider. Needs mylonite>=0.12.0 once released with this input; on an older pinned release it is a no-op (a ::warning:: says so) and you must export the credential yourself."
     required: true
   llm-headers:
     description: "Optional extra LLM request headers (e.g. a workspace id), as NAME=VALUE pairs, comma- or newline-separated (e.g. secrets.MYLONITE_LLM_HEADERS). Passed through as MYLONITE_LLM_HEADERS."  # allow-literal: example
@@ -40,28 +40,61 @@ runs:
     # matters more here than there: this composite action runs inside OTHER
     # people's CI, so a moved tag would execute new code in every downstream
     # repository at once, with whatever permissions their workflow granted.
-    - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+    - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
       with:
         python-version: ${{ inputs.python-version }}
-    # The target's own launch `command` (target-file's `command:` line)
-    # decides whether the runner needs Node or uv -- neither is preinstalled
-    # the way Python is, and a target launched with npx/uvx otherwise fails
-    # to launch with no clearer message than "command not found". A plain
-    # grep, not a YAML parser: `command:` is always a bare top-level scalar
-    # (see docs/target-file.md), and mylonite isn't installed yet at this
-    # point in the step order to lend its own loader.
+    # Pinned to the release whose tag this action is referenced by
+    # (gate-action@vX.Y.Z installs mylonite==X.Y.Z). scripts/prepare_release.py
+    # bumps it with __version__, and the release gate refuses a mismatch.
+    # constraints.txt is vendored next to this file (never hash-locked --
+    # see its own header) so a bad/compromised LiteLLM release doesn't reach
+    # every repo that calls this action the day it's published. The path
+    # travels through env, like every other input below, rather than
+    # interpolated directly into `run:`.
+    - name: Install mylonite
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: pip install "mylonite==0.11.0" -c "$ACTION_PATH/constraints.txt"
+    # The target's own launch `command` decides whether the runner
+    # needs Node or uv -- neither is preinstalled the way Python is, and a
+    # target launched with npx/uvx otherwise fails to launch with no clearer
+    # message than "command not found". Parses the target file with
+    # mylonite's own loader (installed above), not a grep: a grep for
+    # `^command:` exits 1 (aborting the step under this shell's `-eo
+    # pipefail`) on a remote target (transport: sse|http), which declares no
+    # `command:` line at all -- and a quoted or absolute-path command
+    # needs real YAML + basename handling a line-oriented grep can't give.
     - name: Decide whether the target needs Node or uv
       id: runtime
       shell: bash
       env:
         TARGET_FILE: ${{ inputs.target-file }}
       run: |
-        cmd=$(grep -m1 '^command:' "$TARGET_FILE" | cut -d: -f2 | tr -d '[:space:]')
-        case "$cmd" in
-          npx|node) echo "needs=node" >> "$GITHUB_OUTPUT" ;;
-          uvx|uv) echo "needs=uv" >> "$GITHUB_OUTPUT" ;;
-          *) echo "needs=" >> "$GITHUB_OUTPUT" ;;
-        esac
+        python - <<'PY'
+        import os
+        from pathlib import Path
+
+        github_output = os.environ["GITHUB_OUTPUT"]
+        needs = ""
+        try:
+            from mylonite.plugins._mcp.target_file import load_target_file
+
+            tf = load_target_file(Path(os.environ["TARGET_FILE"]))
+            command = Path(tf.command).name if tf.command else ""
+            if command in ("npx", "node"):
+                needs = "node"
+            elif command in ("uvx", "uv"):
+                needs = "uv"
+        except Exception:
+            # A malformed/missing target file is caught properly, with a
+            # real error, by the step that actually runs `mylonite gate`
+            # below -- this step only decides a CI nicety and must never
+            # fail the job itself.
+            needs = ""
+        with open(github_output, "a", encoding="utf-8") as f:
+            f.write(f"needs={needs}\n")
+        PY
     - name: Set up Node (the target launches with npx/node)
       if: ${{ steps.runtime.outputs.needs == 'node' }}
       uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -70,60 +103,77 @@ runs:
     - name: Install uv (the target launches with uvx/uv)
       if: ${{ steps.runtime.outputs.needs == 'uv' }}
       shell: bash
-      run: pip install uv
-    # Pinned to the release whose tag this action is referenced by
-    # (gate-action@vX.Y.Z installs mylonite==X.Y.Z). scripts/prepare_release.py
-    # bumps it with __version__, and the release gate refuses a mismatch.
-    # constraints.txt is vendored next to this file (never hash-locked --
-    # see its own header) so a bad/compromised LiteLLM release doesn't reach
-    # every repo that calls this action the day it's published.
-    - name: Install mylonite
-      shell: bash
-      run: pip install "mylonite==0.11.0" -c "${{ github.action_path }}/constraints.txt"
-    # Maps the api-key input to the credential variable the chosen
-    # model's provider actually needs (never hardcoded to Anthropic's), using
-    # the approved-provider registry mylonite itself ships -- installed by
-    # the step above, so it's available here.
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: pip install uv -c "$ACTION_PATH/constraints.txt"
+    # Maps the api-key input to the credential variable the chosen model's
+    # provider actually needs (never hardcoded to Anthropic's), using the
+    # approved-provider registry mylonite itself ships -- installed above.
+    # This step never writes the key itself anywhere -- not to
+    # $GITHUB_ENV (which would expose it to every later step of the
+    # CALLER's job, including third-party actions, for the rest of the
+    # job) and not to any file. It writes only the credential variable's
+    # NAME (never secret-shaped) to $GITHUB_OUTPUT; the one step that
+    # actually needs the key (the last step below) exports it into its own
+    # process just before calling `mylonite gate`, so the key's scope is
+    # that single step.
     - name: Map the API key to the model's provider
+      id: keymap
       shell: bash
       env:
         MODEL: ${{ inputs.model }}
-        API_KEY: ${{ inputs.api-key }}  # pragma: allowlist secret
-      run: |  # pragma: allowlist secret
+      run: |
         python - <<'PY'
         import os
 
-        from mylonite.providers.registry import PROVIDERS
-        from mylonite.scan.providers import env_vars_for, provider_from_model
-
+        github_output = os.environ["GITHUB_OUTPUT"]
         model = os.environ.get("MODEL", "")
-        api_key = os.environ.get("API_KEY", "")
-        provider = provider_from_model(model) if model else None
-        info = PROVIDERS.get(provider) if provider else None
-        key_vars = env_vars_for(provider)
-
-        if not api_key:
-            if info is not None and not info.local:
-                print(
-                    f"::warning::no api-key input set for provider {provider!r}; "
-                    "set one, or this provider's call will fail on its own missing-"
-                    "credential check"
-                )
-        elif len(key_vars) == 1:
-            with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as f:
-                f.write(f"{key_vars[0]}={api_key}\n")
+        var = ""
+        try:
+            from mylonite.providers.registry import PROVIDERS
+            from mylonite.scan.providers import env_vars_for, provider_from_model
+        except ImportError:
+            # mylonite==0.11.0 (the release this file's install step is
+            # pinned to right now) predates the provider registry. Warn and
+            # fall back to "unmapped" rather than crash every call until a
+            # release with this change bumps the pin -- see the "Install
+            # mylonite" step above. Needs mylonite>=0.12.0 once that ships.
+            print(
+                "::warning::the installed mylonite release has no provider "
+                "registry yet (needs mylonite>=0.12.0 once released) -- "
+                "api-key is not mapped; export your provider's credential "
+                "variable yourself in this job's own env"
+            )
         else:
-            reason = "no registered credential variable" if not key_vars else f"needs {key_vars}"
-            print(
-                f"::warning::provider {provider!r} {reason}; this api-key input "
-                "cannot be mapped automatically -- export the right "
-                "variable(s) yourself in this job's own env"
-            )
-        if info is not None and info.extra_env:
-            print(
-                f"::warning::provider {provider!r} also needs {info.extra_env}; "
-                "export those yourself in this job's own env"
-            )
+            provider = provider_from_model(model) if model else None
+            info = PROVIDERS.get(provider) if provider else None
+            key_vars = env_vars_for(provider)
+
+            if not model:
+                pass
+            elif info is not None and info.local:
+                print(
+                    f"::warning::provider {provider!r} is local; api-key is "
+                    "unused for it"
+                )
+            elif len(key_vars) == 1:
+                var = key_vars[0]
+            else:
+                reason = (
+                    "no registered credential variable" if not key_vars else f"needs {key_vars}"
+                )
+                print(
+                    f"::warning::provider {provider!r} {reason}; this api-key "
+                    "input cannot be mapped automatically -- export the right "
+                    "variable(s) yourself in this job's own env"
+                )
+            if info is not None and info.extra_env:
+                print(
+                    f"::warning::provider {provider!r} also needs {info.extra_env}; "
+                    "export those yourself in this job's own env"
+                )
+        with open(github_output, "a", encoding="utf-8") as f:
+            f.write(f"var={var}\n")
         PY
     # `mylonite gate --open-pr` runs `git commit` directly -- a hosted
     # runner has no git identity configured by default, so without this the
@@ -150,6 +200,11 @@ runs:
         RUNS_ON: ${{ inputs.runs-on }}
         MODE: ${{ inputs.mode }}
         OPEN_PR: ${{ inputs.open-pr }}
+        # The key and its variable's name travel separately -- `export`
+        # below combines them into this step's own process environment only,
+        # never written to $GITHUB_ENV or a file.
+        API_KEY: ${{ inputs.api-key }}  # pragma: allowlist secret
+        KEY_VAR: ${{ steps.keymap.outputs.var }}
         # Named exactly as mylonite itself reads it -- inherited by the
         # `mylonite gate` subprocess below directly from this step's own
         # environment, never turned into a CLI flag or interpolated into
@@ -165,6 +220,9 @@ runs:
         fi
         if [ "$RUNS_ON" != "ubuntu-latest" ]; then
           echo "::warning::the 'runs-on' input is deprecated and has no effect (this action never passes --workflows, so mylonite gate has nothing to scaffold with it)"
+        fi
+        if [ -n "$KEY_VAR" ]; then
+          export "$KEY_VAR=$API_KEY"
         fi
         args=(
           --target-file "$TARGET_FILE"
