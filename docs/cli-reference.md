@@ -414,7 +414,9 @@ For a `--target-file` target, `gate` refuses before any LLM call if a declared
 pre-flight check `scan` runs; see
 [Coverage](target-file.md#coverage-a-declared-class-your-surface-cant-run-is-refused-not-silently-dropped).
 `gate` does not auto-wire a `seed_arm` the way `scan` does, so for a W2 target without
-one, run `scan` first and pass the `target.yaml` it writes to `gate`.
+one, run `scan` first and pass the `target.yaml` it writes to `gate` — or pass
+`--allow-no-seed-arm` to gate it as-is: those seeds report NOT TESTED instead of
+blocking the whole run, the same meaning the flag has on `scan`.
 
 `gate` runs its pre-flight checks in this order, all before any LLM call:
 
@@ -456,7 +458,11 @@ differential leg for a custom target: `gate` then keeps a finding only when an
 data-framing differential to measure whether that input defence is load-bearing;
 opt-in, otherwise a `rest` target is validated by stability + effect + consensus;
 `gate` lists a `rest` finding as a candidate and never commits it);
-`--randomize-exfil/--no-randomize-exfil` (defaults ON for a live custom target).
+`--randomize-exfil/--no-randomize-exfil` (defaults ON for a live custom target);
+`--allow-no-seed-arm` (gate a custom target that declares an indirect-injection class
+like W2 with no `seed_arm` anyway; those seeds report NOT TESTED instead of blocking
+the run — `gate` never auto-wires one the way `scan` does, so this is the only way to
+gate such a target without running `scan` first).
 
 Before the scan phase starts, `gate` prints one line estimating how many LLM
 calls the scan will make (from the seed count after filters), plus about how
