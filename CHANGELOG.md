@@ -217,8 +217,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `create`). A leading `post`, `email` or `issue` makes it a dispatch unless
     the name ends in `read`, `get`, `retrieve` or `lookup`.
   - A seeded record's id in a call links the call to the attempt only when the
-    tool can act (`create_issue`, `close_issue`, `post_comment`), so an agent
-    that only reads the seeded record by id is never a finding.
+    tool is the seed's own or declared consequential, carries
+    `destructiveHint`, or has a verb that changes state in its name
+    (`create_issue`, `close_issue`). An agent that only reads the seeded
+    record by id is never a finding. A name that joins a read to such a verb
+    (`list_and_close`) is no longer a read.
   - A new target-file setting, `control_config.verdict_read_tools`, marks extra
     tools as reads for the verdict only, for a reader such as `web_search`
     that now reads as a dispatch. It changes no control, `check` flags a name

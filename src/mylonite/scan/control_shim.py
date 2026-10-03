@@ -368,12 +368,24 @@ _DESTRUCTIVE_HINTS: tuple[str, ...] = (
     "revoke",
 )
 
-#: State-changing verbs that only the effect verdict's link rule reads: a call
-#: carrying the seeded record's id links to the attempt when its tool's name has
-#: one (``close_issue``). Kept out of the read rule, where several double as
-#: nouns (``get_lock_status``).
+#: State-changing verbs for the effect verdict's link rule: a call carrying the
+#: seeded record's id links to the attempt when its tool's name has one
+#: (``close_issue``). The read rule uses them only in a name that joins two
+#: actions (``list_and_close``), because several double as nouns
+#: (``get_lock_status``).
 VERDICT_LINK_ACTION_VERBS: frozenset[str] = frozenset(
-    {*_DESTRUCTIVE_HINTS, "close", "lock", "unlock", "assign", "reset", "refund", "grant", "kill"}
+    {
+        *_DESTRUCTIVE_HINTS,
+        "close",
+        "lock",
+        "unlock",
+        "assign",
+        "reset",
+        "refund",
+        "grant",
+        "kill",
+        "replace",
+    }
 )
 
 
