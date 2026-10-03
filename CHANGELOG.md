@@ -416,6 +416,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the two now fails the test suite. Linked from the quickstart and the CLI
   reference wherever a model is first needed.
 
+- **An upgrade guide for 0.10.x/0.11.x users:**
+  [`docs/upgrading-to-0.12.md`](https://github.com/Abidemialade/mylonite/blob/main/docs/upgrading-to-0.12.md),
+  covering the new exit codes, never-keep-unproven, no default model, the new
+  and changed reason codes, `--weakness-class`'s narrowing behaviour, and the
+  short gate-directory layout. A new issue template for a false positive or
+  false negative asks for the `scan_report.json`/`validation_report.json`
+  behind the result, secrets removed; the bug-report template now asks for
+  the exact command and any reason codes seen. `CONTRIBUTING.md` states the
+  first-response window for new issues after launch.
+
 ### Fixed
 
 - **`validate`'s provider check no longer mistakes a slow model for an

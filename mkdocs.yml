@@ -51,6 +51,7 @@ nav:
       - Choose a model: choose-a-model.md
       - Installing on Windows: install-windows.md
       - Try it — the reference app: quarry.md
+      - Upgrading from 0.10.x/0.11.x: upgrading-to-0.12.md
   - The journey:
       - Overview: journey/index.md
       - 1. Try it: journey/1-try.md
