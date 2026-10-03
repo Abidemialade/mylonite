@@ -141,6 +141,7 @@ async def _open_mcp_session(
     extra_env: dict[str, str] | None = None,
     command: str | None = None,
     args: list[str] | None = None,
+    cwd: str | None = None,
     read_timeout: timedelta = DEFAULT_MCP_READ_TIMEOUT,
 ) -> AsyncIterator[ClientSession]:
     """Spawn the MCP server and yield an initialised ``ClientSession``.
@@ -151,6 +152,14 @@ async def _open_mcp_session(
 
     ``command``/``args`` default to the spec's launch; a caller can override them
     to start a target's deliberately-unguarded (``vulnerable_launch``) variant.
+
+    ``cwd`` (#187) is the directory the subprocess is spawned in, so a relative
+    ``command`` or a relative path inside ``args`` resolves the same way wherever
+    the caller runs ``mylonite`` from. ``None`` (the default, and every bundled
+    family's spec) keeps today's behaviour: the SDK's own default is the calling
+    process's own cwd. Passed through verbatim to ``StdioServerParameters`` ONLY
+    when set, so a test double with a narrower fake signature (no ``cwd`` kwarg)
+    built before this field existed keeps working unchanged.
 
     Environment (DCR-0012/DCR-0018): the child does NOT inherit the full
     parent environment. It gets a narrow, named allowlist
@@ -163,11 +172,17 @@ async def _open_mcp_session(
     now declare it explicitly in the target file's ``env:`` block.
     """
     env = _compose_child_env(extra_env)
-    params = StdioServerParameters(
-        command=command or spec.command,
-        args=args if args is not None else spec.render_args(scope),
-        env=env,
-    )
+    launch_command = command or spec.command
+    launch_args = args if args is not None else spec.render_args(scope)
+    # Two branches, not `**({} if cwd is None else {"cwd": cwd})`: a keyword
+    # splat of unknown-at-type-check-time content can't be matched against
+    # the right parameter by mypy, and omitting the `cwd` kwarg entirely when
+    # unset (rather than passing `cwd=None`) is what keeps a test double built
+    # before this field existed (no `cwd` kwarg in its own signature) working.
+    if cwd is None:
+        params = StdioServerParameters(command=launch_command, args=launch_args, env=env)
+    else:
+        params = StdioServerParameters(command=launch_command, args=launch_args, env=env, cwd=cwd)
     async with (
         stdio_client(params) as (read_stream, write_stream),
         ClientSession(read_stream, write_stream, read_timeout_seconds=read_timeout) as session,
@@ -201,6 +216,7 @@ class MCPStdioAdapter(MCPSessionAdapterBase):
             extra_env=extra_env,
             command=command,
             args=args,
+            cwd=self._spec.cwd,
             read_timeout=self._mcp_read_timeout,
         )
 

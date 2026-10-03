@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
 
@@ -35,6 +36,7 @@ from mylonite._redaction import (
     CREDENTIAL_ENV_FIELD,
     CREDENTIAL_NESTED_SECTIONS,
     CREDENTIAL_TOP_LEVEL_SECTIONS,
+    redact,
 )
 from mylonite.plugins._mcp.target_registry import (
     CalibrationSettings,
@@ -312,6 +314,11 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
         default_system_prompt=resolved_system_prompt(tf),
         requires_scope=requires_scope,
         args_with_scope=False,
+        # #187: a target file's relative command/args resolve against the
+        # YAML's own directory, the same base system_prompt_file already
+        # uses -- None (the caller's own cwd, unchanged) for an inline
+        # mcp:custom target with no source_dir to anchor to.
+        cwd=str(tf.source_dir) if tf.source_dir is not None else None,
         primary_tools=tuple(tf.primary_tools),
         extra_env=dict(tf.env),
         weakness_classes=tuple(tf.weakness_classes),
@@ -471,6 +478,83 @@ def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def _looks_like_relative_sqlite_path(val: str) -> bool:
+    """True when ``val`` looks like a SQLite DB referenced by a NON-absolute
+    path — the #18 Windows footgun (a relative sqlite path silently opens a
+    different/empty DB, making a vulnerable agent look clean). Shared by
+    :func:`_relative_sqlite_env_keys` (a KEY=VALUE ``env`` entry) and
+    :func:`_relative_sqlite_arg_values` (a bare positional ``args`` entry,
+    #187) — both check the exact same value shape, just reached differently.
+
+    Lives here (not in ``scaffold.py``, which imports ``typer``) so
+    :func:`load_target_file` can run this check with no dependency beyond
+    this module's own (``pydantic``/``yaml``) — a bare
+    ``python -c "from mylonite.plugins._mcp.target_file import
+    load_target_file"``, with no other package installed, must keep
+    working. ``gate-action/action.yml``'s runtime-detection step does
+    exactly that."""
+    low = val.lower()
+    if "://" in val:
+        # URL form. DCR-0011: match the SQLite marker against the URL
+        # SCHEME, not an unanchored substring test anywhere in the value —
+        # `"sqlite" in low` used to misclassify e.g.
+        # `postgresql://sqlite-cache.internal:5432/app` (a non-SQLite URL
+        # whose HOSTNAME merely contains "sqlite") as a relative SQLite path.
+        scheme = low.split("://", 1)[0]
+        if scheme not in ("sqlite", "sqlite3"):
+            return False
+        # The single '/' after the authority separator is NOT part of the
+        # path, so `sqlite:///data.db` is RELATIVE `data.db` while
+        # `sqlite:////abs/x.db` is absolute `/abs/x.db` — the exact #18 trap.
+        after = val.split("://", 1)[1]
+        path = after[1:] if after.startswith("/") else after
+    else:
+        if not ("sqlite" in low or low.endswith((".db", ".sqlite", ".sqlite3"))):
+            return False
+        path = val
+    is_posix_abs = path.startswith("/")
+    is_win_abs = len(path) >= 2 and path[1] == ":"  # C:\… or C:/…
+    return not (is_posix_abs or is_win_abs)
+
+
+def _relative_sqlite_env_keys(env: dict[str, str]) -> list[str]:
+    """Env keys whose value looks like a relative SQLite DB path (#18)."""
+    return [key for key, val in env.items() if _looks_like_relative_sqlite_path(val)]
+
+
+def _relative_sqlite_arg_values(args: list[str]) -> list[str]:
+    """Positional ``args`` entries that look like a relative SQLite DB path —
+    the same #18 footgun as :func:`_relative_sqlite_env_keys`, but for a bare
+    stdio launch argument (e.g. ``--db-path notes.db``) rather than a
+    KEY=VALUE env var. The scaffold's own check used to look only at ``env``
+    (#187): a relative DB path handed to the server via ``args`` instead went
+    unwarned."""
+    return [val for val in args if _looks_like_relative_sqlite_path(val)]
+
+
+def relative_sqlite_path_warnings(tf: TargetFile) -> list[str]:
+    """Human-readable warnings for every relative-SQLite-path footgun (#18) in
+    ``tf``'s ``env`` or ``args`` — shared by ``scan --scaffold`` (a brand-new
+    target) and :func:`load_target_file` (an EXISTING target file, on every
+    load, #187) so the warning fires wherever a target file reaches Mylonite,
+    not only when it is first written. Always a warning, never a refusal —
+    the caller decides whether and how to print each one."""
+    warnings = [
+        f"env {key} looks like a relative SQLite path. On Windows a relative/ambiguous "
+        "sqlite URL can open a DIFFERENT or empty DB, making a vulnerable agent look "
+        "clean (#18). Prefer an absolute path. (value withheld — env values may carry "
+        "credentials)"
+        for key in _relative_sqlite_env_keys(tf.env)
+    ]
+    warnings += [
+        f"arg {val!r} looks like a relative SQLite path. On Windows a relative/ambiguous "
+        "sqlite URL can open a DIFFERENT or empty DB, making a vulnerable agent look "
+        "clean (#18). Prefer an absolute path."
+        for val in _relative_sqlite_arg_values(tf.args)
+    ]
+    return warnings
+
+
 def load_target_file(path: Path) -> TargetFile:
     """Parse a YAML target file into a validated ``TargetFile``.
 
@@ -482,6 +566,13 @@ def load_target_file(path: Path) -> TargetFile:
     genuinely runnable target once the named variable(s) are set. Every other
     field (``system_prompt``, ``purpose``, ``args``, ``url``, ``request.body``,
     ...) is loaded completely unchanged — never scanned for ``${VAR}`` text.
+
+    Also prints a non-fatal warning for a relative-SQLite-path footgun (#18)
+    in ``env`` or ``args`` (#187) — the scaffold's own check used to run only
+    when ``scan --scaffold`` first wrote the file; every caller of this
+    function (``check``, ``scan``, ``generate``, ``validate``, ``gate``, ...)
+    now gets the same warning against a file it merely loads, including one a
+    teammate hand-edited. Never a refusal.
     """
     path = Path(path)
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -495,7 +586,19 @@ def load_target_file(path: Path) -> TargetFile:
     # declares its own `source_dir`), so a PR-editable target.yaml can't hand
     # itself a wider containment base and defeat resolve_contained.
     data["source_dir"] = str(path.parent.resolve())
-    return TargetFile.model_validate(data)
+    tf = TargetFile.model_validate(data)
+
+    # Plain `sys.stderr`, not `mylonite._cli_io.echo_err`: this function must
+    # keep working with NOTHING beyond this module's own dependencies
+    # (pydantic/yaml) installed -- see `_looks_like_relative_sqlite_path`'s
+    # docstring. `echo_err` pulls in `typer` via `_cli_io`, which the
+    # gate-action runtime-detection step's bare `python` does not have. Still
+    # redacted by hand with the same `redact()` `echo_err` itself calls, so
+    # this is the one other deliberate exception to "every human-facing
+    # string leaves through `_cli_io`" -- see `tests/test_cli_output_boundary.py`.
+    for warning in relative_sqlite_path_warnings(tf):
+        print(f"warning: {redact(warning)}", file=sys.stderr)
+    return tf
 
 
 def dump_target_file(tf: TargetFile, *, redact_secrets: bool = True) -> str:

@@ -859,6 +859,31 @@ def test_scan_scaffold_warns_on_relative_sqlite_path(
     assert "relative SQLite path" in (result.stderr or result.output)
 
 
+def test_scan_scaffold_warns_on_relative_sqlite_path_in_args(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#187: the scaffold's relative-SQLite-path check used to look only at
+    `env`; a relative DB path passed via a positional `--arg` must warn too."""
+    _patch_fake_adapter(monkeypatch)
+    out = tmp_path / "target.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "scan",
+            "--command",
+            "python",
+            "--arg",
+            "--db-path",
+            "--arg",
+            "notes.db",
+            "--scaffold",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "relative SQLite path" in (result.stderr or result.output)
+
+
 def test_relative_sqlite_env_keys_does_not_misclassify_hostname_substring() -> None:
     """DCR-0011: the unanchored `"sqlite" in low` substring match misclassified a
     non-SQLite URL whose HOSTNAME merely contains "sqlite" as a relative SQLite

@@ -520,6 +520,94 @@ async def test_open_mcp_session_passes_read_timeout_to_client_session() -> None:
     assert 0 < read_timeout.total_seconds() <= 300
 
 
+@pytest.mark.asyncio
+async def test_open_mcp_session_passes_spec_cwd_to_stdio_params() -> None:
+    """#187: a target spec that declares a ``cwd`` (a loaded target file's own
+    directory) must reach ``StdioServerParameters`` as ``cwd``, so a relative
+    ``command``/``args`` resolves against that directory rather than whoever's
+    shell is running ``mylonite``."""
+    import dataclasses
+
+    captured: dict[str, Any] = {}
+
+    class _FakeParams:
+        def __init__(
+            self, *, command: str, args: list[str], env: dict[str, str], cwd: str | None = None
+        ) -> None:
+            captured["cwd"] = cwd
+
+    @asynccontextmanager
+    async def _fake_stdio_client(params: Any) -> Any:
+        yield (None, None)
+
+    class _FakeClientSession:
+        def __init__(self, *_: Any, **__: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> _FakeClientSession:
+            return self
+
+        async def __aexit__(self, *exc: Any) -> None:
+            return None
+
+        async def initialize(self) -> None:
+            return None
+
+    with (
+        patch.object(stdio_adapter, "StdioServerParameters", _FakeParams),
+        patch.object(stdio_adapter, "stdio_client", _fake_stdio_client),
+        patch.object(stdio_adapter, "ClientSession", _FakeClientSession),
+    ):
+        from mylonite.plugins._mcp import target_registry
+
+        spec = dataclasses.replace(target_registry.BUNDLED_TARGETS["fetch"], cwd="/a/target/dir")
+        async with stdio_adapter._open_mcp_session(spec, None, cwd=spec.cwd):
+            pass
+
+    assert captured["cwd"] == "/a/target/dir"
+
+
+@pytest.mark.asyncio
+async def test_open_mcp_session_omits_cwd_kwarg_when_spec_has_none() -> None:
+    """A target with no declared ``cwd`` (every bundled family, and an inline
+    ``mcp:custom`` target with no source YAML) must not pass ``cwd`` at all —
+    keeping a test double (or the real SDK) that predates this field working
+    unchanged, and keeping the caller's own working directory in effect."""
+
+    class _FakeParams:
+        def __init__(self, *, command: str, args: list[str], env: dict[str, str]) -> None:
+            pass  # raises TypeError if called with an unexpected `cwd` kwarg
+
+    @asynccontextmanager
+    async def _fake_stdio_client(params: Any) -> Any:
+        yield (None, None)
+
+    class _FakeClientSession:
+        def __init__(self, *_: Any, **__: Any) -> None:
+            pass
+
+        async def __aenter__(self) -> _FakeClientSession:
+            return self
+
+        async def __aexit__(self, *exc: Any) -> None:
+            return None
+
+        async def initialize(self) -> None:
+            return None
+
+    with (
+        patch.object(stdio_adapter, "StdioServerParameters", _FakeParams),
+        patch.object(stdio_adapter, "stdio_client", _fake_stdio_client),
+        patch.object(stdio_adapter, "ClientSession", _FakeClientSession),
+    ):
+        from mylonite.plugins._mcp import target_registry
+
+        spec = target_registry.BUNDLED_TARGETS["fetch"]
+        assert spec.cwd is None
+        async with stdio_adapter._open_mcp_session(spec, None, cwd=spec.cwd):
+            pass  # no TypeError means `cwd` was correctly omitted
+
+
 # --- env-key casing must never produce a duplicate entry ---------------------
 
 

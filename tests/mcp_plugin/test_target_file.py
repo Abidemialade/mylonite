@@ -129,6 +129,26 @@ def test_build_target_spec_shape() -> None:
     assert spec.requires_scope is True
 
 
+def test_build_target_spec_cwd_defaults_to_none_for_inline_target() -> None:
+    """#187: an in-memory TargetFile (assembled from `--command`/`--arg` CLI
+    flags, no source YAML) has no `source_dir` to anchor to, so the spec's
+    `cwd` stays None -- the caller's own working directory is unaffected."""
+    spec = build_target_spec(_tf())
+    assert spec.cwd is None
+
+
+def test_build_target_spec_cwd_is_the_loaded_files_directory(tmp_path: Path) -> None:
+    """#187: a LOADED target file's relative command/args must resolve
+    against the YAML's own directory, the same base `system_prompt_file`
+    already uses -- `build_target_spec` threads `TargetFile.source_dir`
+    through as `TargetSpec.cwd`."""
+    target = tmp_path / "app.yaml"
+    target.write_text("family: acme\ncommand: python\nargs: [server.py]\n", encoding="utf-8")
+    tf = load_target_file(target)
+    spec = build_target_spec(tf)
+    assert spec.cwd == str(tmp_path.resolve())
+
+
 def test_target_file_timeout_s_defaults_to_none() -> None:
     """#186/#216: optional, mirrors RequestSpec.timeout_s -- an existing
     target file with no timeout_s must load unchanged (None -> today's
@@ -260,6 +280,44 @@ def test_load_target_file_from_yaml(tmp_path: Path) -> None:
     assert tf.family == "acme"
     assert tf.weakness_classes == ["W2", "W4"]
     assert tf.seed_arm is not None and tf.seed_arm.tool == "remember"
+
+
+def test_load_target_file_warns_on_relative_sqlite_path_in_env(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#18/#187: the relative-SQLite-path footgun used to warn only when
+    `scan --scaffold` first wrote the file. Loading an EXISTING target file
+    (e.g. one a teammate hand-edited) must warn too."""
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nenv: {DB_URL: 'sqlite:///data.db'}\n",
+        encoding="utf-8",
+    )
+    load_target_file(p)
+    assert "relative SQLite path" in capsys.readouterr().err
+
+
+def test_load_target_file_warns_on_relative_sqlite_path_in_args(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#187: the footgun check used to look only at `env`; a relative DB path
+    handed to the server via a positional `args` entry must warn too."""
+    p = tmp_path / "t.yaml"
+    p.write_text(
+        "family: acme\ncommand: python\nargs: ['--db', 'notes.db']\n",
+        encoding="utf-8",
+    )
+    load_target_file(p)
+    assert "relative SQLite path" in capsys.readouterr().err
+
+
+def test_load_target_file_silent_with_no_relative_sqlite_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    p = tmp_path / "t.yaml"
+    p.write_text("family: acme\ncommand: python\nargs: [server.py]\n", encoding="utf-8")
+    load_target_file(p)
+    assert "relative SQLite path" not in capsys.readouterr().err
 
 
 # --- R7: natural-language payload-placement warnings ------------------------
