@@ -14,35 +14,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to always render `ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_API_KEY }}`, so
   an OpenAI, Gemini or other non-Anthropic model's gate job failed in CI
   with no useful message. Both templates now read the credential variable
-  for the model's own provider from the approved-provider registry, and
-  refuse to scaffold for a local model (Ollama, vLLM — no key, and a hosted
-  runner can't reach it) or a provider needing more than one credential
-  variable (Bedrock's keypair). `gate-action` gains a matching `api-key`
-  input, mapped the same way at run time, plus a git-identity step (a
-  hosted runner has none by default, so `--open-pr`'s commit used to fail
-  without it) and an optional `llm-headers` input for extra LLM request
-  headers. **If you have committed workflows from an earlier release,
-  re-run `mylonite gate --workflows` to pick this up** — the old files keep
-  working, but still hardcode Anthropic's key variable.
+  for the model's own provider from the approved-provider registry; a
+  provider needing more than its bare key (Azure's endpoint + API version)
+  gets those emitted too, as repository variables, not just the key.
+  `gate --workflows` refuses outright, before spending anything on the
+  scan/validate run that follows, for a local model (Ollama, vLLM — no
+  key, and a hosted runner can't reach it) or one needing more than one
+  credential variable (Bedrock's keypair, or Vertex, with no bare key at
+  all) — a single `MYLONITE_API_KEY` secret can't express either.
+  `gate-action` gains a matching `api-key` input, mapped the same way at
+  run time; the key itself is never written to `$GITHUB_ENV` (which would
+  have exposed it to every later step of the caller's job) — only the
+  credential variable's *name* travels that way, and the key is exported
+  into the one step that needs it, right before it calls `mylonite gate`.
+  The action also gains a git-identity step (a hosted runner has none by
+  default, so `--open-pr`'s commit used to fail without it) and an
+  optional `llm-headers` input for extra LLM request headers. **If you
+  have committed workflows from an earlier release, re-run `mylonite gate
+  --workflows` to pick this up** — the old files keep working, but still
+  hardcode Anthropic's key variable. **If you call `gate-action`, add the
+  new required `api-key:` input when you bump the tag** (point it at the
+  secret you already export, e.g. `${{ secrets.MYLONITE_API_KEY }}`); an
+  older pinned tag keeps working unchanged.
 - **A bundled MCP target (`mcp:<family>[:scope]`, no `--target-file`)
   refuses `--open-pr`/`--workflows` instead of publishing a workflow that
   can never pass.** It has no `target.yaml` of its own, so the emitted
   test's load of one failed every time CI re-drove it. `gate` now says so
   up front and points at `mylonite scan --scaffold`.
 - **The scaffolded workflows and `gate-action` are hardened the way this
-  repository's own CI already is.** Actions are pinned by commit SHA
+  repository's own CI already is.** Actions are pinned by commit SHA at
+  the same major version this repository's own `.github/workflows` use
   (tag as a comment), each job sets `concurrency:` and `timeout-minutes:`,
   and each sets `MYLONITE_REDRIVE_ATTEMPTS` explicitly (`1` on the per-PR
   gate, `3` on nightly discovery) rather than leaving the default
   unstated. A target launched with `npx`/`node` or `uvx`/`uv` now gets a
-  matching runtime-setup step, read from the target file's own `command:` —
-  a hosted runner has neither preinstalled the way it has Python.
-- **LiteLLM's install range is capped, with an exact-pin constraints file.**
-  `pyproject.toml`'s floor-only `litellm` dependency let a bad or
-  compromised release (LiteLLM had a real one, 24 Mar 2026) reach every
-  install the day it published; it is now capped, and the scaffolded
-  workflows and `gate-action` additionally pin to one exact, verified
-  release via a vendored constraints file.
+  matching runtime-setup step (reading the target file's own `command:`
+  with a real YAML parser, not a `grep` — a remote target declares no
+  `command:` line at all, which broke every gate-action run against one
+  until this), with `uv` itself pinned the same way LiteLLM is, below.
+  The credential, model and LLM-header env vars also move from the whole
+  job down to the one step that actually makes a live call, so an earlier
+  step (checkout, setup) never sees them; the per-PR gate job's checkout
+  additionally drops its persisted git credential, since that job never
+  pushes (the nightly discovery job does, and keeps it).
+- **LiteLLM's install range is capped, with an exact-pin constraints
+  file — the cap is not the main protection.** `pyproject.toml`'s
+  floor-only `litellm` dependency admitted every future release with no
+  ceiling; it is now capped at the next major (`<2.0`) so an
+  API-breaking 2.0 can't arrive unannounced, but that cap alone still
+  lets every 1.x patch through — including a bad one (LiteLLM had a real
+  compromised patch release, 24 Mar 2026). The actual protection is the
+  exact pin in a vendored constraints file, applied by both the
+  scaffolded workflows and `gate-action`, at a release that supports
+  this package's full 3.11–3.14 matrix.
 
 ### Changed
 

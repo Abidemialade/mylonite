@@ -630,12 +630,21 @@ the model fallback and the key mapping together; a repository variable
 alone is enough only for staying on the same provider's other models.
 
 A model whose provider needs more than one credential variable (Bedrock's
-access-key pair) or none that Mylonite's registry knows about makes `gate
+access-key pair, or Vertex, which has no bare key at all) makes `gate
 --workflows` refuse to scaffold at all, naming why — a single
 `MYLONITE_API_KEY` secret can't express either case. Write that workflow by
 hand instead. The same holds for a **local** model (Ollama, vLLM): there is
 no key to map, and a hosted GitHub runner can't reach it regardless, so
 scaffolding would only produce CI that can never pass.
+
+**A provider that needs more than its bare key — but still has exactly
+one — is not refused; the extra variables are emitted alongside it.**
+Azure needs its endpoint and API version beyond `AZURE_API_KEY`: the
+scaffolded workflow exports both as repository **variables**
+(`${{ vars.AZURE_API_BASE }}`, `${{ vars.AZURE_API_VERSION }}` — a URL and
+a version string aren't secret-shaped), read from the same approved-
+provider registry as the key mapping. Set both repository variables
+before the workflow's first live run.
 
 ### Supply-chain pinning
 
