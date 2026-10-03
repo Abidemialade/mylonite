@@ -24,7 +24,7 @@ your own docs either.
 | Provider | Status | LiteLLM prefix | Key env var(s) | Other required vars | Extra headers | Example model |
 |---|---|---|---|---|---|---|
 | anthropic | measured | `anthropic/` | `ANTHROPIC_API_KEY` | — | none yet | `anthropic/claude-haiku-4-5-20251001` |
-| ollama | measured | `ollama_chat/` | none — local, no key | — | none yet | not published yet |
+| ollama | measured | `ollama_chat/` | none — local, no key | — | none yet | `ollama_chat/llama3.2:3b` |
 | azure | supported | `azure/` | `AZURE_API_KEY` | `AZURE_API_BASE`, `AZURE_API_VERSION` | none yet | not published yet |
 | bedrock | supported | `bedrock/` | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | — | none yet | not published yet |
 | google | supported | `gemini/` | `GEMINI_API_KEY` | — | none yet | not published yet |
