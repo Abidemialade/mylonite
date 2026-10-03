@@ -177,6 +177,16 @@ when it finds them (see [target-file.md](target-file.md)). A candidate that stil
 a value from you stays commented. Add `--force` to overwrite. Review it, then scan with
 `--target-file`.
 
+The file also lists every tool in a comment block, the tool inventory: each tool's role
+(consequential, egress, read, store, recall), where that role came from (`declared` in
+the target file, the server's MCP `annotation`, a `schema` parameter, the tool's `name`,
+or `unknown`), and whether the scan's confirm gate treats it as consequential. A tool
+nothing recognises reads `unknown` and is treated as consequential, which is what the
+scan already does with it. The scaffold names the unknown tools when it finishes. To
+confirm them, list your consequential tools under `control_config.consequential_tools`;
+every tool left off that list is then treated as not consequential. The block is
+comments only, so the scan reads the same file either way.
+
 To scaffold a REST/HTTP agent instead of an MCP server, pass `--rest-url URL` (no
 `--command` needed) — add `--rest-body` for a request-body template other than the
 default `{"prompt": "{prompt}"}`, and `--rest-response-path` for a dotted path into

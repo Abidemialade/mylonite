@@ -57,6 +57,13 @@ a name that names no real tool means the plant or the effect probe silently neve
 Every finding is a hint to confirm, never a verdict — `scan`/`gate` are what prove an
 attack actually lands.
 
+After the findings, `check` prints the same tool inventory `scan --scaffold` writes into
+the target file: every tool with its role, where the role came from, and whether the
+scan's confirm gate treats it as consequential. It then names any tool with an unknown
+role, which the scan treats as consequential. Like the unpinned-descriptions advisory, the
+inventory and the unknown-role line are not structural findings and never gate
+`--enforce`: most servers have such a tool on first contact.
+
 ## `ablate` — score the safeguards
 
 Toggle each AI safeguard and report which are **load-bearing**, **security theater**,

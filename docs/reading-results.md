@@ -277,6 +277,18 @@ counted on the `coverage:` line under its own code (`[MYL-INC-001 x1]`), not on 
 `judge:` line, because no LLM call failed. Attempts against reference and REST targets
 carry no `trace_outcome` and are decided as before.
 
+**Which tools count as consequential.** The guarded side's confirm gate decides this
+for each tool in a fixed order: your `control_config.consequential_tools` list, then the
+server's own MCP annotations (`readOnlyHint`, `destructiveHint`), then the tool's name.
+A tool none of these recognise is guarded as consequential anyway. The trace counts a
+call as a dispatch unless the tool is a read, and its read check also matches read words
+inside a longer name, so the two can disagree on a name such as `budget_report`. To see
+what each of your tools will be treated as before you spend anything, read the tool
+inventory that `mylonite scan --scaffold` writes into the target file. It has one line
+per tool, with its role, where the role came from (`declared`, `annotation`, `schema`,
+`name` or `unknown`), and whether the gate treats it as consequential. When the trace
+would count the tool's calls as reads, the line says so.
+
 `validate` counts a custom target's firing runs by these proof levels on its effect leg
 (see [Validation](validation.md)). When the leg fails because runs fired with nothing tying
 the damage to them (an LLM-judge verdict, say), the remediation line says so and points at an `{exfil_email}` or

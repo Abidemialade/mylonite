@@ -14,7 +14,11 @@ readers and declared lists:
   shadow of the egress control's argument check), then ``classify`` over
   ``_EGRESS_HINTS`` and ``openWorldHint``;
 * read: ``classify`` over ``READ_HINTS`` and ``readOnlyHint``;
-* store / recall: the scan's own auto-wire pick (``_classify_tools``).
+* store / recall: the scan's own auto-wire pick (``_classify_tools``);
+* verdict read: whether the verdict's trace reading (``effect_verdict.is_read_tool``)
+  counts a call to the tool as a read rather than a dispatch. It matches read
+  words as substrings, so it can disagree with the confirm gate on a name such
+  as ``budget_report``; the inventory shows that rather than smoothing it over.
 
 A tool that no tier recognises is "unknown", and the confirm-gate control
 already treats it as consequential (the fail-closed default). The inventory
@@ -28,6 +32,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mylonite.scan.control_shim import _CONSEQUENTIAL_HINTS, _EGRESS_HINTS, READ_HINTS
+from mylonite.scan.effect_verdict import is_read_tool
 from mylonite.scan.tool_classifier import (
     annotation_is_egress,
     annotation_is_read,
@@ -69,6 +74,8 @@ class InventoryEntry:
     roles: tuple[RoleEvidence, ...]
     consequential: bool
     consequential_source: str
+    #: The verdict reads a call to this tool as a read, not a dispatch.
+    verdict_read: bool = False
 
     @property
     def unknown(self) -> bool:
@@ -153,6 +160,12 @@ def tool_inventory(tools: Sequence[Any], *, control_config: Any = None) -> list[
                 roles=tuple(roles),
                 consequential=cons_applies,
                 consequential_source=cons_source,
+                verdict_read=is_read_tool(
+                    name,
+                    read_tool_names=declared_read or (),
+                    annotations=annotations,
+                    consequential_tool_names=declared_consequential or (),
+                ),
             )
         )
     return entries
@@ -178,8 +191,14 @@ def treated_as_text(entry: InventoryEntry) -> str:
     if not entry.consequential:
         return f"no ({entry.consequential_source})"
     if entry.consequential_source == SOURCE_UNKNOWN:
-        return "yes (fail-closed: nothing says otherwise)"
-    return f"yes ({entry.consequential_source})"
+        text = "yes (fail-closed default)"
+    else:
+        text = f"yes ({entry.consequential_source})"
+    if entry.verdict_read:
+        # The confirm gate guards it, but the verdict does not count a call to
+        # it as a dispatch: say so instead of letting the two disagree silently.
+        text += "; the verdict counts its calls as reads"
+    return text
 
 
 def inventory_comment_lines(entries: Sequence[InventoryEntry]) -> list[str]:
