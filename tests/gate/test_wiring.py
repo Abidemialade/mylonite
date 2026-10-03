@@ -418,6 +418,96 @@ def test_open_pr_fn_does_not_refuse_when_a_target_yaml_is_already_co_located(
     assert fake.calls, "an already-co-located target.yaml must not be refused"
 
 
+def test_open_pr_fn_does_not_stage_an_untracked_unredacted_pre_existing_target(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """A pre-existing target.yaml this run never wrote, holding a raw
+    secret-shaped value redaction would have masked, and not already
+    tracked by git -- must not be staged. It could be a hand-placed or
+    stale file describing something else entirely, or leaking a literal
+    credential into the gating PR."""
+    monkeypatch.chdir(tmp_path)
+    fake = _FakePrMod()
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest",
+        workflows=False,
+        target_file=None,
+        pr_mod=fake,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    out_dir.mkdir(parents=True)
+    (out_dir / "target.yaml").write_text(
+        "family: demo\ncommand: python\nargs: []\n"
+        "headers:\n  X-Api-Key: sk-live-abcdefghijklmnopqrstuvwx\n",  # pragma: allowlist secret
+        encoding="utf-8",
+    )
+
+    bundled = SimpleNamespace(pattern_id="p1", target_id="mcp:custom")
+    open_pr_fn(
+        out_dir=out_dir,
+        findings=[(bundled, SimpleNamespace(test_filename="test_p1.py"))],
+        body="## What Mylonite found\n",
+        open_pr=False,
+    )
+    add_paths = fake.calls[0]["paths"].add_paths
+    assert out_dir / "target.yaml" not in add_paths
+
+
+def test_open_pr_fn_stages_a_pre_existing_target_already_tracked_by_git(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """The same un-redacted file as above, but already committed -- it was
+    already visible in history, so staging it again (unchanged) adds
+    nothing new; the git-tracked check alone is enough."""
+    subprocess.run(["git", "init", str(tmp_path)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.email", "test@example.com"],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.name", "test"],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.chdir(tmp_path)
+    fake = _FakePrMod()
+    open_pr_fn = make_open_pr_fn(
+        runs_on="ubuntu-latest",
+        workflows=False,
+        target_file=None,
+        pr_mod=fake,
+        model="anthropic/claude-haiku-4-5-20251001",
+    )
+    out_dir = tmp_path / ".mylonite" / "gate"
+    out_dir.mkdir(parents=True)
+    target_path = out_dir / "target.yaml"
+    target_path.write_text(
+        "family: demo\ncommand: python\nargs: []\n"
+        "headers:\n  X-Api-Key: sk-live-abcdefghijklmnopqrstuvwx\n",  # pragma: allowlist secret
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "add", str(target_path)], check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "commit", "-m", "pre-existing target"],
+        check=True,
+        capture_output=True,
+    )
+
+    bundled = SimpleNamespace(pattern_id="p1", target_id="mcp:custom")
+    open_pr_fn(
+        out_dir=out_dir,
+        findings=[(bundled, SimpleNamespace(test_filename="test_p1.py"))],
+        body="## What Mylonite found\n",
+        open_pr=False,
+    )
+    add_paths = fake.calls[0]["paths"].add_paths
+    assert target_path in add_paths
+
+
 # ---------------------------------------------------------------------------
 # #203: resolve_gate_out_dir
 # ---------------------------------------------------------------------------
