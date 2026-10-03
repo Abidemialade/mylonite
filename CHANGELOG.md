@@ -212,16 +212,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries the attack's marker and NOT TESTED (`MYL-INC-001`) when nothing ties
   it to the attempt.
   - A tool is now a read when its name starts or ends with a whole read verb
-    (`get_issue`, `list_notes`, `notes_list`) and has no transport word
+    (`get_issue`, `list_notes`, `issue_read`) and has no transport word
     (`fetch`, `web`, `url`) and no verb that changes state (`send`, `upload`,
-    `create`). A leading `post`, `email` or `issue` also makes it a dispatch.
+    `create`). A leading `post`, `email` or `issue` makes it a dispatch unless
+    the name ends in `read`, `get`, `retrieve` or `lookup`.
   - A seeded record's id in a call links the call to the attempt only when the
-    tool can act, so an agent that only reads the seeded record by id is never
-    a finding.
+    tool can act (`create_issue`, `close_issue`, `post_comment`), so an agent
+    that only reads the seeded record by id is never a finding.
   - A new target-file setting, `control_config.verdict_read_tools`, marks extra
     tools as reads for the verdict only, for a reader such as `web_search`
-    that now reads as a dispatch. It changes no control. See
-    `docs/target-file.md`.
+    that now reads as a dispatch. It changes no control, `check` flags a name
+    in it that the server does not have, and the `MYL-INC-001` fix line now
+    mentions it. See `docs/target-file.md`.
   - The scaffold's store and recall pick uses whole words too, so
     `post_to_thread` is no longer offered as the recall tool. The tool
     inventory's "counts its calls as reads" note follows the new rule.
