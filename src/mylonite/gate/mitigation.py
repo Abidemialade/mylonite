@@ -7,7 +7,14 @@ from typing import Any
 
 from mylonite._redaction import redact
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, guarded_twin_layer
-from mylonite._verdict import KEPT, verdict_label, verdict_reason
+from mylonite._verdict import (
+    KEPT,
+    STABILITY_STAGES,
+    stability_measured,
+    stability_not_measured,
+    verdict_label,
+    verdict_reason,
+)
 from mylonite.contracts import ExploitRecord, ValidationReport
 from mylonite.gate.localize import localize
 from mylonite.mitigations import snippet as _snippet
@@ -371,10 +378,19 @@ def _evidence_lines(report: ValidationReport) -> str:
     # ``detail`` is free text that can carry a credential the target echoed
     # (#223). The PR body is committed and sent to GitHub, so it gets the same
     # ``redact()`` pass ``validation_report.json`` gets before it is written.
-    rows = [
-        f"- **{o.stage}**: {'pass' if o.passed else 'FAIL'} — {redact(o.detail)}"
-        for o in report.outcomes
-    ]
+    # A repeat-run leg resting on one run per build measured nothing, so it
+    # reads "not measured", never pass or a check mark (see
+    # _verdict.stability_measured). Enough runs render as before.
+    unmeasured: set[str] = (
+        set() if stability_measured(report) else {str(s) for s in STABILITY_STAGES}
+    )
+
+    def _result(o: Any) -> str:
+        if str(o.stage) in unmeasured and o.passed and not o.report_only:
+            return stability_not_measured(report)
+        return "pass" if o.passed else "FAIL"
+
+    rows = [f"- **{o.stage}**: {_result(o)} — {redact(o.detail)}" for o in report.outcomes]
     # The differential-oracle evidence (PR2): the gate with live per-leg marks,
     # the fires/resists counts, and the per-seed kill matrix — so the PR shows
     # WHY this test is trustworthy, not just that it was kept.
@@ -383,7 +399,9 @@ def _evidence_lines(report: ValidationReport) -> str:
     legs_by_stage = {str(o.stage): o for o in report.outcomes}
     if report.gating_legs:
         rendered = " AND ".join(
-            f"{leg} {'✓' if legs_by_stage[leg].passed else '✗'}"
+            f"{leg} (not measured)"
+            if leg in unmeasured and legs_by_stage[leg].passed
+            else f"{leg} {'✓' if legs_by_stage[leg].passed else '✗'}"
             for leg in report.gating_legs
             if leg in legs_by_stage
         )
