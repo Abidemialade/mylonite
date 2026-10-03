@@ -283,6 +283,11 @@ the damage to them (an LLM-judge verdict, say), the remediation line says so and
 `{exfil_host}` marker and `mylonite scan --target-file <file> --authorize <family>` to
 calibrate the probe.
 
+On a `transport: rest` target the effect leg is always report-only: Mylonite sees only the
+agent's reply, so there is no state to read. Its detail starts `black-box target:`, and
+neither it nor the remediation lines suggest an `effect_probe`, which a `rest` target
+refuses (see [Plain HTTP agents](http-agent.md)).
+
 ### Reading a rug-pull result
 
 The `synth-w1-rug-pull` attempt lists the server's tools before the agent runs, lists

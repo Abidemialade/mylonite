@@ -320,9 +320,22 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
         # Deferred: the validator module pulls in the scan engine, which a
         # report render does not otherwise need.
         from mylonite.plugins._reference.reference_validator import (
+            BLACK_BOX_EFFECT_CLAUSE,
             EFFECT_UNPROVEN_CLAUSE,
             unguarded_no_verdict,
         )
+
+        consensus_remediation = (
+            "consensus fail: judges disagreed the effect was real; add an effect_probe."
+        )
+        # A rest target refuses an effect_probe: don't advise one there.
+        if any(
+            o.stage == "effect" and o.detail == BLACK_BOX_EFFECT_CLAUSE for o in report.outcomes
+        ):
+            consensus_remediation = (
+                "consensus fail: judges disagreed the attack landed; a black-box target "
+                "gives no state to settle it, so scan the agent's MCP server to confirm."
+            )
 
         effect_remediation = (
             "effect fail: the target's effect probe did not confirm the damage materialised."
@@ -356,7 +369,7 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
             "flakiness": "flakiness fail: exploit too flaky to gate; try a more deterministic seed.",
             "stability": "stability fail: the attack did not reproduce against the real target.",
             "effect": effect_remediation,
-            "consensus": "consensus fail: judges disagreed the effect was real; add an effect_probe.",
+            "consensus": consensus_remediation,
             # DCR-0007: a metamorphic-only failure (every other leg passes) is a
             # documented gating leg that can REJECT a report on its own (see the
             # "metamorphic robustness gates kept" note above) -- without this
