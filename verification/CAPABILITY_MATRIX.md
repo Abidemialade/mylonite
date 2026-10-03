@@ -207,9 +207,10 @@ committed `third-party-campaign.yml` workflow, never a local replay.
 
 ## Headline numbers (fill as runs complete)
 
-- **Third-party campaign, live in CI (2026-10-03):** ✅✅ **KEPT, twice, each across 3
-  independent re-drives on every provider tried** — `@modelcontextprotocol/server-memory`
-  and `redis/mcp-redis`, both W4. Full numbers, caveats and product-bug links:
+- **Third-party campaign, live in CI (2026-10-03):** ✅✅ **W4 KEPT on two servers, passing
+  the pre-registered 2-of-3 bar on both hosted providers** — `@modelcontextprotocol/server-memory`
+  (Claude Haiku 4.5 3/3, gpt-4o-mini 2/3) and `redis/mcp-redis` (3/3 on both), at the
+  dispatched-tool-linked proof level; the effect probe did not calibrate on these servers. Full numbers, caveats and product-bug links:
   [`results/0.12.0/third-party/README.md`](results/0.12.0/third-party/README.md).
 - **Detection (MCPSecBench `maliciousadd`):** ✅ **1 W1 finding** caught with Haiku on a
   third-party target — the external detection proof. (Recall over the full MCPSecBench server
