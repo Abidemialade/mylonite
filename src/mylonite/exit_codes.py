@@ -23,6 +23,11 @@ Contract:
 * ``6`` test generation failed
 * ``7`` test validation failed
 * ``8`` the gate's git/gh step failed (the findings are still on disk)
+* ``9`` ``gate`` kept at least one proven finding and wrote its gate test
+  (``gate`` exits ``0`` only when the scan ran and found nothing)
+* ``10`` ``gate`` kept nothing, but at least one finding reproduced without
+  proof (STABLE, NOT PROVEN): it is reported as a candidate, never written as
+  a gate test
 """
 
 from __future__ import annotations
@@ -39,17 +44,19 @@ EXIT_NOT_KEPT: Final = 5
 EXIT_GENERATE_FAILED: Final = 6
 EXIT_VALIDATE_FAILED: Final = 7
 EXIT_PR_FAILED: Final = 8
+EXIT_GATE_KEPT: Final = 9
+EXIT_GATE_CANDIDATES: Final = 10
 
-#: Explicit severity ordering, least to most severe. Every code minted so far
-#: (0-8) happens to rank more severe as its number increases, which is why a
-#: plain ``max()`` over exit codes has worked until now -- but that was an
-#: accident of numbering, not a rule a future code is bound by. This list is
-#: the deliberate version: it reproduces today's ``max()`` result for every
-#: combination of 0-8, and gives later codes (e.g. a future distinct
-#: "inconclusive" or "clean, server-reported" code) a place to be inserted by
-#: hand rather than wherever their numeric value happens to fall.
+#: Explicit severity ordering, least to most severe. The codes 0-8 rank more
+#: severe as their number increases, so for them this reproduces a plain
+#: ``max()``. The gate's result codes are placed by hand: ``9`` (kept) and
+#: ``10`` (candidates only) are results, not errors, so they rank above
+#: success and below every error code, with a proven finding above an
+#: unproven one. Their numbers alone would rank them above ``8``.
 SEVERITY_ORDER: Final[tuple[int, ...]] = (
     EXIT_SUCCESS,
+    EXIT_GATE_CANDIDATES,
+    EXIT_GATE_KEPT,
     EXIT_FINDINGS,
     EXIT_CONFIG,
     EXIT_BUDGET,
@@ -66,11 +73,10 @@ _SEVERITY_RANK: Final[dict[int, int]] = {code: rank for rank, code in enumerate(
 def most_severe(codes: Iterable[int]) -> int:
     """Return the most severe of ``codes``, per :data:`SEVERITY_ORDER`.
 
-    This is the explicit replacement for ``max(codes)``: for every code in
-    :data:`SEVERITY_ORDER` (today, 0-8) it returns exactly what ``max()``
-    would, because the order was built to reproduce that. The difference is
-    that future codes are ranked by where they're placed in the list, not by
-    their integer value.
+    This is the explicit replacement for ``max(codes)``: for the codes 0-8 it
+    returns exactly what ``max()`` would, because the order was built to
+    reproduce that. Later codes (``9``, ``10``) are ranked by where they are
+    placed in the list, not by their integer value.
 
     Raises ``ValueError`` if ``codes`` is empty, or if any code is not in
     :data:`SEVERITY_ORDER` -- an unregistered code is a bug at the call site
