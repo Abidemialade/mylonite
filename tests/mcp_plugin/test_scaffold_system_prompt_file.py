@@ -51,6 +51,28 @@ def test_rebase_relative_path_falls_back_to_absolute_when_climbing_would_be_need
     assert result == (workdir / "prompt.txt").resolve()
 
 
+def test_rebase_relative_path_falls_back_to_absolute_on_a_cross_drive_relpath(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Important fix (review round 1): on Windows, `path` and `output` can
+    resolve onto different drives (e.g. `--scaffold T:/configs/app.yaml` run
+    from a `C:` cwd) -- there is no relative path between two drives at all,
+    and `os.path.relpath` raises `ValueError` rather than returning one.
+    This must fall back to the absolute path, not crash `scan --scaffold`."""
+    import os as os_module
+
+    monkeypatch.chdir(tmp_path)
+
+    def _raise_cross_drive(*_a: object, **_k: object) -> str:
+        raise ValueError("path is on mount 'C:', start on mount 'T:'")
+
+    monkeypatch.setattr(os_module.path, "relpath", _raise_cross_drive)
+    out = tmp_path / "configs" / "app.yaml"
+    result = _rebase_relative_path(Path("prompt.txt"), output=out)
+    assert result.is_absolute()
+    assert result == (tmp_path / "prompt.txt").resolve()
+
+
 def test_rebase_relative_path_under_a_nested_output_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
