@@ -682,7 +682,7 @@ def test_run_gate_processes_every_exploit_in_pattern_id_order(tmp_path):
 
 
 def test_run_gate_orders_the_pr_body_by_severity_not_pattern_id(tmp_path):
-    """SV1: with two kept findings, the gate PR lists the more severe one
+    """with two kept findings, the gate PR lists the more severe one
     first, even though generate/validate still ran in pattern_id order.
     'a-low-severity' sorts first by pattern_id but is W1 (Medium); it must
     not lead the PR body ahead of the W2 (High) finding."""

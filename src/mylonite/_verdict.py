@@ -144,7 +144,7 @@ def next_step_after_keep(
     The exit code is 0 either way, but an unproven keep is not presented as a
     finished gate: committing its test gates reproduction only.
 
-    ``exploit`` (A3/SV1): when given and the verdict is a plain ``KEPT`` —
+    ``exploit``: when given and the verdict is a plain ``KEPT`` —
     never for a STABLE, NOT PROVEN or black-box keep, which already say
     nothing was proven — this is preceded by the same severity, impact and
     suggested-fix lines the gate PR body opens with

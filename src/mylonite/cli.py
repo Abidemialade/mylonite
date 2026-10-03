@@ -1454,7 +1454,7 @@ def scan(
             write_redacted_target(scan_dir / "target.yaml", custom_target_yaml)
         echo(redact(render_summary(result)))
         echo(f"Artefacts: {scan_dir}")
-        # A3/SV1: severity, impact and the suggested fix under every FOUND,
+        # severity, impact and the suggested fix under every FOUND,
         # most severe first — the same facts (reused, not re-derived) the
         # gate PR body opens with — so the fix is never exclusive to a
         # validated directory or an export.
@@ -2383,7 +2383,7 @@ def validate(
         from mylonite._verdict import next_step_after_keep
 
         echo("")
-        # A3/SV1: the severity/impact/suggested-fix block under a plain KEPT
+        # the severity/impact/suggested-fix block under a plain KEPT
         # verdict (generated.exploit carries the finding both the reference
         # and custom-target branches above already built).
         echo(next_step_after_keep(report, generated.exploit))

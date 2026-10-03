@@ -187,7 +187,7 @@ def severity_sort_kept(
 
 def sort_exploits_by_severity(exploits: list[ExploitRecord]) -> list[ExploitRecord]:
     """The same most-severe-first order as :func:`severity_sort_kept`, for a
-    plain list of exploits (`scan`'s end-of-run findings, SV1)."""
+    plain list of exploits (`scan`'s end-of-run findings)."""
     return sorted(exploits, key=_severity_sort_key)
 
 
@@ -197,7 +197,7 @@ def finding_block(
     *,
     target: Any | None = None,
 ) -> list[str]:
-    """Severity, impact and suggested-fix lines for one finding (A3/SV1).
+    """Severity, impact and suggested-fix lines for one finding.
 
     The same facts the gate PR body opens with — reused here, not
     re-derived, so every surface that shows a finding states them the same
@@ -332,7 +332,7 @@ def _reviewer_checklist(
     model: str | None,
     system_prompt: str | None,
 ) -> list[str]:
-    """A short checklist (T5): what a reviewer should confirm before merging
+    """A short checklist: what a reviewer should confirm before merging
     this gate PR, not a claim Mylonite makes on their behalf."""
     label = verdict_label(report)
     prompt_line = (
