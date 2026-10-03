@@ -34,17 +34,17 @@ __all__ = [
     "CREDENTIAL_TOP_LEVEL_SECTIONS",
     "REDACTION_PLACEHOLDER",
     "SecretRedactingFilter",
-    "clear_secret_values",
+    "clear_masked_values",
     "install_log_redaction",
     "looks_like_api_key",
-    "mask_secret_values",
+    "mask_registered_values",
     "redact",
     "redact_env",
     "redact_exception",
     "redact_target_yaml",
     "redact_url_query",
     "redact_value",
-    "register_secret_value",
+    "register_masked_value",
     "target_env_refs",
     "target_masked_fields",
     "target_yaml_env_ref_name",
@@ -275,34 +275,34 @@ def redact_url_query(url: str) -> str:
 #: the values of ``--llm-header``/``MYLONITE_LLM_HEADERS`` (a workspace id
 #: matches none of the shape patterns, yet must never reach a log or a
 #: console line). Longest first, so a value containing another is masked whole.
-_SECRET_VALUES: list[str] = []
+_MASKED_VALUES: list[str] = []
 
 #: Values shorter than this are not registered: masking every occurrence of a
 #: two-letter value would shred ordinary text.
-_MIN_SECRET_VALUE_LEN: Final = 4
+_MIN_MASKED_VALUE_LEN: Final = 4
 
 
-def register_secret_value(value: str) -> None:
+def register_masked_value(value: str) -> None:
     """Mask every exact occurrence of ``value`` in :func:`redact`'s output."""
-    if len(value) < _MIN_SECRET_VALUE_LEN or value in _SECRET_VALUES:
+    if len(value) < _MIN_MASKED_VALUE_LEN or value in _MASKED_VALUES:
         return
-    _SECRET_VALUES.append(value)
-    _SECRET_VALUES.sort(key=len, reverse=True)
+    _MASKED_VALUES.append(value)
+    _MASKED_VALUES.sort(key=len, reverse=True)
 
 
-def clear_secret_values() -> None:
-    """Forget every value registered with :func:`register_secret_value`."""
-    _SECRET_VALUES.clear()
+def clear_masked_values() -> None:
+    """Forget every value registered with :func:`register_masked_value`."""
+    _MASKED_VALUES.clear()
 
 
-def mask_secret_values(text: str) -> str:
+def mask_registered_values(text: str) -> str:
     """Mask only the registered exact values, leaving everything else as is.
 
     For text that is persisted (a failed call's detail in a verdict reason),
     where the shape-based patterns of :func:`redact` are deliberately not
     applied, but a registered value must still never land on disk.
     """
-    for value in _SECRET_VALUES:
+    for value in _MASKED_VALUES:
         text = text.replace(value, REDACTION_PLACEHOLDER)
     return text
 
@@ -310,7 +310,7 @@ def mask_secret_values(text: str) -> str:
 def redact(text: str) -> str:
     """Return ``text`` with secret-shaped tokens replaced by the placeholder.
 
-    Also masks every value registered with :func:`register_secret_value`.
+    Also masks every value registered with :func:`register_masked_value`.
     Non-``str`` inputs are returned unchanged (defensive). The operation is
     idempotent: redacting already-redacted text is a no-op because the
     placeholder matches none of the patterns.
@@ -318,7 +318,7 @@ def redact(text: str) -> str:
     if not isinstance(text, str):
         return text
 
-    redacted = mask_secret_values(text)
+    redacted = mask_registered_values(text)
     for pattern in _FULL_PATTERNS:
         redacted = pattern.sub(REDACTION_PLACEHOLDER, redacted)
     redacted = _URL_CRED_PATTERN.sub(_mask_url_cred, redacted)
@@ -423,7 +423,7 @@ class SecretRedactingFilter(logging.Filter):
     on a handler, or on LiteLLM's loggers, which see other libraries' records
     too) a record from that logger tree gets the full :func:`redact`, and any
     other record has only the registered secret values masked
-    (:func:`register_secret_value`), and is left untouched when nothing
+    (:func:`register_masked_value`), and is left untouched when nothing
     matched.
 
     Covers the rendered message (``msg`` with its ``%`` args), the exception
@@ -442,7 +442,7 @@ class SecretRedactingFilter(logging.Filter):
         name = record.name or ""  # makeLogRecord() builds records with name=None
         if name == self.tree or name.startswith(self.tree + "."):
             return redact
-        return mask_secret_values if _SECRET_VALUES else None
+        return mask_registered_values if _MASKED_VALUES else None
 
     def filter(self, record: logging.LogRecord) -> bool:
         mask = self._masker(record)
