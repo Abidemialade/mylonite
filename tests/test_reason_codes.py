@@ -415,6 +415,7 @@ def test_every_preflight_code_is_used_by_a_refusal() -> None:
         reason_codes.PRE_DESCRIBE_FAILED,
         reason_codes.PRE_AUTOWIRE_TIMEOUT,
         reason_codes.PRE_AUTOWIRE_DESCRIBE_FAILED,
+        reason_codes.PRE_WEAKNESS_FILTER_EMPTY,
     }
 
 

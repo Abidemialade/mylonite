@@ -268,9 +268,9 @@ _ABORT: Final[tuple[ReasonCode, ...]] = (
         "The scan used up its LLM call budget and stopped early; coverage is incomplete.",
         "Raise --max-llm-calls (the per-scan budget), or the hard request ceiling "
         "(--max-llm-requests or MYLONITE_MAX_LLM_REQUESTS) when the run names it, or "
-        "run fewer weakness classes — --weakness-class on a "
-        "reference/bundled target, weakness_classes in the target file for a custom one — "
-        "then re-run.",
+        "run fewer weakness classes with --weakness-class (every target kind), or by "
+        "editing weakness_classes in the target file (a custom target only) — then "
+        "re-run.",
     ),
     _rc(
         ABT_PROVIDER_UNREACHABLE,
@@ -329,6 +329,7 @@ PRE_DESCRIBE_TIMEOUT: Final = "MYL-PRE-002"
 PRE_DESCRIBE_FAILED: Final = "MYL-PRE-003"
 PRE_AUTOWIRE_TIMEOUT: Final = "MYL-PRE-004"
 PRE_AUTOWIRE_DESCRIBE_FAILED: Final = "MYL-PRE-005"
+PRE_WEAKNESS_FILTER_EMPTY: Final = "MYL-PRE-006"
 
 _PREFLIGHT: Final[tuple[ReasonCode, ...]] = (
     _rc(
@@ -362,6 +363,13 @@ _PREFLIGHT: Final[tuple[ReasonCode, ...]] = (
         "Starting or describing the server failed while inferring a seed_arm.",
         "Fix the cause printed after the code (it names the failing step, usually the "
         "target file's command, args or timeout_s), then re-run.",
+    ),
+    _rc(
+        PRE_WEAKNESS_FILTER_EMPTY,
+        "--weakness-class named none of the target's declared weakness_classes, so "
+        "nothing would be scanned, and the run was refused before any LLM call.",
+        "Pass a class the target file declares in weakness_classes, or drop "
+        "--weakness-class to run every declared class.",
     ),
 )
 
