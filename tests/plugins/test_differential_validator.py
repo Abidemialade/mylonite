@@ -2478,3 +2478,48 @@ def test_a_pattern_no_seed_matches_is_never_kept() -> None:
     assert report.reproducibility is not None
     assert report.reproducibility.vuln_fired == 0
     assert report.reproducibility.guard_resisted == 0
+
+
+def test_a_guard_that_leaked_nothing_but_could_not_confirm_is_not_called_unblocking() -> None:
+    """The guarded side leaked 0/3, confirmed 1/3 resisting and reached no
+    verdict on 2/3. The keep still fails (absence of harm is not proof), but
+    the detail must not claim the guard "did not block this attack"."""
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    n = 3
+    guard_resisted = [True, False, False]
+
+    def _fake_run_custom_iteration(self, target, pattern_id, *, factory=None):
+        if factory is None:
+            return _CustomRun(finding=True, effect_confirmed="unprobed", response=None)
+        idx = self._guard_calls
+        self._guard_calls += 1
+        return _CustomRun(
+            finding=False,
+            effect_confirmed="unprobed",
+            response=None,
+            resisted=guard_resisted[idx],
+        )
+
+    validator = DifferentialValidator(
+        model="stub",
+        iterations=n,
+        vuln_threshold=1,
+        completion_fn=_cust_completion,
+        run_build=False,
+        guarded_adapter_factory=lambda: _FakeCustomAdapter("true"),
+        control_weakness="W4",
+    )
+    validator._guard_calls = 0
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            DifferentialValidator, "_run_custom_iteration", _fake_run_custom_iteration, raising=True
+        )
+        report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    differential = _outcome(report, "differential")
+    assert differential.passed is False
+    assert report.kept is False
+    assert "did not block" not in differential.detail
+    assert "guarded resisted 1/3" in differential.detail
+    assert "2/3 reached no verdict" in differential.detail

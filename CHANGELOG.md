@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A rejection no longer says the guard "did not block" when it blocked everything it
+  could see.** When the guarded side of a custom-target differential leaked nothing but
+  some runs reached no verdict (for example, an effect probe that failed calibration),
+  `validate` now reports how many guarded runs resisted and how many could not be
+  decided, and suggests an effect probe that calibrates. The verdict is unchanged: an
+  attack that is merely absent is still not proof that the control closes it.
 - **The scaffolded gate workflows and `gate-action` now map your actual
   provider's credential, not always Anthropic's.** `gate --workflows` used
   to always render `ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_API_KEY }}`, so

@@ -1022,11 +1022,36 @@ class DifferentialValidator(ValidatorBase):
             passed = decision.differential_passed and decision.flakiness_passed
             control = self._control_weakness or "boundary control"
             rate_gap = ((fired - guard_fired) / n) if n else 0.0
+            guard_no_verdict = n - guard_fired - guard_resisted_count
             counts = (
                 f"raw fired {fired}/{n}, guarded leaked {guard_fired}/{n}, "
+                f"guarded resisted {guard_resisted_count}/{n}, "
                 f"success-rate gap {rate_gap:.2f}"
             )
-            if passed and self._guarded_is_server_layer:
+            # A guarded side that leaked nothing but could not be confirmed as
+            # resisting (runs that reached no verdict) is not a guard that "did
+            # not block": say what actually fell short.
+            unconfirmed = (
+                not passed
+                and guard_fired == 0
+                and guard_no_verdict > 0
+                and fired >= self._vuln_threshold
+            )
+            if unconfirmed:
+                where = (
+                    "server-layer twin"
+                    if self._guarded_is_server_layer
+                    else "synthetic boundary twin"
+                )
+                detail = (
+                    f"control {control!r} ({where}): {counts}; the guarded side leaked "
+                    f"nothing, but only {guard_resisted_count}/{n} runs could be confirmed "
+                    f"as resisting (need {self._min_guard_resist_rate:.0%}) and "
+                    f"{guard_no_verdict}/{n} reached no verdict, so this run cannot show "
+                    "that the control closes the attack. Declare an effect_probe that "
+                    "calibrates on this target so a stopped attack can be confirmed"
+                )
+            elif passed and self._guarded_is_server_layer:
                 detail = (
                     f"control {control!r} (server-layer twin): {counts} "
                     f"(need >= {self._min_rate_gap}); {PROOF_CLAIM_SERVER}"
