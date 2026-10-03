@@ -243,6 +243,17 @@ class MCPStdioAdapter(MCPSessionAdapterBase):
     def _describe_data_sources(self) -> list[str]:
         return [f"MCP stdio: {self._spec.command} {' '.join(self._spec.render_args(self._scope))}"]
 
+    def _launch_failure_summary(self) -> str:
+        # #195 review finding: redact() only catches a `key=value`/`key:
+        # value` shape or a provider-shaped token -- a credential passed as
+        # TWO argv items (`--password`, `<value>`, no separator) with an
+        # unremarkable value is not caught, and a stdio target's args
+        # routinely carry exactly that shape (`--password hunter2`). Never
+        # print an arg value here: the executable (still redacted,
+        # belt-and-braces) plus how many args it had, nothing else.
+        n = len(self._spec.render_args(self._scope))
+        return f"MCP stdio: {redact(self._spec.command)} with {n} argument(s), values withheld"
+
     def _describe_notes(self) -> str:
         return (
             f"MCP stdio target — family={self._family!r}, "
@@ -264,11 +275,11 @@ class MCPStdioAdapter(MCPSessionAdapterBase):
             # question, and nothing here answered it. Name it, the same way
             # invoke()'s failure path already does for a live attempt (see
             # MCPSessionAdapterBase.invoke's "For a launch failure also name
-            # the command" comment) -- redacted: args routinely carry a
-            # secret as a CLI flag (`npx server --api-key=...`).
+            # the command" comment) -- never an arg value (see
+            # _launch_failure_summary's docstring/override above).
             cause = _unwrap_sole_exception(exc)
             try:
-                where = redact("; ".join(self._describe_data_sources()))
+                where = self._launch_failure_summary()
             except Exception:
                 where = ""
             detail = f" [{where}]" if where else ""

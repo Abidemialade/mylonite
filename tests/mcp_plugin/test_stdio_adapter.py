@@ -865,16 +865,19 @@ async def test_describe_launch_failure_names_the_command() -> None:
             await adapter.describe()
     message = str(excinfo.value)
     assert "FileNotFoundError" not in message.split(":")[0]  # not a bare class-name lead
-    assert "mcp:fetch" in message or "fetch" in message
+    assert adapter._spec.command in message  # "uvx" -- the executable, named
 
 
 @pytest.mark.asyncio
-async def test_describe_launch_failure_redacts_a_credential_shaped_arg(
+async def test_describe_launch_failure_never_prints_an_arg_value(
     tmp_path: Path,
 ) -> None:
-    """The command/args a launch failure names can carry a credential as a
-    CLI flag (`server --api-key=...`) -- the message must redact it, the
-    same guarantee `invoke()`'s own launch-failure naming already gives."""
+    """#195 review finding: redact() only catches a `key=value`/`key: value`
+    shape or a provider-shaped token -- a credential passed as two separate
+    argv items (`--password`, `<value>`, no separator) with an unremarkable
+    value is not caught. The launch-failure message must therefore never
+    print an arg value at all, `=`-joined or not: only the (still redacted)
+    executable and an argument COUNT."""
     from contextlib import asynccontextmanager
 
     from mylonite.plugins._mcp import target_registry
@@ -906,7 +909,11 @@ async def test_describe_launch_failure_redacts_a_credential_shaped_arg(
         target_registry.clear_runtime_targets()
     message = str(excinfo.value)
     assert secret not in message
-    assert "--api-key=" in message  # the flag name/shape still shows -- only the value is masked
+    assert "--api-key" not in message  # no arg text at all, not even the flag name
+    assert "srv" not in message  # not even an unremarkable, non-credential arg
+    assert "python" in message  # the executable is still named
+    assert "argument(s), values withheld" in message
+    assert "3 argument(s)" in message  # -m, srv, --api-key=<secret>
 
 
 @pytest.mark.asyncio
