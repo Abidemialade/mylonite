@@ -128,11 +128,27 @@ from mylonite._replay import (
     _read_meta_cache_key_version,
 )
 from mylonite.demo.runner import (
-    DEMO_MODEL,
-    DEMO_PROVIDER,
+    DemoFixtureError,
     _build_scan,
     _note_id_counter,
+    demo_model,
+    demo_provider,
 )
+
+
+def __getattr__(name: str) -> str:
+    """``DEMO_MODEL`` / ``DEMO_PROVIDER``: the shipped recording's identity, read lazily.
+
+    Read on access, not at import, so a half-finished re-record (one variant's
+    sidecar rewritten with a new model, the other not yet) cannot stop this very
+    script from importing; pass ``--provider``/``--model`` to finish it.
+    """
+    if name == "DEMO_MODEL":
+        return demo_model()
+    if name == "DEMO_PROVIDER":
+        return demo_provider()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 try:
     from mylonite.demo.runner import _VARIANTS
@@ -226,7 +242,7 @@ def _check_dir_safe_to_record(variant_dir: Path, expected_version: int) -> None:
     )
 
 
-def _stamp_meta(variant_dir: Path, variant: str, *, model: str = DEMO_MODEL) -> None:
+def _stamp_meta(variant_dir: Path, variant: str, *, model: str | None = None) -> None:
     """Write the ``_meta.json`` sidecar BEFORE recording begins.
 
     Stamped up front (not after ``engine.run()``, as an earlier version of
@@ -239,6 +255,8 @@ def _stamp_meta(variant_dir: Path, variant: str, *, model: str = DEMO_MODEL) -> 
     a target directory is either genuinely empty (safe to stamp+record into)
     or already agrees with this sidecar (a deliberate incremental re-record).
     """
+    if model is None:
+        model = demo_model()
     variant_dir.mkdir(parents=True, exist_ok=True)
     meta_path = variant_dir / "_meta.json"
     meta_path.write_text(
@@ -312,8 +330,8 @@ def _reject_partial_recording(variant: str, report: object) -> None:
 async def _record_variant(
     variant: str,
     *,
-    provider: str = DEMO_PROVIDER,
-    model: str = DEMO_MODEL,
+    provider: str | None = None,
+    model: str | None = None,
     force: bool = False,
 ) -> tuple[int, int]:
     """Record one variant's fixtures; return (fixture_count, findings_count).
@@ -322,6 +340,8 @@ async def _record_variant(
     through rather than read from the module constants so the sidecar this run
     stamps always names the model this run actually called.
     """
+    model = model if model is not None else demo_model()
+    provider = provider if provider is not None else demo_provider()
     variant_dir = FIXTURES_ROOT / variant
     if force:
         removed = _clear_variant_dir(variant_dir)
@@ -361,8 +381,10 @@ async def _record_variant(
 
 
 async def _main(
-    *, provider: str = DEMO_PROVIDER, model: str = DEMO_MODEL, force: bool = False
+    *, provider: str | None = None, model: str | None = None, force: bool = False
 ) -> None:
+    model = model if model is not None else demo_model()
+    provider = provider if provider is not None else demo_provider()
     print(f"Recording demo fixtures with {provider}/{model}")
     print(f"Fixtures root: {FIXTURES_ROOT.resolve()}")
     counts: dict[str, tuple[int, int]] = {}
@@ -418,9 +440,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--provider",
-        default=DEMO_PROVIDER,
+        default=None,
         help=(
-            f"provider label for this recording (default: {DEMO_PROVIDER}). Display "
+            "provider label for this recording (default: the provider of the "
+            "shipped recording's model). Display "
             "only: LiteLLM routes purely on the --model prefix, so this never "
             "changes which endpoint is called. Pass it alongside a --model from a "
             "different provider, or the console output names the wrong one. It is "
@@ -431,11 +454,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--model",
-        default=DEMO_MODEL,
+        default=None,
         help=(
             "model to record against, provider-prefixed as LiteLLM expects "
-            f"(default: {DEMO_MODEL}). Stamped into _meta.json and shown in the "
-            "demo's mode line."
+            "(default: the model the shipped fixtures name in their _meta.json). "
+            "Stamped into _meta.json and shown in the demo's mode line."
         ),
     )
     parser.add_argument(
@@ -449,7 +472,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "produces."
         ),
     )
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    # Resolved here, not at import: the defaults come from the shipped fixtures'
+    # sidecars, and a missing or mixed set must not stop the script from
+    # recording a fresh one when the caller names the model.
+    if args.model is None or args.provider is None:
+        try:
+            args.model = args.model if args.model is not None else demo_model()
+            args.provider = args.provider if args.provider is not None else demo_provider()
+        except DemoFixtureError as exc:
+            parser.error(f"{exc} Pass --provider and --model to record a fresh set.")
+    return args
 
 
 if __name__ == "__main__":

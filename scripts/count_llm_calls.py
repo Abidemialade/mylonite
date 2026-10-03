@@ -23,7 +23,7 @@ Usage::
 
     python scripts/count_llm_calls.py            # scan counts only (fast)
     python scripts/count_llm_calls.py --gate     # also the gate path (slower)
-    python scripts/count_llm_calls.py --root DIR # read examples/ from DIR
+    python scripts/count_llm_calls.py --root DIR # read the recordings from DIR
 
 The script uses only APIs that existed at the baseline commit, so the same file
 can measure an older tree: point ``PYTHONPATH`` at that tree's ``src`` and
@@ -303,7 +303,12 @@ def measure(*, gate: bool, root: Path = ROOT) -> dict[str, Any]:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--gate", action="store_true", help="also count the gate path")
-    parser.add_argument("--root", type=Path, default=ROOT, help="tree to read examples/ from")
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=ROOT,
+        help="tree to read the recordings (src/mylonite/demo/) from",
+    )
     args = parser.parse_args(argv)
     # The gate prints its own progress to stdout; keep stdout for the JSON.
     with contextlib.redirect_stdout(sys.stderr):

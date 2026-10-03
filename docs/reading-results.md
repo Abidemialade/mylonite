@@ -118,6 +118,11 @@ An unguarded run that was cut off by `--iteration-timeout` or stopped by the cal
 budget reached no verdict, which is not the same as the attack failing to land.
 When any were, the line counts them and points at the time limit instead.
 
+With `--iterations 1` the flakiness leg has nothing to compare, because one run per build
+gives a rate of 0% or 100% by construction. The panel then shows that leg as
+`· not measured`, the gate line as `flakiness (not measured)`, and the verdict reason
+says stability was not measured (1 run per build). Two or more iterations measure it.
+
 The verdict at the end of the gate line is **KEPT**, **STABLE, NOT PROVEN** or
 **REJECTED**. STABLE, NOT PROVEN is a kept test with no proof behind it: the attack
 reproduced, but no guarded side or effect probe showed a safeguard stops it, or the

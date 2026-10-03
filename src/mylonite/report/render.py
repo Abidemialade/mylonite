@@ -25,9 +25,12 @@ from mylonite._twin_fidelity import (
 from mylonite._verdict import (
     KEPT,
     REJECTED,
+    STABILITY_STAGES,
     STABLE_NOT_PROVEN,
     has_proof,
     is_black_box_keep,
+    stability_measured,
+    stability_not_measured,
     verdict_label,
     verdict_reason,
 )
@@ -149,7 +152,21 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
     table.add_column("metric", no_wrap=True)
     table.add_column("detail")
 
+    # A repeat-run leg that rests on one run per build measured nothing; it
+    # reads "not measured", never as a pass (see _verdict.stability_measured).
+    unmeasured = (
+        set() if stability_measured(report) else {o.stage for o in report.outcomes}
+    ) & STABILITY_STAGES
     for outcome in report.outcomes:
+        if outcome.stage in unmeasured and outcome.passed and not outcome.report_only:
+            note = stability_not_measured(report)
+            table.add_row(
+                outcome.stage,
+                "· not measured",
+                "-",
+                rich_escape(f"{note}: {redact(outcome.detail)}"),
+            )
+            continue
         if outcome.report_only:
             # Informational leg (e.g. effect with no probe declared): not a pass,
             # not a fail — it does not contribute to kept. Show it as such so the
@@ -198,9 +215,11 @@ def _render_validation_report(report: Any, console: Console | None = None) -> No
         # operator reading an incomplete formula with no mark or mention of
         # the missing leg can't tell the VERDICT might depend on it.
         rendered = " AND ".join(
-            f"{leg} {_mark(legs_by_stage[leg].passed)}"
-            if leg in legs_by_stage
-            else f"{leg} (missing)"
+            f"{leg} (missing)"
+            if leg not in legs_by_stage
+            else f"{leg} (not measured)"
+            if leg in unmeasured and legs_by_stage[leg].passed
+            else f"{leg} {_mark(legs_by_stage[leg].passed)}"
             for leg in report.gating_legs
         )
         console_print(console, f"gate: kept = {rendered}  =>  {verdict_label(report)}")

@@ -82,3 +82,51 @@ def test_fixture_variants_naming_different_models_are_refused(
 
     with pytest.raises(DemoFixtureError, match="different models"):
         runner_mod._recorded_model()
+
+
+# --- the recorded model is read lazily: a broken sidecar is exit 2, not a crash ---
+
+
+def _broken_fixture_root(tmp_path: Path, *, mixed: bool) -> Path:
+    for variant, model in (("vulnerable", "provider-a/model-a"), ("guarded", "provider-b/model-b")):
+        (tmp_path / variant).mkdir()
+        if mixed:
+            (tmp_path / variant / "_meta.json").write_text(
+                json.dumps({"model": model}), encoding="utf-8"
+            )
+    return tmp_path
+
+
+@pytest.mark.parametrize("mixed", [False, True], ids=["missing-sidecar", "mixed-models"])
+def test_a_broken_sidecar_exits_2_with_one_line_and_no_traceback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mixed: bool
+) -> None:
+    from typer.testing import CliRunner
+
+    from mylonite.cli import app
+
+    root = _broken_fixture_root(tmp_path, mixed=mixed)
+    monkeypatch.setattr(runner_mod, "packaged_fixture_dir", lambda: root)
+
+    result = CliRunner().invoke(app, ["demo"])
+
+    assert result.exit_code == 2, result.output
+    assert "Traceback" not in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    assert "demo fixtures" in result.output
+
+
+def test_the_record_script_still_parses_when_the_shipped_sidecars_are_broken(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from scripts import record_demo_fixtures as script
+
+    root = _broken_fixture_root(tmp_path, mixed=True)
+    monkeypatch.setattr(runner_mod, "packaged_fixture_dir", lambda: root)
+
+    args = script._parse_args(["--provider", "ollama", "--model", "ollama_chat/llama3.2:3b"])
+    assert (args.provider, args.model) == ("ollama", "ollama_chat/llama3.2:3b")
+
+    with pytest.raises(SystemExit):
+        script._parse_args([])
+    assert "Pass --provider and --model" in capsys.readouterr().err

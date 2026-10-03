@@ -259,7 +259,7 @@ MYLONITE_OFFLINE_E2E=1 pytest tests/e2e/test_offline_deep_path.py tests/corpus t
 - **Offline deep path.** `tests/e2e/test_offline_deep_path.py` runs the
   reference scan of the vulnerable twin from the demo's recordings, sends
   its finding through the real generator and differential validator (which
-  replay `examples/reference_validation/differential_fixtures/`), and runs
+  replay the demo's kept finding in `src/mylonite/demo/kept/`), and runs
   the emitted test under pytest. It skips without `MYLONITE_OFFLINE_E2E=1`,
   so the main test jobs don't pay for it twice; the two jobs above always
   set it.

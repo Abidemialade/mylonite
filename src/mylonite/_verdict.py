@@ -56,6 +56,37 @@ JUDGE_ONLY_CLAUSE: Final = (
 _PROOF_STAGES: Final = frozenset({"differential", "effect"})
 
 
+#: The repeat-run legs: each measures how often the attack reproduces.
+STABILITY_STAGES: Final = frozenset({"flakiness", "stability"})
+
+#: The fewest runs per build that let a repeat-run leg measure anything. With one
+#: run the success rate is 0% or 100% by construction, so nothing was repeated and
+#: the leg's pass says nothing about stability.
+MIN_STABILITY_RUNS: Final = 2
+
+
+def stability_runs(report: ValidationReport) -> int | None:
+    """Runs per build behind the repeat-run legs, or ``None`` when not recorded."""
+    evidence = report.reproducibility
+    return None if evidence is None else int(evidence.iterations)
+
+
+def stability_measured(report: ValidationReport) -> bool:
+    """False when the repeat-run legs rest on fewer runs than they need.
+
+    ``None`` (no reproducibility evidence recorded) reads as measured, so a
+    report that never carried the counts renders exactly as it always did.
+    """
+    runs = stability_runs(report)
+    return runs is None or runs >= MIN_STABILITY_RUNS
+
+
+def stability_not_measured(report: ValidationReport) -> str:
+    """``not measured (1 run per build)``: the wording for an unmeasured leg."""
+    runs = stability_runs(report) or 0
+    return f"not measured ({runs} run{'' if runs == 1 else 's'} per build)"
+
+
 def _build_passed(report: ValidationReport) -> bool:
     """True when the build leg ran (was not skipped) and passed."""
     return any(o.stage == "build" and o.passed and not o.report_only for o in report.outcomes)
@@ -115,6 +146,8 @@ def verdict_reason(report: ValidationReport) -> str:
             )
         return "the test was not kept."
     if label == KEPT:
+        if not stability_measured(report):
+            return f"the test discriminates; stability {stability_not_measured(report)}."
         return "the test discriminates and is stable."
     if is_black_box_keep(report):
         return (

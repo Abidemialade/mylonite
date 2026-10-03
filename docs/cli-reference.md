@@ -139,8 +139,9 @@ What it prints, in order:
 3. **The scan table** for W1 to W4 on both builds, the headline counts, a coverage
    note, and a legend for every mark.
 
-The kept finding rests on one recorded run per build; a live `validate` repeats each
-build several times. W1 does not land in the recording (see
+The kept finding rests on one recorded run per build, so its flakiness leg reads "not
+measured (1 run per build)" rather than a pass; a live `validate` repeats each build
+several times to measure it. W1 does not land in the recording (see
 [limitations](limitations.md#12-w1-does-not-land-on-the-reference-app)), and the
 output says so instead of leaving a bare NO VERDICT cell.
 
