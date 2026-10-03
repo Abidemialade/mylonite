@@ -22,7 +22,11 @@ readers and declared lists:
   it can disagree with the confirm gate both ways: ``list_notes`` is guarded by
   the gate's fail-closed default and ``get_issue`` by the gate's name hint
   ``issue``, yet the verdict counts calls to either as reads. The inventory shows
-  that rather than smoothing it over.
+  that rather than smoothing it over. This column is a per-tool, name-only guess:
+  the live verdict also reads each actual call's arguments, and a call whose
+  arguments carry a URL or host is never a read whatever its tool's name or
+  declared list says (``get_page(url=...)``, #304) — the inventory has no call
+  to look at, so it cannot show that half of the rule.
 
 A tool that no tier recognises is "unknown", and the confirm-gate control
 already treats it as consequential (the fail-closed default); the egress

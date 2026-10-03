@@ -26,7 +26,7 @@ from mylonite.scan.control_shim import (
     VERDICT_TAIL_READ_VERBS,
 )
 from mylonite.scan.predicate_primitives import DEFAULT_DEFERRED_MARKERS, has_deferral_word
-from mylonite.scan.tool_classifier import name_token_list
+from mylonite.scan.tool_classifier import name_token_list, url_values
 
 TraceOutcome = Literal[
     "not-called",
@@ -46,6 +46,7 @@ class LinkResult:
 def is_read_tool(
     name: str,
     *,
+    args: Mapping[str, object] | None = None,
     read_tool_names: Collection[str] = (),
     annotations: Mapping[str, object] | None = None,
     verify_tool: str | None = None,
@@ -60,31 +61,40 @@ def is_read_tool(
     1. a declared consequential tool or the seed's own tool: never a read, even
        when it is also the verify or recall tool, or a misconfigured probe
        would hide the agent's own consequential calls;
-    2. a declared read tool (``read_tool_names``, which also carries
+    2. ``args`` carries a URL, hostname or IP literal
+       (:func:`mylonite.scan.tool_classifier.url_values`): never a read,
+       whatever the tool's name says and whatever list it is declared under —
+       a read-named tool that takes a destination, such as
+       ``get_page(url=...)``, can perform the exact egress a declared egress
+       tool can, and a name or an operator's own list cannot see that an
+       argument, not the tool, is what carries the risk (#304);
+    3. a declared read tool (``read_tool_names``, which also carries
        ``control_config.verdict_read_tools``) or the probe's verify or recall
        tool: a read;
-    3. ``destructiveHint`` or ``openWorldHint``: not a read;
-    4. a transport word (``fetch``, ``web``, ``url``) or a state-changing verb
+    4. ``destructiveHint`` or ``openWorldHint``: not a read;
+    5. a transport word (``fetch``, ``web``, ``url``) or a state-changing verb
        (``send``, ``upload``, ``create``) anywhere in the name: not a read,
        whatever ``readOnlyHint`` says;
        Two joined actions (``and``, ``then``, ``or``) where one is a
        state-changing word such as ``close`` or ``replace``
        (``list_and_close``): not a read either;
-    5. a last word of ``read``, ``get``, ``retrieve`` or ``lookup``
+    6. a last word of ``read``, ``get``, ``retrieve`` or ``lookup``
        (``issue_read``, ``message_get``): a read, unless the name joins two
        actions (``post_and_read``);
-    6. a word that is a verb when it leads the name (``post_to_thread``,
+    7. a word that is a verb when it leads the name (``post_to_thread``,
        ``email_customer``): not a read;
-    7. ``readOnlyHint``: a read;
-    8. a read verb as the first or the last word (``get_issue``,
+    8. ``readOnlyHint``: a read;
+    9. a read verb as the first or the last word (``get_issue``,
        ``notes_list``): a read;
-    9. anything else, including ``budget_report``: not a read.
+    10. anything else, including ``budget_report``: not a read.
 
     Words match whole, never inside a longer word (``thread`` is not
     ``read``). A noun such as ``issue`` or ``email`` after a leading read verb
     does not make a call a dispatch, so ``get_issue`` still reads.
     """
     if name in consequential_tool_names:
+        return False
+    if args and url_values(args):
         return False
     if name in {verify_tool, recall_tool} or name in read_tool_names:
         return True
@@ -198,6 +208,14 @@ def has_deferred_dispatch(
     )
 
 
+def _call_args(call: Mapping[str, object]) -> Mapping[str, object] | None:
+    """A trace entry's ``args``, typed for :func:`is_read_tool` — ``None`` for
+    any shape other than a mapping, so a malformed trace entry degrades to no
+    structural evidence rather than raising."""
+    args = call.get("args")
+    return args if isinstance(args, Mapping) else None
+
+
 def _consequential_calls(
     trace: Sequence[Mapping[str, object]],
     *,
@@ -214,6 +232,7 @@ def _consequential_calls(
         if isinstance(call.get("tool"), str)
         and not is_read_tool(
             str(call["tool"]),
+            args=_call_args(call),
             read_tool_names=read_tool_names,
             annotations=annotations.get(str(call["tool"])),
             verify_tool=verify_tool,
@@ -252,6 +271,7 @@ def link_for(
             or call.get("blocked_by")
             or is_read_tool(
                 name,
+                args=_call_args(call),
                 read_tool_names=read_tool_names,
                 annotations=annotations.get(name),
                 verify_tool=verify_tool,
@@ -303,6 +323,7 @@ def dispatched_tools(
         and not call.get("is_error")
         and not is_read_tool(
             str(call["tool"]),
+            args=_call_args(call),
             read_tool_names=read_tool_names,
             annotations=annotations.get(str(call["tool"])),
             verify_tool=verify_tool,

@@ -421,6 +421,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case where a planner that declines still reads resisted: indirect W1
   and W2 attacks. Direct W3 and W4 probes, generated and bundled alike,
   read NOT TESTED instead.
+  two cases where a planner that declines still reads resisted: indirect W1
+  and W2 attacks, and the bundled direct W3 and W4 probes. Generated W3 and
+  W4 probes already read NOT TESTED in that case.
+- **A read-named tool that takes a destination no longer reads RESISTED
+  (#304).** The name rule from #297 still counted a call as a read whenever a
+  read verb led or ended the name, even when the call's own arguments carried
+  a URL, hostname or IP literal — so an undeclared `get_page(url=...)` that
+  fetched an attacker-chosen address read "called no consequential tool", the
+  same negative #297 fixed for a name without a read verb. A call is now
+  never a read when its arguments carry a destination, whatever the tool's
+  name says and whatever list — including `read_tool_names` and
+  `verdict_read_tools` — it is declared under. A call with no destination in
+  its arguments (`get_page(id=...)`, `read_note`, `list_notes`) still reads
+  exactly as before.
 - **A `transport: rest` target that declares an `effect_probe` now stops with
   one clear message instead of being ignored.** Every command that loads the
   file, `check` included, exits `2` before it connects or calls a model, and
