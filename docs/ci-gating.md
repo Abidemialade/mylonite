@@ -322,18 +322,32 @@ for, not one you opt out of.
 > If you relied on that, add `--open-pr` and `--workflows` explicitly.
 
 The PR body is itself a result surface (see [Reading the results](reading-results.md#the-gating-pr)).
-It states the guarded-twin claim only for a `KEPT` validation; any other verdict is named
-with its reason. It carries:
+Every finding section follows one order — **verdict, impact, fix, proof** — so the facts
+a reviewer needs most read top to bottom instead of being scattered by finding shape. It
+states the guarded-twin claim only for a `KEPT` validation; any other verdict is named
+with its reason, and "your own safeguard stopped it" is said only when the differential
+measured a real `control_env`, never Mylonite's boundary stand-in. It carries:
 
-- **The differential proof** — the fires/resists numbers and the `kept` formula, so a
-  reviewer sees *why the test is trustworthy*, not just that it exists.
+- **A verdict, a severity and a one-sentence impact** — `KEPT` / `STABLE, NOT PROVEN` /
+  `REJECTED` with why; `High` / `Medium` / `Low`; and a deterministic, plain-language
+  sentence naming what an attacker gets from this weakness class (the same sentence for
+  every finding of that class). A multi-finding gate PR lists the most severe finding
+  first.
 - **Located at** — the exact locus to fix (which tool description / returned content /
   action handler / system-prompt line).
 - **The proven fix** — an evidence-anchored recommendation naming the actual tool and
   argument that landed the exploit (your own tool for a `--target-file` app; the
   reference app's tool for the bundled `reference:*` targets), as a fenced code sketch
   (never a diff — Mylonite doesn't assert it knows your file layout) tiered
-  deterministic/probabilistic/detective.
+  deterministic/probabilistic/detective. It is always a *suggestion* — Mylonite proves
+  and gates the weakness; it never claims to have patched your code.
+- **The differential proof** — the fires/resists numbers and the `kept` formula, so a
+  reviewer sees *why the test is trustworthy*, not just that it exists. The per-seed kill
+  matrix marks a seed this test never ran as "not run" rather than lumping it in with a
+  genuine miss, with a legend explaining each mark.
+- **A reviewer checklist** — four lines to confirm against your own app before merging:
+  the proof level, the planner model, whether the prompt was declared or Mylonite's
+  generic default, and the run counts behind the proof.
 - **Compliance** — the OWASP-LLM/ASI · MITRE ATLAS · NIST tags.
 - **Inline annotations** — a best-effort GitHub check-run annotation on the offending
   prompt line, when the AI layer is a committed file.

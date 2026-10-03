@@ -7,7 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The gate PR body reads verdict, impact, fix, then proof — every time.**
+  Every finding section now opens with an explicit verdict line, a severity
+  label and a one-sentence, plain-language impact statement ("anyone who can
+  put text in a note can make your agent email its contents to an outside
+  address, with no approval step") before the suggested fix and the
+  supporting evidence. A multi-finding gate PR now lists the most severe
+  finding first. A new "Reviewer checklist" section closes each finding,
+  naming the proof level, the planner model, whether the prompt was declared
+  or Mylonite's default, and the run counts — for the reviewer to confirm
+  against their own app, not a claim Mylonite makes on their behalf.
+  "Your own safeguard stopped it" is still said only when the differential
+  measured a real `control_env`, never Mylonite's boundary stand-in.
+
 ### Fixed
+
+- **The gate PR's kill matrix no longer shows an untested seed as a miss.**
+  A committed test's differential drives only its own seed; every other
+  seed in the bank was never run by that test. The PR body's kill matrix now
+  marks those seeds "not run" (matching `mylonite validate`'s console
+  output) instead of the same mark a seed that ran and failed to
+  discriminate would get, and a one-line legend explains what each mark
+  means.
 
 - **A JSON request body is sent as JSON.** The `rest` transport sent its body with no
   content type, so agent servers that require one (FastAPI, for example) rejected every
