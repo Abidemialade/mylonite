@@ -178,6 +178,11 @@ class ControlConfig(BaseModel):
     fetch_allowlist: tuple[str, ...] = ("localhost", "127.0.0.1", "example.com")
     consequential_tools: tuple[str, ...] = ()
     read_tool_names: tuple[str, ...] = ()  # W2: narrows which results get quarantined
+    # The effect verdict only: tools whose calls count as reads, never as an
+    # action the attack could have carried out. Changes no control: nothing is
+    # quarantined or confirmed differently. For a reader whose name the verdict
+    # cannot tell from an action (``web_search``, ``fetch_note``) (#297).
+    verdict_read_tools: tuple[str, ...] = ()
     # W2 (InformationFlowControl, PR4): tools explicitly exempted from the
     # untrusted-content sink refusal — the FIDES `accepts_untrusted=True`
     # equivalent. A tool named here is never refused for acting on untrusted

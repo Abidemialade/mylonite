@@ -280,14 +280,36 @@ carry no `trace_outcome` and are decided as before.
 **Which tools count as consequential.** The guarded side's confirm gate decides this
 for each tool in a fixed order: your `control_config.consequential_tools` list, then the
 server's own MCP annotations (`readOnlyHint`, `destructiveHint`), then the tool's name.
-A tool none of these recognise is guarded as consequential anyway. The trace counts a
-call as a dispatch unless the tool is a read: one you list in
-`control_config.read_tool_names`, the probe's own tool, or one whose name has a read word
-(`read`, `get`, `list`, `search` and so on) as a whole word. A read word inside a longer
-word does not count, so `post_to_thread` and `upload_file` are dispatches, and a name with
-a consequential or egress word (`send`, `post`, `fetch`, `web`) is never a read, even
-`web_fetch`. The two can still disagree: a tool such as `list_notes` is guarded by the
-gate's fail-closed default, while the trace counts its calls as reads. To see
+A tool none of these recognise is guarded as consequential anyway.
+
+The trace counts a call as a dispatch unless the tool is a read. A tool is a read when you
+list it in `control_config.read_tool_names` or `control_config.verdict_read_tools`, when it
+is the probe's own tool, or when its name starts or ends with a read verb (`read`, `get`,
+`list`, `search`, `view`, `lookup` and so on). Words count whole, never inside a longer
+word. Some words always make a call a dispatch, wherever they sit in the name, even when
+the server marks the tool read-only:
+
+- a transport word: `fetch`, `web`, `url`, `http`;
+- a verb that changes state: `send`, `create`, `upload`, `delete`, `update`.
+
+A word that is a verb only when it comes first (`post`, `email`, `issue`, `add`) makes it
+a dispatch only in that position. So `get_issue` and `get_email` are reads, while
+`post_to_thread`, `upload_file`, `web_fetch` and `budget_report` are dispatches.
+
+A seeded record's id in a call ties that call to the attempt only when the tool can act:
+it is in your consequential list, it is the seed's own tool, it carries
+`destructiveHint`, or its name has a verb that changes state. A read by id never counts
+as a finding.
+
+A reader the trace counts as a dispatch, such as `web_search`, makes an unlinked attempt
+read NOT TESTED, never RESISTED. To have the verdict count it as a read, list it under
+`control_config.verdict_read_tools`. That list changes the verdict only. Don't use
+`read_tool_names` for this: it is also the list of tools whose results the guarded side
+quarantines, and naming one tool there stops the quarantine of every tool you leave out.
+
+The gate and the trace can disagree. `list_notes` is guarded by the gate's fail-closed
+default, and `get_issue` by the gate's name hint `issue`, yet the trace counts calls to
+either as reads. To see
 what each of your tools will be treated as before you spend anything, read the tool
 inventory that `mylonite scan --scaffold` writes into the target file. It has one line
 per tool, with its role, where the role came from (`declared`, `annotation`, `schema`,

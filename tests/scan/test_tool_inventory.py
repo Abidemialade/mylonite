@@ -187,11 +187,44 @@ def test_a_gate_and_verdict_disagreement_is_shown_not_hidden() -> None:
     "name", ["budget_report", "post_to_thread", "upload_file", "create_widget", "web_fetch"]
 )
 def test_a_read_word_inside_a_name_is_not_a_verdict_read(name: str) -> None:
-    """The verdict matches read words as whole words and never reads a
-    consequential or egress name as a read (#297); the inventory agrees."""
+    """The verdict needs a whole read verb first or last and no transport or
+    state-changing word (#297); the inventory agrees."""
     entry = _by_name(tool_inventory([_tool(name)]))[name]
     assert entry.verdict_read is False
     assert "reads" not in treated_as_text(entry)
+
+
+def test_a_name_hint_disagreement_is_shown_too() -> None:
+    """The gate guards `get_issue` by the name hint "issue"; the verdict counts
+    its calls as reads because "get" leads. The inventory says both."""
+    entry = _by_name(tool_inventory([_tool("get_issue")]))["get_issue"]
+    assert entry.consequential_source == "name"
+    assert entry.verdict_read is True
+    assert "verdict counts its calls as reads" in treated_as_text(entry)
+
+
+def test_verdict_read_tools_reach_the_verdict_read_flag_only() -> None:
+    """`control_config.verdict_read_tools` marks a tool a read for the verdict,
+    exactly as the scan passes it, and changes no other column."""
+    from mylonite.scan.effect_verdict import is_read_tool
+
+    tools = [_tool("web_search")]
+    plain = _by_name(tool_inventory(tools))["web_search"]
+    cc = SimpleNamespace(
+        consequential_tools=[],
+        egress_tools=[],
+        read_tool_names=[],
+        verdict_read_tools=["web_search"],
+    )
+    marked = _by_name(tool_inventory(tools, control_config=cc))["web_search"]
+    assert plain.verdict_read is False
+    assert marked.verdict_read is is_read_tool("web_search", read_tool_names={"web_search"})
+    assert marked.verdict_read is True
+    assert (marked.roles, marked.consequential, marked.consequential_source) == (
+        plain.roles,
+        plain.consequential,
+        plain.consequential_source,
+    )
 
 
 def test_a_declared_consequential_tool_is_never_a_verdict_read() -> None:

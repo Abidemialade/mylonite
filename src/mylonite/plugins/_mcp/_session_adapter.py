@@ -1404,7 +1404,13 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         # its name suggests: a call to it is a dispatch, never an exempt read.
         if seed_tool_name and seed_tool_name not in consequential:
             consequential = (*consequential, seed_tool_name)
-        read_tool_names = control_config.read_tool_names if control_config else ()
+        # The verdict counts both lists as reads; verdict_read_tools changes
+        # nothing else.
+        read_tool_names: tuple[str, ...] = (
+            tuple(control_config.read_tool_names) + tuple(control_config.verdict_read_tools)
+            if control_config
+            else ()
+        )
         probe = self._spec.effect_probe
         verify_tool = probe.verify_tool if probe is not None else None
         rendered_marker = (

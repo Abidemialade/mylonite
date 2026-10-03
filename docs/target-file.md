@@ -119,6 +119,7 @@ control_config:
   fetch_allowlist: [example.com]       # hosts the egress control permits
   consequential_tools: [send_email]    # W4: high-impact actions to gate
   read_tool_names: [read_note]         # W2: tools whose results get quarantined
+  verdict_read_tools: [web_search]     # verdict only: calls that count as reads
   private_tools: [get_user_sessions]   # W2/W4: tools that RETURN sensitive data
   private_markers: ["INTERNAL-SECRET-"] # …or a literal that marks a result private
   destructive_tools: [delete_entities] # W2: sinks where an injected call is damage itself
@@ -296,6 +297,12 @@ for a `vulnerable_launch` twin.
     - **`destructive_tools`** — sinks where an injection-driven call is damage in itself
       (delete/overwrite/transfer). These refuse untrusted context outright. Inferred
       from MCP's `destructiveHint` and name hints when you don't declare them.
+  `verdict_read_tools` is separate from every control. It names tools whose calls the
+  effect verdict counts as reads, not as an action the attack could carry out, for a
+  reader whose name it cannot tell from an action (`web_search`, `fetch_note`). No
+  result is quarantined and no call is confirmed differently. Use it instead of
+  `read_tool_names` for this: declaring `read_tool_names` narrows W2's quarantine to the
+  tools you list. See [Reading results](reading-results.md) for the verdict's read rule.
 - **`calibration`** (`CalibrationSettings`) — whether the calibration controls (real
   writes proving your `effect_probe` can see a change) may run; see
   [Calibration](#calibration) above.

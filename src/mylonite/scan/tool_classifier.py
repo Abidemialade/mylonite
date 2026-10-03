@@ -485,10 +485,15 @@ _TOKEN_SPLIT_RE = re.compile(r"[^A-Za-z0-9]+")
 _CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 
 
+def name_token_list(name: str) -> list[str]:
+    """Lowercase word tokens of a tool name, in order (``getIssue`` -> ["get", "issue"])."""
+    with_boundaries = _CAMEL_BOUNDARY_RE.sub("_", name)
+    return [t for t in _TOKEN_SPLIT_RE.split(with_boundaries.lower()) if t]
+
+
 def name_tokens(name: str) -> set[str]:
     """Lowercase word tokens of a tool name."""
-    with_boundaries = _CAMEL_BOUNDARY_RE.sub("_", name)
-    return {t for t in _TOKEN_SPLIT_RE.split(with_boundaries.lower()) if t}
+    return set(name_token_list(name))
 
 
 def hint_matches(name: str, hints: tuple[str, ...]) -> bool:
