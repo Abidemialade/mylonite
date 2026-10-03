@@ -64,6 +64,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `seed_arm` can now be gated (those seeds report NOT TESTED) instead of
     only being gate-able after first running `scan` to auto-wire one.
   (#195, #210)
+- **Four credential-handling gaps around target files are closed.** A value
+  in `headers`/`request.headers`/`env` that already references an environment
+  variable (your own `Authorization: Bearer ${MY_TOKEN}`) is now left exactly
+  as written instead of being re-wrapped into a second, disconnected
+  `${MYLONITE_TARGET_...}` placeholder that silently orphaned the variable you
+  already exported — and the printed hint for a headers variable now says it
+  must hold the FULL header value (`Bearer ...`), not just the bare token.
+  `scan --command`/`--arg`/`--env` now refuse outright, naming the flag(s)
+  passed, when combined with `--target-file` instead of being silently
+  ignored (the file's own `command`/`args`/`env` always won either way). A
+  credential-shaped `--arg`/`args` value — `--api-key=sk-...`, a URL with
+  `?access_token=...` — still can't be masked (no key name to mask by) but now
+  warns, naming the position and withholding the value, with a hint to move
+  it to `env:` or `--env-file`. `--env-file` now refuses a recognised
+  variable whose value is itself an unresolved `${VAR}`-shaped placeholder
+  (a templating tool's or secrets manager's reference never substituted)
+  instead of loading that literal text and sending it to a provider as a
+  credential.
 
 - **The gate PR's kill matrix no longer shows an untested seed as a miss.**
   A committed test's differential drives only its own seed; every other

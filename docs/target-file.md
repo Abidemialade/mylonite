@@ -478,6 +478,15 @@ and `request.headers`, and each secret-looking `env` value (a key such as `GITHU
 or `DB_PASSWORD`, or a value shaped like an API key), becomes a `${MYLONITE_TARGET_...}`
 placeholder. Plain values such as `LOG_LEVEL: debug` stay as written.
 
+A value that is ALREADY a `${VAR}` reference — your own hand-written
+`Authorization: Bearer ${MY_TOKEN}`, or a `GITHUB_TOKEN: ${MY_GH_TOKEN}` you set up
+yourself — is left exactly as written instead of being re-wrapped into a second,
+disconnected `${MYLONITE_TARGET_...}` placeholder. Re-wrapping it would silently orphan
+the variable you already export in your shell, and — for a header — require the NEW
+variable to hold the whole header value rather than just the token. Writing a target
+file never resolves a `${VAR}` reference from the live environment either way: only
+*loading* one does, so no live secret can reach the written file through this path.
+
 A credential in the query string of `url` or `request.url` is masked too. A parameter
 with a credential name (`api_token`, `access_key`, `client_secret`, `key`, `sig`, ...),
 or whose value is shaped like an API key, becomes `***REDACTED***`. Other parameters
@@ -502,6 +511,13 @@ note: secrets in headers and env were kept out of app.yaml. It reads them from t
     export MYLONITE_TARGET_ENV_GITHUB_TOKEN='<your GITHUB_TOKEN>'
   PowerShell:
     $env:MYLONITE_TARGET_ENV_GITHUB_TOKEN = '<your GITHUB_TOKEN>'
+```
+
+For a `headers`/`request.headers` variable the hint instead names the FULL header
+value, since that variable has to hold more than the bare token:
+
+```text
+export MYLONITE_TARGET_HEADERS_AUTHORIZATION='<the full Authorization header value, e.g. Bearer ...>'
 ```
 
 The bundled `mcp:github` family (no target file needed) uses the same `${VAR}`
@@ -530,6 +546,13 @@ recognised provider credential/config names (see [Choose a model](choose-a-model
 not a `MYLONITE_TARGET_...` placeholder or a user-named token, both of which it drops
 with a warning rather than loading. In CI, set the target's own variables as secrets on
 the job.
+
+For the provider/config names `--env-file` DOES load: a value that is itself an
+unresolved `${VAR}`-shaped placeholder (a templating tool's or secrets manager's
+reference that was never substituted, e.g. `ANTHROPIC_API_KEY=${SOME_SECRET_MANAGER_VAR}`
+left in the file as written) is a clear error naming the variable and the file, not a
+silent load — that literal text is never a usable credential, and sending it to a
+provider as one fails confusingly at best.
 
 If a variable is unset, loading the file stops with exit code 2 and names the variable,
 the key it holds and the `export` line to run. Mylonite never starts your server with an
@@ -656,25 +679,45 @@ way (see [Path containment](#path-containment) above); when the path given on th
 line can't be reached from there at all, the scaffold says so immediately instead of
 leaving you to find out only when a later `scan` fails to load it.
 
-### A credential in `args` is written in plain text
+### A credential in `args` is written in plain text — and now warns
 
 `headers`, `request.headers` and `env` are the only credential-bearing fields Mylonite
 masks (see [Secrets stay out of the file](#secrets-stay-out-of-the-file) below) — `args` is
 an unstructured string list with no key name to mask by, so a value embedded there (for
-example `args: [--api-key, sk-live-...]`, or a URL with `?access_token=...`) survives
+example `args: [--api-key, sk-live-...]`, or a URL with `?access_token=...`) still survives
 byte-for-byte into every copy Mylonite writes: the scan directory, `generate`'s co-located
-copy, and the `gate` PR. `scan --scaffold`'s own "secrets were kept out of the file"
-message does not mention this, so the message can read as a stronger guarantee than it
-is. See [`SECURITY.md`](https://github.com/Abidemialade/mylonite/blob/main/SECURITY.md)
+copy, and the `gate` PR. `scan --scaffold`, and every later command that loads the file
+(`check`, `scan`, `generate`, `validate`, `gate`), now warns when an `args` entry looks
+credential-shaped — naming its position (`args[N]`) and withholding the value, the same
+pattern the relative-SQLite-path warning above uses:
+
+```text
+warning: args[0] looks like it carries a credential (value withheld). Move it to env: in
+the target file, or set it via --env-file, instead of a launch argument -- see
+docs/target-file.md#a-credential-in-args-is-written-in-plain-text-and-now-warns.
+```
+
+See [`SECURITY.md`](https://github.com/Abidemialade/mylonite/blob/main/SECURITY.md)
 for the full policy. If a target's launch needs a credential, pass it via `env` (most
 subprocess CLIs also accept the value from an environment variable) or, for a remote
 server, `headers` — never as a literal `args` entry.
 
-### `--env`, `--command` and `--arg` are ignored once `--target-file` is set
+### `--env`, `--command` and `--arg` refuse once `--target-file` is set
 
-`scan`, `generate`, `validate` and `gate` all accept `--target-file` alongside the
-`mcp:custom` flags (`--command`, `--arg`, `--env`) that build an inline target spec, but
-once `--target-file` is given, those three flags are silently ignored rather than
-rejected — the file's own `command`/`args`/`env` always win, with no warning that the
-flags you passed had no effect. Put any launch override in the target file's `env:`
-block instead of trying to pass it on the command line alongside `--target-file`.
+`scan` accepts `--target-file` alongside the `mcp:custom` flags (`--command`, `--arg`,
+`--env`) that build an inline target spec. Once `--target-file` is given, those three
+flags would have no effect — the file's own `command`/`args`/`env` always win — so
+passing any of them together with `--target-file` now refuses outright, naming exactly
+the flag(s) you passed:
+
+```text
+error: scan: --arg, --env have no effect together with --target-file -- the file's own
+command/args/env always win. Put the launch override in the target file's env: block
+instead, or drop --target-file to build the target from these flags.
+```
+
+Put any launch override in the target file's `env:` block instead of trying to pass it
+on the command line alongside `--target-file`, or drop `--target-file` and build the
+inline target from the flags alone. `--scaffold` is the one case where `--command`/
+`--arg`/`--env` and `--target-file` can appear together without refusing: `--scaffold`
+builds the file FROM those flags and never reads an existing `--target-file`.
