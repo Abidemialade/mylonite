@@ -286,3 +286,150 @@ def test_gate_prints_the_estimate_before_any_spend(
 
     out = result.stderr or result.output
     assert "Estimated LLM calls for this gate run" in out, out
+
+
+# ---------------------------------------------------------------------------
+# Ordering: the estimate must print before the FIRST live call, not just
+# somewhere in the output -- a fix-round-1 finding was that
+# `_validate_custom`'s live provider ping ran before the estimate did.
+# ---------------------------------------------------------------------------
+
+
+def test_validate_custom_prints_the_estimate_before_the_live_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_validate_custom`` pings the provider directly
+    (``_provider_preflight_direct``) before building the real validator. That
+    ping is the first live call this path makes, so the estimate -- which
+    exists to be seen before any spend -- must be printed strictly before it,
+    not after."""
+    from tests.test_cli import _sample_exploit
+
+    import mylonite.commands.cost_estimate as cost_estimate_module
+    from mylonite.cli import _validate_custom
+    from mylonite.plugins._mcp import target_registry
+
+    order: list[str] = []
+
+    original_line = cost_estimate_module.validate_estimate_line
+
+    def _tracking_line(*args: Any, **kwargs: Any) -> str:
+        order.append("estimate")
+        return original_line(*args, **kwargs)
+
+    monkeypatch.setattr(cost_estimate_module, "validate_estimate_line", _tracking_line)
+
+    def _tracking_preflight(*_a: Any, **_kw: Any) -> bool:
+        order.append("preflight")
+        return True
+
+    monkeypatch.setattr("mylonite.cli._provider_preflight_direct", _tracking_preflight)
+
+    class _StubValidator:
+        def __init__(self, **_kw: Any) -> None:
+            pass
+
+        def validate(self, *_a: Any, **_k: Any) -> Any:
+            return SimpleNamespace(kept=True, gating_legs=[])
+
+    monkeypatch.setattr(
+        "mylonite.plugins._reference.reference_validator.DifferentialValidator", _StubValidator
+    )
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
+
+    tf = tmp_path / "t.yaml"
+    tf.write_text(
+        "family: myapp\ncommand: echo\nargs: []\nweakness_classes: [W2]\n"
+        "seed_arm:\n  tool: remember\n  args_template: {content: '{payload}'}\n",
+        encoding="utf-8",
+    )
+    gen = SimpleNamespace(exploit=_sample_exploit().model_copy(update={"target_id": "mcp:myapp"}))
+    target_registry.clear_runtime_targets()
+    try:
+        _validate_custom(gen, tf, 1, "anthropic", "anthropic/m", fast=False, authorize="myapp")
+    finally:
+        target_registry.clear_runtime_targets()
+
+    assert order == ["estimate", "preflight"], order
+
+
+def test_scan_prints_the_estimate_before_the_first_live_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``scan`` has no separate preflight ping of its own -- the first live
+    call is the real planner/customiser/judge traffic inside the engine, so
+    the estimate must print before THAT."""
+    import litellm
+
+    import mylonite.commands.cost_estimate as cost_estimate_module
+
+    order: list[str] = []
+
+    original_line = cost_estimate_module.scan_estimate_line
+
+    def _tracking_line(*args: Any, **kwargs: Any) -> str:
+        order.append("estimate")
+        return original_line(*args, **kwargs)
+
+    monkeypatch.setattr(cost_estimate_module, "scan_estimate_line", _tracking_line)
+
+    async def _tracking_acompletion(*_a: Any, **_kw: Any) -> SimpleNamespace:
+        order.append("acompletion")
+        return _benign_response()
+
+    def _tracking_completion(*_a: Any, **_kw: Any) -> SimpleNamespace:
+        order.append("completion")
+        return _benign_response()
+
+    monkeypatch.setattr(litellm, "acompletion", _tracking_acompletion)
+    monkeypatch.setattr(litellm, "completion", _tracking_completion)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
+
+    result = runner.invoke(
+        app,
+        ["scan", "reference:vulnerable", "--model", "anthropic/claude-haiku-4-5-20251001"],
+    )
+
+    assert order, f"no calls recorded; output:\n{result.stderr or result.output}"
+    assert order[0] == "estimate", order
+
+
+def test_gate_prints_the_estimate_before_the_first_live_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``gate`` has no separate preflight ping of its own either -- the first
+    live call is inside the scan phase ``run_gate`` drives, so the estimate
+    must print before THAT."""
+    import litellm
+
+    import mylonite.commands.cost_estimate as cost_estimate_module
+
+    order: list[str] = []
+
+    original_line = cost_estimate_module.gate_estimate_line
+
+    def _tracking_line(*args: Any, **kwargs: Any) -> str:
+        order.append("estimate")
+        return original_line(*args, **kwargs)
+
+    monkeypatch.setattr(cost_estimate_module, "gate_estimate_line", _tracking_line)
+
+    async def _tracking_acompletion(*_a: Any, **_kw: Any) -> SimpleNamespace:
+        order.append("acompletion")
+        return _benign_response()
+
+    def _tracking_completion(*_a: Any, **_kw: Any) -> SimpleNamespace:
+        order.append("completion")
+        return _benign_response()
+
+    monkeypatch.setattr(litellm, "acompletion", _tracking_acompletion)
+    monkeypatch.setattr(litellm, "completion", _tracking_completion)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
+
+    result = runner.invoke(
+        app,
+        ["gate", "reference:vulnerable", "--out", str(tmp_path / "gate")],
+    )
+
+    assert order, f"no calls recorded; output:\n{result.stderr or result.output}"
+    assert order[0] == "estimate", order

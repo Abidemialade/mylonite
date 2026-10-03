@@ -1785,6 +1785,37 @@ def _validate_custom(
         spec.family, tf.scope, spec.requires_scope, authorize, command="validate"
     )
 
+    # M1: the differential leg (re-driving a guarded twin of the SAME real target,
+    # model held constant) gates `kept` BY DEFAULT — proving the *safeguard*, not the
+    # model, carries the security. `--fast` opts out (it doubles the live runs per
+    # finding); a weakness with no inferable control falls back loudly to the
+    # stability/effect/consensus gate.
+    #
+    # plan_twins is the ONE place that decides raw-vs-guarded (server-layer
+    # control_env / vulnerable_launch / rest input-framing / boundary shim /
+    # no differential) — `gate` and `testkit.assert_control_holds` call the exact
+    # same function with the exact same inputs, so this decision cannot drift
+    # between them (the bug this closes: `gate` used to hold a parallel, drifted
+    # copy of this logic that ignored control_env entirely). PURE -- no call of
+    # any kind -- so it's resolved here, before the live preflight below, so the
+    # pre-spend estimate (which needs to know the twin count) can print first.
+    cw = weakness_class_for(generated.exploit)
+    plan = plan_twins(spec, weakness=cw, fast=fast, prove_input_control=prove_input_control)
+
+    # One plain line estimating the LLM spend BEFORE it happens -- strictly
+    # before the live preflight call just below, which is the first request
+    # this command sends to the provider.
+    from mylonite.commands.cost_estimate import validate_estimate_line
+
+    echo_err(
+        validate_estimate_line(
+            is_reference=False,
+            iterations=iterations,
+            twins=2 if plan.control_weakness is not None else 1,
+            fast=fast,
+        )
+    )
+
     # T14/H3: the "no default provider, fail loudly" invariant -- a cheap,
     # no-network credential-presence check, distinct from (and cheaper than)
     # _provider_preflight's real live call just below. Ordered AFTER the
@@ -1823,20 +1854,9 @@ def _validate_custom(
     # Calibrate the effect probe before it's trusted (--authorize matched above).
     if spec.transport != "rest":
         _calibrate_custom_target_now(build_adapter_for_spec(spec, scope=tf.scope, model=model))
-    # M1: the differential leg (re-driving a guarded twin of the SAME real target,
-    # model held constant) gates `kept` BY DEFAULT — proving the *safeguard*, not the
-    # model, carries the security. `--fast` opts out (it doubles the live runs per
-    # finding); a weakness with no inferable control falls back loudly to the
-    # stability/effect/consensus gate.
-    #
-    # plan_twins is the ONE place that decides raw-vs-guarded (server-layer
-    # control_env / vulnerable_launch / rest input-framing / boundary shim /
-    # no differential) — `gate` and `testkit.assert_control_holds` call the exact
-    # same function with the exact same inputs, so this decision cannot drift
-    # between them (the bug this closes: `gate` used to hold a parallel, drifted
-    # copy of this logic that ignored control_env entirely).
-    cw = weakness_class_for(generated.exploit)
-    plan = plan_twins(spec, weakness=cw, fast=fast, prove_input_control=prove_input_control)
+    # `cw`/`plan` were already resolved above, before the preflight -- reused
+    # here rather than recomputed (it's pure, so recomputing would be
+    # harmless, but reuse makes the single resolution point obvious).
     if plan.banner:
         for line in plan.banner.split("\n"):
             echo_err(f"validate: {line}")
@@ -1891,18 +1911,6 @@ def _validate_custom(
             "control_env in your target.yaml (see docs/concepts.md).\n"
             f"{bar}"
         )
-
-    # One plain line estimating the LLM spend BEFORE it happens.
-    from mylonite.commands.cost_estimate import validate_estimate_line
-
-    echo_err(
-        validate_estimate_line(
-            is_reference=False,
-            iterations=iterations,
-            twins=2 if guarded_factory is not None else 1,
-            fast=fast,
-        )
-    )
 
     validator = DifferentialValidator(
         iterations=iterations,
