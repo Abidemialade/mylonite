@@ -72,10 +72,14 @@ on:
       target:
         description: >-
           Exactly one target (verification/SOURCE.md and
-          verification/PREREG_E2E_2026_10.md). The three e2e-* options are the
-          precision cells (verification/PREREG_E2E_2026_10.md): no finding on any
-          of them is ever a vulnerability, so a KEPT result there is scored
-          as a false positive to triage, never published as a real finding.
+          verification/PREREG_E2E_2026_10.md). e2e-guarded-reference,
+          e2e-readonly-time and e2e-readonly-b are the precision cells
+          (verification/PREREG_E2E_2026_10.md): no finding on any of them is
+          ever a vulnerability, so a KEPT result there is scored as a false
+          positive to triage, never published as a real finding.
+          e2e-reference-w1 is the breadth cell on the in-repo reference app
+          (that file's "Breadth cell 1"), not a precision cell: a KEPT result
+          there may be a real finding to adjudicate like any other cell.
         required: true
         type: choice
         options:
@@ -88,6 +92,7 @@ on:
           - e2e-guarded-reference
           - e2e-readonly-time
           - e2e-readonly-b
+          - e2e-reference-w1
       provider:
         description: >-
           Exactly one provider. 'ollama' is valid ONLY with
@@ -121,7 +126,10 @@ on:
           target doesn't declare matches nothing and the CLI refuses before
           any spend). Blank runs every class the target declares, as before.
           Validated against the W1-W4 allowlist before any step that could
-          spend; a bad value fails the "Validate inputs" step.
+          spend; a bad value fails the "Validate inputs" step. Unused for
+          target=e2e-reference-w1: that cell is pinned to --weakness-class W1
+          by the workflow itself (verification/PREREG_E2E_2026_10.md's
+          "Breadth cell 1"), whatever this input is set to.
         required: false
         default: ""
       scan_ceiling:
@@ -439,10 +447,25 @@ jobs:
       # fetches it on demand in the scaffold-check and run steps below, the
       # same as target 4 -- no separate install step needed.
 
+      - name: "e2e-reference-w1: install the bundled reference app (in-process twin; see the prereg's Breadth cell 1)"
+        if: steps.guard.outputs.run == 'true' && env.TPV_TARGET == 'e2e-reference-w1'
+        shell: bash
+        # Same install the canaries already do (canaries.yml): the in-process
+        # `reference:vulnerable`/`reference:guarded` adapter
+        # (reference_target_adapter.py) lazily imports `mcp_kitchen_sink`, and
+        # the differential leg `validate` drives for this target needs the
+        # guarded twin from the SAME package -- no server launch here, unlike
+        # e2e-guarded-reference's real stdio install above (this target never
+        # spawns a subprocess for either twin).
+        run: python -m pip install "./reference_targets/mcp_kitchen_sink[mcp]"
+
       # --- scaffold sanity check (no provider key; see the prereg) ----------
 
-      - name: Scaffold sanity check -- re-introspect via the unchanged CLI (not for target 3; see the prereg)
-        if: steps.guard.outputs.run == 'true' && env.TPV_TARGET != 'tpv-streamablehttp'
+      - name: Scaffold sanity check -- re-introspect via the unchanged CLI (not for target 3 or e2e-reference-w1; see the prereg)
+        if: >-
+          steps.guard.outputs.run == 'true' &&
+          env.TPV_TARGET != 'tpv-streamablehttp' &&
+          env.TPV_TARGET != 'e2e-reference-w1'
         shell: bash
         run: |
           case "$TPV_TARGET" in
@@ -520,7 +543,13 @@ jobs:
           TPV_PATTERN: ${{ inputs.pattern }}
         run: |
           EXTRA_SCAN_FLAGS=()
-          if [ -n "$TPV_PATTERN" ]; then
+          if [ "$TPV_TARGET" = "e2e-reference-w1" ]; then
+            # Breadth cell 1 (verification/PREREG_E2E_2026_10.md): this
+            # cell's class is pinned to W1 by the workflow itself -- the
+            # dispatch's own `pattern` input is unused here, whatever it is
+            # set to.
+            EXTRA_SCAN_FLAGS+=(--weakness-class W1)
+          elif [ -n "$TPV_PATTERN" ]; then
             EXTRA_SCAN_FLAGS+=(--weakness-class "$TPV_PATTERN")
           fi
           case "$TPV_TARGET" in
@@ -540,6 +569,14 @@ jobs:
             e2e-guarded-reference)  TARGET_FILE=e2e_guarded_reference.yaml; FULL_JOURNEY=true ;;
             e2e-readonly-time)      TARGET_FILE=e2e_readonly_time.yaml;     FULL_JOURNEY=true ;;
             e2e-readonly-b)         TARGET_FILE=e2e_readonly_b.yaml;        FULL_JOURNEY=true ;;
+            # Breadth cell 1: the in-repo reference app is not a
+            # verification/third_party/*.yaml target, so TARGET_FILE stays
+            # empty -- the scan/generate/validate commands below branch on
+            # that to dispatch `reference:vulnerable` directly, with no
+            # --target-file/--authorize (the in-process reference adapter
+            # takes neither; see cli.py's `is_reference`/`is_custom`
+            # routing).
+            e2e-reference-w1)      TARGET_FILE="";                        FULL_JOURNEY=true ;;
             *) echo "::error::unknown target $TPV_TARGET"; exit 1 ;;
           esac
 
@@ -563,15 +600,33 @@ jobs:
           # existing is also how the scorer knows validate ran.
           mkdir -p out
           set +e
-          MYLONITE_MAX_LLM_REQUESTS="$TPV_SCAN_CEILING" "$MYLONITE" scan \
-            --target-file "verification/third_party/$TARGET_FILE" \
-            --authorize "$TPV_TARGET" --model "$TPV_MODEL" --max-llm-calls 60 \
-            --output-dir out "${EXTRA_SCAN_FLAGS[@]}" 2>&1 | tee run.log scan.log
+          if [ -z "$TARGET_FILE" ]; then
+            # Breadth cell 1: the bundled reference target, no
+            # --target-file/--authorize (see the case statement above).
+            MYLONITE_MAX_LLM_REQUESTS="$TPV_SCAN_CEILING" "$MYLONITE" scan \
+              reference:vulnerable --model "$TPV_MODEL" --max-llm-calls 60 \
+              --output-dir out "${EXTRA_SCAN_FLAGS[@]}" 2>&1 | tee run.log scan.log
+          else
+            MYLONITE_MAX_LLM_REQUESTS="$TPV_SCAN_CEILING" "$MYLONITE" scan \
+              --target-file "verification/third_party/$TARGET_FILE" \
+              --authorize "$TPV_TARGET" --model "$TPV_MODEL" --max-llm-calls 60 \
+              --output-dir out "${EXTRA_SCAN_FLAGS[@]}" 2>&1 | tee run.log scan.log
+          fi
           scan_rc=${PIPESTATUS[0]}
           set -e
           echo "scan exited $scan_rc" >> run.log
           scan_dir="$(find out -maxdepth 1 -mindepth 1 -type d | head -1)"
           echo "score_dir=${scan_dir:-out}" >> "$GITHUB_OUTPUT"
+          # A SEPARATE output from score_dir (never overwritten below): the
+          # REAL scan output directory `scan --output-dir` wrote, with its
+          # own full `attempts`/`calibration` blocks -- unlike `generated/`,
+          # which `generate` leaves only a trimmed `{model, provider}` copy
+          # of scan_report.json beside the test. score_dir points at
+          # `generated` once generate+validate succeed (below); this output
+          # always still points at the original scan directory, so the
+          # Score step can read calibration/proof_level/exercised from the
+          # real report even when scoring a validated run.
+          echo "scan_dir=${scan_dir:-out}" >> "$GITHUB_OUTPUT"
 
           # Targets 4-6 are N=1 smoke cells (prereg: "claim no verdict") --
           # scan only. generate/validate need an actual finding to run on,
@@ -596,16 +651,26 @@ jobs:
             exploit_path="$(compgen -G "$scan_dir/exploit_*.json" | sort | head -1 || true)"
             if [ -n "$exploit_path" ]; then
               set +e
-              "$MYLONITE" generate "$exploit_path" --out generated \
-                --target-file "verification/third_party/$TARGET_FILE" --prove-control 2>&1 | tee -a run.log generate.log
+              if [ -z "$TARGET_FILE" ]; then
+                "$MYLONITE" generate "$exploit_path" --out generated \
+                  --prove-control 2>&1 | tee -a run.log generate.log
+              else
+                "$MYLONITE" generate "$exploit_path" --out generated \
+                  --target-file "verification/third_party/$TARGET_FILE" --prove-control 2>&1 | tee -a run.log generate.log
+              fi
               generate_rc=${PIPESTATUS[0]}
               set -e
               echo "generate exited $generate_rc" >> run.log
               if [ "$generate_rc" -eq 0 ]; then
                 set +e
-                MYLONITE_MAX_LLM_REQUESTS="$TPV_VALIDATE_CEILING" "$MYLONITE" validate generated \
-                  --target-file "verification/third_party/$TARGET_FILE" --authorize "$TPV_TARGET" \
-                  --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log validate.log
+                if [ -z "$TARGET_FILE" ]; then
+                  MYLONITE_MAX_LLM_REQUESTS="$TPV_VALIDATE_CEILING" "$MYLONITE" validate generated \
+                    --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log validate.log
+                else
+                  MYLONITE_MAX_LLM_REQUESTS="$TPV_VALIDATE_CEILING" "$MYLONITE" validate generated \
+                    --target-file "verification/third_party/$TARGET_FILE" --authorize "$TPV_TARGET" \
+                    --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log validate.log
+                fi
                 validate_rc=${PIPESTATUS[0]}
                 set -e
                 echo "validate exited $validate_rc" >> run.log
@@ -642,13 +707,28 @@ jobs:
         shell: bash
         env:
           TPV_SCORE_DIR: ${{ steps.run.outputs.score_dir }}
+          # The REAL scan output directory (never overwritten, unlike
+          # score_dir) -- see that output's own comment above. Lets the
+          # scorer read calibration/proof_level/exercised from the full
+          # report even when TPV_SCORE_DIR is `generated` (a validated
+          # run), whose own scan_report.json is only generate's trimmed
+          # copy.
+          TPV_ORIGINAL_SCAN_DIR: ${{ steps.run.outputs.scan_dir }}
           # So the scorer reports this cell's own weakness class's
           # fired/resisted/kept counts (e.g. "w2" for the third-party
           # injection breadth cell) instead of always defaulting to "w1".
           TPV_PATTERN: ${{ inputs.pattern }}
         run: |
+          score_pattern="$TPV_PATTERN"
+          if [ "$TPV_TARGET" = "e2e-reference-w1" ]; then
+            # Breadth cell 1: the dispatch's own `pattern` input is unused
+            # for this cell (see "Run the real journey" above) -- score it
+            # as W1 regardless of what was dispatched.
+            score_pattern="W1"
+          fi
           "$RUNNER_TEMP/campaign-venv/bin/python" scripts/score_third_party.py score \
-            "${TPV_SCORE_DIR:-out}" --target "$TPV_TARGET" --pattern "$TPV_PATTERN" \
+            "${TPV_SCORE_DIR:-out}" --target "$TPV_TARGET" --pattern "$score_pattern" \
+            --scan-dir "${TPV_ORIGINAL_SCAN_DIR:-out}" \
             --run-log run.log --scan-log scan.log --validate-log validate.log \
             --out score.json
 

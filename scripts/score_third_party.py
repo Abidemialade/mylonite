@@ -105,10 +105,15 @@ Usage
 
 ::
 
-    # one run (the directory `validate` wrote validation_report.json into)
-    python scripts/score_third_party.py score out/generated/<slug>/ \\
-        --target tpv-server-memory --run-log run.log \\
-        --scan-log scan.log --validate-log validate.log --out score-run1.json
+    # one run (the directory `validate` wrote validation_report.json into).
+    # --scan-dir points at the REAL scan output directory when it differs
+    # from the run_dir above (a validated FULL_JOURNEY run's own
+    # scan_report.json is only `generate`'s trimmed {model, provider} copy)
+    # -- see `_resolve_scan_dir`'s docstring.
+    python scripts/score_third_party.py score generated/ \\
+        --target tpv-server-memory --scan-dir "out/2026-10-04T21-08-01Z" \\
+        --run-log run.log --scan-log scan.log --validate-log validate.log \\
+        --out score-run1.json
 
     # combine N re-drives of the same cell (targets 1-3: N=3, bar 2/3)
     python scripts/score_third_party.py rollup \\
@@ -273,15 +278,33 @@ def _weakness_for_pattern(pattern_id: str) -> str | None:
     return None
 
 
-def _calibration_info(raw_report: dict) -> dict[str, object]:
+def _calibration_info(scan_dir: Path) -> dict[str, object]:
     """``{"calibration_status": ..., "calibration_reason_code": ...}``, read
-    from ``scan_report.json``'s own ``calibration`` block
-    (``mylonite.plugins._mcp.calibration.CalibrationResult.to_dict()``,
-    written only for a custom target that declares an ``effect_probe``).
-    Both are ``None`` when the target has no probe to calibrate (a bundled
-    reference target, or a precision cell with no ``seed_arm``/
-    ``effect_probe`` at all) or the report predates this field."""
-    calibration = raw_report.get("calibration") if isinstance(raw_report, dict) else None
+    from ``scan_dir``'s own ``verdicts.json`` -- the artefact
+    ``mylonite.scan.artefacts._verdicts_document`` actually writes the
+    ``calibration`` block (``CalibrationResult.to_dict()``) into.
+
+    An earlier version of this function read ``scan_report.json`` instead --
+    confirmed against a real campaign run (both pilot dispatches of the
+    `tpv-server-memory` breadth cell, 2026-10-04) to NEVER carry a
+    top-level ``calibration`` key at all, so every live run read
+    ``calibration_status: null`` even on a KEPT finding whose target
+    declares an effect probe. ``mylonite.scan.artefacts.
+    read_verdicts_calibration`` reads the identical file for the identical
+    reason -- this mirrors it rather than importing it, so this script's
+    pure aggregation logic keeps working without ``mylonite`` installed.
+    Both fields are ``None`` when the target has no probe to calibrate (a
+    bundled reference target, or a precision cell with no ``seed_arm``/
+    ``effect_probe`` at all), ``scan_dir`` has no ``verdicts.json``, or the
+    file predates this field."""
+    path = scan_dir / "verdicts.json"
+    if not path.is_file():
+        return {"calibration_status": None, "calibration_reason_code": None}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"calibration_status": None, "calibration_reason_code": None}
+    calibration = data.get("calibration") if isinstance(data, dict) else None
     if not isinstance(calibration, dict):
         return {"calibration_status": None, "calibration_reason_code": None}
     return {
@@ -290,12 +313,56 @@ def _calibration_info(raw_report: dict) -> dict[str, object]:
     }
 
 
-def _finding_proof_level(raw_report: dict) -> str | None:
-    """The ``proof_level`` (``judge_evidence["proof_level"]``) of the FIRST
-    ``outcome=finding`` attempt -- the only one ``generate``/``validate`` ever
-    act on, per the prereg's multi-finding note. ``None`` when nothing fired,
-    or the attempt carries no such key (an older report)."""
-    for attempt in raw_report.get("attempts", []) if isinstance(raw_report, dict) else []:
+def _validated_pattern_id(run_dir: Path) -> str | None:
+    """The ``pattern_id`` of the ONE exploit ``generate`` actually emitted a
+    test from -- the ``exploit_*.json`` file co-located in ``run_dir``
+    itself (never more than one there for a validated run: `generate`'s
+    single-finding mode, invoked with one explicit exploit path -- see
+    ``third-party-campaign.yml``'s own comment on why). ``None`` when
+    ``run_dir`` holds none (a scan-only cell, or before ``generate`` ran) or
+    the file can't be read, so every caller falls back to "the first finding
+    in attempts order" instead."""
+    matches = sorted(run_dir.glob("exploit_*.json"))
+    if not matches:
+        return None
+    try:
+        data = json.loads(matches[0].read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    pattern_id = data.get("pattern_id") if isinstance(data, dict) else None
+    return str(pattern_id) if pattern_id else None
+
+
+def _finding_proof_level(raw_report: dict, validated_pattern_id: str | None = None) -> str | None:
+    """The ``proof_level`` (``judge_evidence["proof_level"]``) of the
+    attempt ``generate``/``validate`` actually acted on.
+
+    With a scan report recording MULTIPLE findings (e.g. ``findings_count``
+    2), "the first ``outcome=finding`` attempt in list order" is not
+    necessarily the one that was validated -- a real campaign pilot run
+    (2026-10-04) found a scan with a `delete_entities` finding listed BEFORE
+    the `create_relations` finding `generate`/`validate` actually processed
+    (the harness always passes the alphabetically-first `exploit_*.json`
+    path, which need not be attempts-list order), so reading the list's
+    first match read a weaker proof level than the one the KEPT verdict
+    actually proves. ``validated_pattern_id`` (see
+    :func:`_validated_pattern_id`) disambiguates this when given; omitted or
+    not found among the attempts falls back to the old "first finding"
+    behaviour, unchanged for every caller and offline fixture that predates
+    this parameter."""
+    attempts = raw_report.get("attempts", []) if isinstance(raw_report, dict) else []
+    if validated_pattern_id is not None:
+        for attempt in attempts:
+            if (
+                isinstance(attempt, dict)
+                and attempt.get("outcome") == "finding"
+                and attempt.get("pattern_id") == validated_pattern_id
+            ):
+                evidence = attempt.get("judge_evidence")
+                if isinstance(evidence, dict) and evidence.get("proof_level"):
+                    return str(evidence["proof_level"])
+                return None
+    for attempt in attempts:
         if isinstance(attempt, dict) and attempt.get("outcome") == "finding":
             evidence = attempt.get("judge_evidence")
             if isinstance(evidence, dict) and evidence.get("proof_level"):
@@ -434,6 +501,53 @@ def _read_raw_report_safe(run_dir: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _resolve_scan_dir(run_dir: Path, scan_dir: Path | None) -> Path:
+    """Which directory actually holds the REAL ``scan_report.json`` -- the
+    one ``scan --output-dir`` wrote, with its own ``attempts``/
+    ``calibration`` blocks -- as opposed to ``generate``'s trimmed
+    ``{model, provider}`` copy it leaves beside the emitted test.
+
+    For a scan-only cell (the N=1 smoke targets, or a precision/breadth cell
+    scored straight from its scan directory), ``run_dir`` already IS the
+    real scan directory. For a FULL_JOURNEY cell that reached
+    ``generate``/``validate``, ``run_dir`` is the ``generated/`` directory
+    instead, and the real report lives in a SEPARATE directory the
+    workflow's own ``scan --output-dir`` wrote into -- callers pass that as
+    ``scan_dir`` (``third-party-campaign.yml``'s ``scan_dir`` step output,
+    never overwritten the way its ``score_dir`` output is). Prefers
+    ``scan_dir`` when its own report carries ``attempts``; falls back to
+    ``run_dir`` otherwise -- including every caller before this parameter
+    existed, which passes ``None``, and every offline test fixture, which
+    writes its report straight into ``run_dir``.
+    """
+    candidates: list[Path] = []
+    for base in (scan_dir, run_dir):
+        if base is None:
+            continue
+        candidates.append(base)
+        # `scan --output-dir out` writes into a timestamped child
+        # (`out/<ts>/`). When a caller passes the parent, try its children,
+        # newest first, so the real report is never silently missed.
+        if base.is_dir() and not (base / "scan_report.json").is_file():
+            children = sorted(
+                (c for c in base.iterdir() if (c / "scan_report.json").is_file()),
+                key=lambda c: c.name,
+                reverse=True,
+            )
+            candidates.extend(children)
+    for candidate in candidates:
+        report_path = candidate / "scan_report.json"
+        if not report_path.is_file():
+            continue
+        try:
+            data = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and "attempts" in data:
+            return candidate
+    return run_dir
+
+
 def score_run(
     run_dir: Path,
     *,
@@ -441,6 +555,7 @@ def score_run(
     scan_log: Path | None = None,
     validate_log: Path | None = None,
     pattern: str | None = None,
+    scan_dir: Path | None = None,
 ) -> dict[str, object]:
     """Classify one run directory per the prereg's pass rule.
 
@@ -449,9 +564,11 @@ def score_run(
     ``scan_log`` and ``validate_log`` are each stage's own output; a
     ``validate_log`` path whose file does not exist means validate never ran.
     ``pattern`` is the cell's own ``--weakness-class``/``pattern`` dispatch
-    value (``W1``-``W4``, or ``None``/blank for the first campaign's
-    unfiltered cells, which default to ``W1`` -- see
-    :func:`_weakness_counts`'s caller below).
+    value (``W1``-``W4``, or ``None``/blank when the cell runs unfiltered --
+    see :func:`_score_run_normally`'s per-declared-class handling of a blank
+    pattern). ``scan_dir`` is the REAL scan output directory, when it
+    differs from ``run_dir`` (see :func:`_resolve_scan_dir`); omitted for a
+    scan-only ``run_dir`` or an offline test fixture.
     """
     scan_text = _read_log(scan_log)
     validate_text = _read_log(validate_log)
@@ -488,44 +605,63 @@ def score_run(
                 codes_text = scan_text
             else:
                 codes_text = log_text
-            result = _score_run_normally(run_dir, log_text, codes_text, pattern=pattern)
+            result = _score_run_normally(
+                run_dir, log_text, codes_text, pattern=pattern, scan_dir=scan_dir
+            )
     if target_noise_traceback:
         result["target_noise_traceback"] = True
-    result["exercised"] = _run_exercised(run_dir, result)
+    result["exercised"] = _run_exercised(run_dir, result, scan_dir=scan_dir)
 
     # Integrity rule 7 (the prereg): calibration status and proof level
     # travel with EVERY scored run, not only KEPT/NOT_KEPT/FOUND_UNVALIDATED
     # -- a NOT_TESTED/PRODUCT_DEFECT/INVALID run gets both as an explicit
     # ``None`` (present, not omitted) rather than leaving a downstream
     # reader to ``dict.get()`` defensively. ``setdefault`` is a no-op for
-    # every branch above that already computed a real value.
-    raw_report_for_defaults = _read_raw_report_safe(run_dir)
-    defaults = _calibration_info(raw_report_for_defaults)
+    # every branch above that already computed a real value. Read from the
+    # REAL scan directory (see :func:`_resolve_scan_dir`) -- a validated
+    # run's own ``run_dir`` may hold only ``generate``'s trimmed report, and
+    # calibration lives in that directory's ``verdicts.json``, never in
+    # ``scan_report.json`` at all (see :func:`_calibration_info`).
+    real_scan_dir_for_defaults = _resolve_scan_dir(run_dir, scan_dir)
+    raw_report_for_defaults = _read_raw_report_safe(real_scan_dir_for_defaults)
+    defaults = _calibration_info(real_scan_dir_for_defaults)
     result.setdefault("calibration_status", defaults["calibration_status"])
     result.setdefault("calibration_reason_code", defaults["calibration_reason_code"])
-    result.setdefault("proof_level", _finding_proof_level(raw_report_for_defaults))
+    result.setdefault(
+        "proof_level",
+        _finding_proof_level(raw_report_for_defaults, _validated_pattern_id(run_dir)),
+    )
     return result
 
 
-def _run_exercised(run_dir: Path, result: dict[str, object]) -> bool:
+def _run_exercised(
+    run_dir: Path, result: dict[str, object], *, scan_dir: Path | None = None
+) -> bool:
     """Whether at least one attempt in this run reached a real verdict
     (``finding``/``no_finding``) -- the integrity rule's "a cell counts only
     if attacks were actually exercised" (used by :func:`precision_rollup`).
 
-    Prefers re-reading ``scan_report.json`` directly (the same
-    ``ScanDirResult.exercised`` every other classification already trusts).
-    When no ``scan_report.json`` sits in this directory but ``validate`` ran
-    anyway -- the "scan stopped at its ceiling but still recorded a finding"
-    path, scored from ``validate``'s own log -- the prereg says that always
-    follows a real recorded finding, so it counts as exercised even though
-    the finding itself lives in a directory this function was not pointed
-    at. Anything else defaults to whether the classification itself required
-    a judged outcome.
+    Prefers re-reading the REAL ``scan_report.json`` (see
+    :func:`_resolve_scan_dir`: ``scan_dir`` when its own report carries
+    ``attempts``, else ``run_dir``) and the same ``ScanDirResult.exercised``
+    every other classification already trusts. Reading ``run_dir``'s own
+    file unconditionally was the bug this parameter closes: for a validated
+    FULL_JOURNEY run, that file is only ``generate``'s trimmed
+    ``{model, provider}`` copy, with no ``attempts`` list at all, which made
+    every such run read as unexercised even on a KEPT verdict. When no real
+    scan report is found anywhere but ``validate`` ran anyway -- the "scan
+    stopped at its ceiling but still recorded a finding" path, scored from
+    ``validate``'s own log -- the prereg says that always follows a real
+    recorded finding, so it counts as exercised even though the finding
+    itself lives in a directory this function was not pointed at. Anything
+    else defaults to whether the classification itself required a judged
+    outcome.
     """
-    report_path = run_dir / "scan_report.json"
+    real_dir = _resolve_scan_dir(run_dir, scan_dir)
+    report_path = real_dir / "scan_report.json"
     if report_path.is_file():
         try:
-            return load_scan_dir(run_dir).exercised
+            return load_scan_dir(real_dir).exercised
         except ScanDirIntegrityError:
             return False
     if result.get("stage") == "validate":
@@ -533,19 +669,111 @@ def _run_exercised(run_dir: Path, result: dict[str, object]) -> bool:
     return result.get("classification") in (KEPT, NOT_KEPT, FOUND_UNVALIDATED)
 
 
+def _first_finding_weakness(
+    raw_report: dict, validated_pattern_id: str | None = None
+) -> str | None:
+    """The W1-W4 class of the attempt ``generate``/``validate`` actually
+    acted on. Used only for the blank-``pattern`` per-declared-class
+    breakdown, to decide which class's block gets ``kept=1`` on a KEPT
+    verdict. Prefers the attempt matching ``validated_pattern_id`` (see
+    :func:`_validated_pattern_id`) -- with multiple findings, the first
+    ``outcome=finding`` attempt in list order need not be the one that was
+    actually validated (the same mismatch :func:`_finding_proof_level`
+    guards against); falls back to that "first finding" behaviour when
+    omitted or not found."""
+    attempts = raw_report.get("attempts", []) if isinstance(raw_report, dict) else []
+    if validated_pattern_id is not None:
+        for attempt in attempts:
+            if (
+                isinstance(attempt, dict)
+                and attempt.get("outcome") == "finding"
+                and attempt.get("pattern_id") == validated_pattern_id
+            ):
+                return _weakness_for_pattern(validated_pattern_id)
+    for attempt in attempts:
+        if isinstance(attempt, dict) and attempt.get("outcome") == "finding":
+            return _weakness_for_pattern(str(attempt.get("pattern_id", "")))
+    return None
+
+
+def _pattern_blocks_for(raw_report: dict, pattern: str | None) -> dict[str, dict[str, int]]:
+    """The fired/resisted/kept block(s) to merge into a score result, keyed
+    by weakness class in lowercase (``"w1"``, ``"w2"``, ...).
+
+    An explicit ``--weakness-class``/``pattern`` dispatch (``W1``-``W4``)
+    always gets exactly one block, under its own key, whether or not any
+    attempt actually belongs to it (the e2e-reference-w1 breadth cell
+    depends on this: a clean resist still reports a `"w1"` block showing
+    0 fired).
+
+    A BLANK pattern (the unfiltered cells) never defaults to a hardcoded
+    `"w1"` -- a target whose scan declared W2/W4 and never ran a single W1
+    seed must not read an all-zero `"w1"` block as if W1 had been measured.
+    Instead, one block per class actually present among the run's own
+    attempts (via :func:`_weakness_for_pattern`), empty (no block at all)
+    when none resolve to a known class.
+    """
+    if pattern:
+        key = pattern.upper()
+        return {key.lower(): _weakness_counts(raw_report, key)}
+    classes_seen: set[str] = set()
+    for attempt in raw_report.get("attempts", []) if isinstance(raw_report, dict) else []:
+        if not isinstance(attempt, dict):
+            continue
+        weakness = _weakness_for_pattern(str(attempt.get("pattern_id", "")))
+        if weakness:
+            classes_seen.add(weakness)
+    return {w.lower(): _weakness_counts(raw_report, w) for w in sorted(classes_seen)}
+
+
+def _mark_kept(
+    pattern_blocks: dict[str, dict[str, int]],
+    *,
+    pattern: str | None,
+    weakness_classes: list[str],
+    raw_report: dict,
+    validated_pattern_id: str | None = None,
+) -> None:
+    """Set ``kept=1`` on the one block the validated finding belongs to.
+
+    An explicit pattern is marked only when the target actually declared
+    that class (unchanged from before this function existed); a blank
+    pattern looks at the finding's own attempt instead, since several
+    classes' blocks may be present at once.
+    """
+    if pattern:
+        key = pattern.upper()
+        if key in weakness_classes and key.lower() in pattern_blocks:
+            pattern_blocks[key.lower()]["kept"] = 1
+        return
+    found_weakness = _first_finding_weakness(raw_report, validated_pattern_id)
+    if found_weakness and found_weakness.lower() in pattern_blocks:
+        pattern_blocks[found_weakness.lower()]["kept"] = 1
+
+
 def _score_run_normally(
-    run_dir: Path, log_text: str, codes_text: str, *, pattern: str | None = None
+    run_dir: Path,
+    log_text: str,
+    codes_text: str,
+    *,
+    pattern: str | None = None,
+    scan_dir: Path | None = None,
 ) -> dict[str, object]:
     """Every classification branch except rule #1 (the traceback check,
     handled by the caller, :func:`score_run`, before this is reached).
     ``log_text`` is the whole log, searched for infra signatures;
     ``codes_text`` is the scored stage's own log, the only place reason
     codes are read from. ``pattern`` is the cell's own weakness-class
-    filter (``W1``-``W4``); blank/``None`` defaults to ``W1`` (the first
-    campaign's cells, all unfiltered, only ever cared about W1's counts)."""
+    filter (``W1``-``W4``); blank/``None`` reports counts per class actually
+    present (see :func:`_pattern_blocks_for`). ``scan_dir`` is the REAL scan
+    output directory when it differs from ``run_dir`` (see
+    :func:`_resolve_scan_dir`) -- used only to source the data fields below
+    (calibration, proof level, weakness counts, reason codes FROM attempts);
+    the structural "does this directory exist at all" checks below still
+    read ``run_dir`` itself.
+    """
     report_path = run_dir / "scan_report.json"
     validation_path = run_dir / "validation_report.json"
-    weakness_key = (pattern or "W1").upper()
 
     if not report_path.is_file() and not validation_path.is_file():
         return _classify_missing_report(run_dir, log_text)
@@ -560,16 +788,25 @@ def _score_run_normally(
             # above, so this is a product/harness defect, not an infra one.
             return {"classification": PRODUCT_DEFECT, "reason": str(exc)}
 
+    # The REAL scan directory -- scan's own output, with its own
+    # `scan_report.json` `attempts` list and its own `verdicts.json`
+    # (calibration lives there, never in `scan_report.json` -- see
+    # `_calibration_info`) -- not `generate`'s trimmed `{model, provider}`
+    # `scan_report.json` copy that may sit in `run_dir` instead (see
+    # `_resolve_scan_dir`'s docstring). Falls back to run_dir itself when no
+    # better directory is found, so every caller that predates this
+    # parameter (and every offline test fixture) is unaffected.
+    real_scan_dir = _resolve_scan_dir(run_dir, scan_dir)
+    real_report_path = real_scan_dir / "scan_report.json"
     raw_report: dict = {}
-    if report_path.is_file():
-        raw_report = json.loads(report_path.read_text(encoding="utf-8"))
+    if real_report_path.is_file():
+        raw_report = json.loads(real_report_path.read_text(encoding="utf-8"))
     log_reason_codes = _REASON_CODE_RE.findall(codes_text)
     reason_codes = _dedupe(_reason_codes_in_attempts(raw_report) + log_reason_codes)
     weakness_classes = sorted(scan_result.weakness_classes) if scan_result is not None else []
-    calibration_info = _calibration_info(raw_report)
-    proof_level = _finding_proof_level(raw_report)
-    pattern_counts = _weakness_counts(raw_report, weakness_key)
-    pattern_key = weakness_key.lower()
+    calibration_info = _calibration_info(real_scan_dir)
+    proof_level = _finding_proof_level(raw_report, _validated_pattern_id(run_dir))
+    pattern_blocks = _pattern_blocks_for(raw_report, pattern)
 
     if validation_path.is_file():
         from mylonite._verdict import verdict_label
@@ -578,15 +815,20 @@ def _score_run_normally(
         report = ValidationReport.model_validate_json(validation_path.read_text(encoding="utf-8"))
         label = verdict_label(report)
         if label == "KEPT":
-            if weakness_key in weakness_classes:
-                pattern_counts["kept"] = 1
+            _mark_kept(
+                pattern_blocks,
+                pattern=pattern,
+                weakness_classes=weakness_classes,
+                raw_report=raw_report,
+                validated_pattern_id=_validated_pattern_id(run_dir),
+            )
             return {
                 "classification": KEPT,
                 "label": label,
                 "weakness_classes": weakness_classes,
                 "reason_codes": reason_codes,
                 "proof_level": proof_level,
-                pattern_key: pattern_counts,
+                **pattern_blocks,
                 "adjudication": {"status": "unadjudicated", "reason": None},
                 **calibration_info,
             }
@@ -602,7 +844,7 @@ def _score_run_normally(
             "weakness_classes": weakness_classes,
             "reason_codes": reason_codes,
             "proof_level": proof_level,
-            pattern_key: pattern_counts,
+            **pattern_blocks,
             **calibration_info,
         }
 
@@ -645,7 +887,7 @@ def _score_run_normally(
             "weakness_classes": weakness_classes,
             "reason_codes": reason_codes,
             "proof_level": proof_level,
-            pattern_key: pattern_counts,
+            **pattern_blocks,
             **calibration_info,
         }
 
@@ -670,7 +912,7 @@ def _score_run_normally(
         "weakness_classes": weakness_classes,
         "reason_codes": reason_codes,
         "proof_level": proof_level,
-        pattern_key: pattern_counts,
+        **pattern_blocks,
         **calibration_info,
     }
 
@@ -774,9 +1016,21 @@ def main(argv: list[str] | None = None) -> int:
     score_p.add_argument(
         "--pattern",
         default=None,
-        help="The cell's own --weakness-class/pattern value (W1-W4). Controls which "
-        "class's fired/resisted/kept counts are reported, and under which key "
-        "('w2' for W2, etc.) -- blank/omitted defaults to W1.",
+        help="The cell's own --weakness-class/pattern value (W1-W4). An explicit value "
+        "always reports exactly that class's fired/resisted/kept counts, under its own "
+        "key ('w2' for W2, etc.), whether or not any attempt belongs to it; blank/omitted "
+        "reports one block per class actually present among the run's own attempts "
+        "instead of guessing W1.",
+    )
+    score_p.add_argument(
+        "--scan-dir",
+        type=Path,
+        default=None,
+        help="The REAL scan output directory (scan --output-dir's own timestamped dir), "
+        "when it differs from RUN_DIR -- RUN_DIR is `generated/` for a validated "
+        "FULL_JOURNEY run, whose own scan_report.json is only generate's trimmed "
+        "{model, provider} copy; this points at the one with the real attempts/"
+        "calibration blocks. Omitted when RUN_DIR already is the real scan directory.",
     )
     score_p.add_argument("--out", type=Path, required=True)
 
@@ -804,6 +1058,7 @@ def main(argv: list[str] | None = None) -> int:
             scan_log=args.scan_log,
             validate_log=args.validate_log,
             pattern=args.pattern,
+            scan_dir=args.scan_dir,
         )
         result["target"] = args.target
         args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")

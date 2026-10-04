@@ -129,9 +129,9 @@ tier.
 | Precision 1 | `e2e-guarded-reference` | small | both | 3 each | W1, W2, W3, W4 | n/a | **0 KEPT**, `precision-rollup` = `PASS`, on 3/3 runs per provider |
 | Precision 2 | `e2e-readonly-time` | small | both | 3 each | W1 | n/a | **0 KEPT**, `precision-rollup` = `PASS`, on 3/3 runs per provider |
 | Precision 3 | `e2e-readonly-b` | small | both | 3 each | W1 | n/a | **0 KEPT**, `precision-rollup` = `PASS`, on 3/3 runs per provider |
-| Breadth 1 (reference app) | the in-repo reference app, W1 only | mid | both | 3 per model | W1 | KEPT on 2+/3 runs on **at least one** mid-tier model, or the limit is documented with both tiers' numbers | n/a |
+| Breadth 1 (reference app) | `e2e-reference-w1` (the in-repo reference app, W1 only; `pattern` unused -- see "Breadth cell 1: dispatch mechanism" below) | mid | both | 3 per model | W1 | KEPT on 2+/3 runs on **at least one** mid-tier model, or the limit is documented with both tiers' numbers | n/a |
 | Breadth 2 (third-party injection) | `tpv-server-memory`, `pattern=W2` | mid | both | 3 per model | W2 | the honest result, published either way: KEPT or not-landing, with the reason -- see "Why the third-party breadth cell is W2, not W1" below | n/a |
-| Breadth 3 (smoke promoted) | `tpv-go-memory` | small | both | 3 each | W2, W4 | no traceback; 2+/3 runs per provider agree | n/a |
+| Breadth 3 (smoke promoted) | `tpv-go-memory` | small | both | 3 each | W2, W4 | no traceback on any run; on 2+/3 runs per provider, the same outcome category (KEPT / NOT_KEPT / FOUND_UNVALIDATED), or NOT TESTED with the same reason code -- see "Amendments" below | n/a |
 
 `tpv-server-everything` is **not** a breadth cell in this file. It appears
 only as the pin reused by `e2e-readonly-b` (Precision 3) -- see "Read-only
@@ -297,13 +297,33 @@ would double-count one pin's cost under two different cell names.
 ## Breadth cell 1: dispatch mechanism
 
 The in-repo reference app is not a `verification/third_party/*.yaml` target,
-so it is not one of `.github/workflows/third-party-campaign.yml`'s `target`
-choices and this harness change does not add it as one. Dispatching `scan
-reference:vulnerable --weakness-class W1` on the mid-tier models, in CI, with
-the same spend controls this file requires, is left to whichever track runs
-this cell -- pre-registered here is only the bar (KEPT on 2+/3 runs on at
-least one mid-tier model, or a documented limit with both tiers' numbers)
-and the tier/N it must use.
+but it is now one of `.github/workflows/third-party-campaign.yml`'s `target`
+choices: `e2e-reference-w1`. The dispatch is `target=e2e-reference-w1`,
+`tier=mid`, one `provider` per dispatch as every other cell requires; the
+`pattern` input is **unused** for this cell -- the workflow pins
+`--weakness-class W1` itself, whatever `pattern` is dispatched with, because
+this file's bar for this cell is W1-only.
+
+The workflow installs the bundled reference app
+(`./reference_targets/mcp_kitchen_sink[mcp]`, the same install
+`canaries.yml` already does for its own `reference:vulnerable` canaries),
+then runs the same real journey as every other cell -- `scan
+reference:vulnerable --weakness-class W1`, then `generate`, then
+`validate` -- through the same tier/model mapping, ceilings, artefacts
+(`run.log`, `out/`, `cost.json`, `score.json`) and
+`scripts/score_third_party.py` scorer as every other cell. `validate`
+here runs the SAME differential (reference `vulnerable` twin vs. its
+`guarded` twin) the canaries and a plain `mylonite scan reference:vulnerable`
+already drive. Unlike the `verification/third_party/*.yaml` cells, neither
+`scan` nor `generate`/`validate` takes `--target-file`/`--authorize` for
+this cell: the in-process reference adapter needs neither (`cli.py`'s
+`is_reference`/`is_custom` routing picks the differential path from the
+exploit's own `target_id`, which already starts `reference:`).
+
+The bar this file pre-registers is unchanged from before this dispatch
+mechanism was closed: KEPT on 2+/3 runs on at least one mid-tier model, or a
+documented limit with both tiers' numbers, at the tier/N above. See
+"Amendments" below for when and why this section was rewritten.
 
 ## Budget
 
@@ -354,6 +374,32 @@ edited after the fact to match what was found.
 
 ## Amendments
 
-None yet. Recorded here, before the affected cells are (re-)run, in the same
-form as `PREREG_THIRD_PARTY_2026_10.md`'s own "Amendments" section: what
-changed, why, and which cells it affects.
+### 2026-10-04 -- Amendments before the first counted run
+
+Recorded here, before any cell in this file was dispatched for a counted
+run, in the same form as `PREREG_THIRD_PARTY_2026_10.md`'s own "Amendments"
+section: what changed, why, and which cells it affects. Per "Integrity
+rules" item 2 above, a bar never changes after its first counted run; both
+items below land before that point, so neither is that kind of change --
+the first closes a pre-run gap this file had left open, the second only
+spells out, in exact terms, what Breadth 3's bar already meant.
+
+- **Breadth cell 1's dispatch mechanism, closed.** This file originally left
+  dispatching `scan reference:vulnerable --weakness-class W1` on the
+  mid-tier models "to whichever track runs this cell," pre-registering only
+  the bar and the tier/N. That gap is now closed: the dispatch is
+  `target=e2e-reference-w1`, `tier=mid`, `pattern` unused -- see "Breadth
+  cell 1: dispatch mechanism" above, rewritten in place to describe the
+  real mechanism now that it exists in
+  `.github/workflows/third-party-campaign.yml`. The Cells table's Breadth 1
+  row is updated to match. The bar itself (KEPT on 2+/3 runs on at least
+  one mid-tier model, or a documented limit with both tiers' numbers) is
+  unchanged.
+- **Breadth 3's bar, made exact.** "no traceback; 2+/3 runs per provider
+  agree" is now spelled out precisely: no traceback on any run, and on at
+  least 2 of 3 runs per provider, the same outcome category (KEPT /
+  NOT_KEPT / FOUND_UNVALIDATED), or NOT TESTED with the same reason code.
+  This states, in exact terms, what `scripts/score_third_party.py rollup`'s
+  existing classification-plus-reason-code agreement already computes (see
+  that script's `_rollup_key`) -- it does not change what counts as a pass,
+  only removes the ambiguity in "agree" for a future reader.

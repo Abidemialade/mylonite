@@ -1,0 +1,34 @@
+{
+  "calibration": {
+    "certified_tools": [],
+    "reason_code": "MYL-INC-003",
+    "seed_control": { "reason_code": null, "status": "passed" },
+    "status": "confirm_only"
+  },
+  "classes": [
+    {
+      "codes": ["MYL-NT-006"],
+      "counts": { "finding": 0, "not_tested": 1, "resisted": 0, "server_reported": 0 },
+      "evidence_tiers": { "judge-only": 0, "state": 0, "trace": 0 },
+      "proof_levels": [],
+      "status": "NOT TESTED",
+      "trace_decided": 0,
+      "weakness": "W2"
+    },
+    {
+      "codes": [],
+      "counts": { "finding": 2, "not_tested": 2, "resisted": 1, "server_reported": 0 },
+      "evidence_tiers": { "judge-only": 0, "state": 1, "trace": 1 },
+      "proof_levels": ["effect-confirmed", "dispatched-tool-linked"],
+      "status": "FINDING",
+      "trace_decided": 5,
+      "weakness": "W4"
+    }
+  ],
+  "codes": { "MYL-NT-006": 1 },
+  "counts": { "finding": 2, "not_tested": 3, "resisted": 1, "server_reported": 0 },
+  "evidence_tiers": { "judge-only": 0, "state": 1, "trace": 1 },
+  "proof_levels": { "dispatched-tool-linked": 1, "effect-confirmed": 1 },
+  "schema_version": "1.1",
+  "target_id": "mcp:tpv-server-memory"
+}
