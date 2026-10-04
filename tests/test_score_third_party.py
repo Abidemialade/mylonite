@@ -15,6 +15,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import score_third_party as scorer
 
+#: Redacted excerpts of two real third-party-campaign pilot dispatches
+#: (2026-10-02-l2-master-plan, `tpv-server-memory`, tier=mid, 2026-10-04):
+#: `e2e_pilot_anthropic_not_kept` (run 37234686003, claude-sonnet-5, scored
+#: NOT_KEPT) and `e2e_pilot_openai_kept` (run 37234695213, gpt-5.1, scored
+#: KEPT). Checked against `detect-secrets` before being committed. See
+#: `_materialise_pilot_run` below for how each directory's files map onto a
+#: real run's layout (`generated/` + the scan's own timestamped `out/` dir).
+_FIXTURES = Path(__file__).resolve().parent / "fixtures" / "score_third_party"
+
 
 def _write_scan_report(run_dir: Path, **over: object) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -36,6 +45,18 @@ def _write_validation_report(run_dir: Path, **over: object) -> None:
     base: dict = {"test_filename": "test_example.py", "outcomes": [], "kept": False}
     base.update(over)
     (run_dir / "validation_report.json").write_text(json.dumps(base), encoding="utf-8")
+
+
+def _write_verdicts(run_dir: Path, *, calibration: dict | None) -> None:
+    """``verdicts.json`` -- the artefact that actually carries the
+    ``calibration`` block (``mylonite.scan.artefacts._verdicts_document``),
+    never ``scan_report.json`` itself (confirmed against two real
+    campaign pilot runs on 2026-10-04, which never carry a top-level
+    ``calibration`` key at all)."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "verdicts.json").write_text(
+        json.dumps({"schema_version": "1.1", "calibration": calibration}), encoding="utf-8"
+    )
 
 
 def _write_log(tmp_path: Path, text: str, name: str = "run.log") -> Path:
@@ -686,7 +707,7 @@ def test_cli_round_trips_score_then_rollup(tmp_path: Path) -> None:
 # --- W1 counts and the precision-cell rollup (plan item (e)) ----------------
 
 
-def test_kept_run_emits_calibration_status_from_the_scan_report(tmp_path: Path) -> None:
+def test_kept_run_emits_calibration_status_from_verdicts_json(tmp_path: Path) -> None:
     run_dir = tmp_path / "run1"
     _write_scan_report(
         run_dir,
@@ -700,8 +721,8 @@ def test_kept_run_emits_calibration_status_from_the_scan_report(tmp_path: Path) 
             }
         ],
         findings_count=1,
-        calibration={"status": "certified", "reason_code": None},
     )
+    _write_verdicts(run_dir, calibration={"status": "certified", "reason_code": None})
     (run_dir / f"exploit_{_exploit_record()['pattern_id']}.json").write_text(
         json.dumps(_exploit_record()), encoding="utf-8"
     )
@@ -716,10 +737,8 @@ def test_kept_run_emits_calibration_status_from_the_scan_report(tmp_path: Path) 
 
 def test_not_kept_run_emits_a_failed_calibration_status(tmp_path: Path) -> None:
     run_dir = tmp_path / "run1"
-    _write_scan_report(
-        run_dir,
-        calibration={"status": "failed", "reason_code": "MYL-INC-005"},
-    )
+    _write_scan_report(run_dir)
+    _write_verdicts(run_dir, calibration={"status": "failed", "reason_code": "MYL-INC-005"})
     _write_validation_report(run_dir, kept=False, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_FAILED])
     result = scorer.score_run(run_dir)
     assert result["classification"] == scorer.NOT_KEPT
@@ -728,6 +747,22 @@ def test_not_kept_run_emits_a_failed_calibration_status(tmp_path: Path) -> None:
     # NOT_KEPT never carries an adjudication field -- that is reserved for a
     # KEPT finding, which is the only thing the controller ever adjudicates.
     assert "adjudication" not in result
+
+
+def test_calibration_is_never_read_from_scan_report_json_even_if_present_there(
+    tmp_path: Path,
+) -> None:
+    """The exact bug a real campaign pilot run exposed (2026-10-04):
+    `scan_report.json` never carries a top-level `calibration` key at all
+    (the product writes it only into `verdicts.json`), so a stray
+    `calibration` key in `scan_report.json` -- however it got there -- must
+    never be read as the real thing."""
+    run_dir = tmp_path / "run1"
+    _write_scan_report(run_dir, calibration={"status": "certified", "reason_code": None})
+    _write_validation_report(run_dir, kept=False, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_FAILED])
+    result = scorer.score_run(run_dir)
+    assert result["calibration_status"] is None
+    assert result["calibration_reason_code"] is None
 
 
 def test_a_report_with_no_calibration_block_reads_both_fields_as_none(tmp_path: Path) -> None:
@@ -788,6 +823,77 @@ def test_w1_kept_is_one_only_when_the_run_is_actually_kept_and_w1_declared(
     result = scorer.score_run(run_dir)
     assert result["classification"] == scorer.KEPT
     assert result["w1"]["kept"] == 1
+
+
+# --- e2e-reference-w1 (verification/PREREG_E2E_2026_10.md's Breadth cell 1) --
+# `third-party-campaign.yml` always dispatches this cell with
+# `--pattern W1` (the workflow pins it, ignoring the dispatch's own
+# `pattern` input -- see "Run the real journey"/"Score the run against the
+# prereg"), so the scorer always sees an explicit pattern here, never a
+# blank one. The three outcomes below -- KEPT, not landing (NOT_KEPT), and
+# NOT TESTED -- are the ones this cell's own bar
+# ("Breadth cell 1: dispatch mechanism") actually reads.
+
+
+def test_e2e_reference_w1_kept_report_reads_kept(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run1"
+    _write_scan_report(
+        run_dir,
+        target_id="reference:vulnerable",
+        weakness_classes=["W1"],
+        attempts=[
+            {
+                "seed_id": "a",
+                "pattern_id": "synth-w1-tool-description-read_note",
+                "outcome": "finding",
+                "judge_evidence": {"proof_level": "effect-confirmed"},
+            }
+        ],
+        findings_count=1,
+    )
+    (run_dir / "exploit_synth-w1-tool-description-read_note.json").write_text(
+        json.dumps(_w1_exploit_record("synth-w1-tool-description-read_note")), encoding="utf-8"
+    )
+    _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
+    result = scorer.score_run(run_dir, pattern="W1")
+    assert result["classification"] == scorer.KEPT
+    assert result["w1"] == {"fired": 1, "resisted": 0, "kept": 1}
+
+
+def test_e2e_reference_w1_rejected_report_reads_not_kept_not_landing(tmp_path: Path) -> None:
+    """A finding the reference validator's differential rejects (the attack
+    did not reproduce against the guarded twin's own control) -- "not
+    landing" in the prereg's own wording for this cell's bar."""
+    run_dir = tmp_path / "run1"
+    _write_scan_report(
+        run_dir,
+        target_id="reference:vulnerable",
+        weakness_classes=["W1"],
+        attempts=[
+            {"seed_id": "a", "pattern_id": "synth-w1-rug-pull", "outcome": "finding"},
+        ],
+        findings_count=1,
+    )
+    (run_dir / "exploit_synth-w1-rug-pull.json").write_text(
+        json.dumps(_w1_exploit_record()), encoding="utf-8"
+    )
+    _write_validation_report(run_dir, kept=False, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_FAILED])
+    result = scorer.score_run(run_dir, pattern="W1")
+    assert result["classification"] == scorer.NOT_KEPT
+    assert result["label"] == "REJECTED"
+    assert result["w1"] == {"fired": 1, "resisted": 0, "kept": 0}
+
+
+def test_e2e_reference_w1_ceiling_abort_reads_not_tested(tmp_path: Path) -> None:
+    """A scan-ceiling abort on this cell (MYLONITE_MAX_LLM_REQUESTS tripped
+    before any W1 seed reached a verdict) -- NOT TESTED, keyed on the
+    abort's own reason code, exactly like every other cell's ceiling trip."""
+    run_dir = tmp_path / "run1"
+    _write_scan_report(run_dir, target_id="reference:vulnerable", aborted="budget_exceeded")
+    log = _write_log(tmp_path, "error: [MYL-ABT-001] LLM request ceiling of 60 reached\n")
+    result = scorer.score_run(run_dir, run_log=log, pattern="W1")
+    assert result["classification"] == scorer.NOT_TESTED
+    assert result["reason_codes"] == ["MYL-ABT-001"]
 
 
 def test_exercised_is_true_for_a_clean_resist_and_false_for_an_unexercised_abort(
@@ -960,3 +1066,163 @@ def test_calibration_and_proof_level_are_present_on_a_mylonite_traceback_product
     # exercised still gets computed on this path too (previously skipped by
     # an early return that bypassed the rest of score_run entirely).
     assert "exercised" in result
+
+
+# --- regression tests from two real campaign pilot runs (2026-10-04) --------
+# `score_run` was checked against the real artefacts of two uncounted
+# `tpv-server-memory` mid-tier pilot dispatches and found wrong on three
+# counts: `proof_level`/`calibration_status` stayed null even on a KEPT run,
+# `exercised` read false on a KEPT run, and an unfiltered run's fired/
+# resisted counts were reported under a hardcoded, wrong "w1" key. Each test
+# below is built from a redacted excerpt of one real run's own artefacts
+# (`tests/fixtures/score_third_party/`), not a hand-rolled synthetic report,
+# so it would have caught the exact shapes (the trimmed `generate` stub, the
+# `verdicts.json`-only calibration block, the out-of-order multi-finding
+# list) a hand-written fixture had been missing.
+
+
+def _materialise_pilot_run(tmp_path: Path, fixture_name: str) -> tuple[Path, Path]:
+    """Lay out one fixture set the way a real FULL_JOURNEY cell's own
+    directories look: ``generated/`` (what ``generate``/``validate`` wrote
+    -- the trimmed scan_report.json, the real validation_report.json, and
+    the ONE exploit file the validated finding came from) alongside a
+    SEPARATE ``out/`` directory (what ``scan --output-dir`` itself wrote --
+    the real, untrimmed scan_report.json, the real verdicts.json, and every
+    exploit file the scan produced). Returns ``(generated_dir, out_dir)``,
+    the same pair ``third-party-campaign.yml`` passes as ``run_dir`` and
+    ``--scan-dir``.
+    """
+    fixture_dir = _FIXTURES / fixture_name
+    generated_dir = tmp_path / "generated"
+    out_dir = tmp_path / "out"
+    generated_dir.mkdir(parents=True)
+    out_dir.mkdir(parents=True)
+
+    (generated_dir / "scan_report.json").write_text(
+        (fixture_dir / "generated_scan_report.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (generated_dir / "validation_report.json").write_text(
+        (fixture_dir / "generated_validation_report.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (out_dir / "scan_report.json").write_text(
+        (fixture_dir / "out_scan_report.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (out_dir / "verdicts.json").write_text(
+        (fixture_dir / "out_verdicts.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    for exploit_file in fixture_dir.glob("exploit_*.json"):
+        text = exploit_file.read_text(encoding="utf-8")
+        # The ONE exploit `generate` was given -- co-located in BOTH
+        # `generated/` (what it emitted a test from) and `out/` (it was
+        # also one of the scan's own findings).
+        (generated_dir / exploit_file.name).write_text(text, encoding="utf-8")
+        (out_dir / exploit_file.name).write_text(text, encoding="utf-8")
+    for exploit_file in fixture_dir.glob("out_exploit_*.json"):
+        # A SECOND finding the scan produced but `generate`/`validate` never
+        # touched (the harness validates only the first, alphabetically --
+        # see third-party-campaign.yml's own comment on why) -- present only
+        # in `out/`, exactly like the real pilot run's own scan directory.
+        name = exploit_file.name.removeprefix("out_")
+        (out_dir / name).write_text(exploit_file.read_text(encoding="utf-8"), encoding="utf-8")
+
+    return generated_dir, out_dir
+
+
+def test_e2e_pilot_kept_run_reads_real_proof_level_and_calibration(tmp_path: Path) -> None:
+    """The exact bug: before this fix, `proof_level` and `calibration_status`
+    stayed null on this real KEPT run, because the scorer read
+    `generated/scan_report.json` (generate's trimmed `{model, provider}`
+    stub -- no `attempts`, no `calibration`) instead of the scan's own
+    `out/scan_report.json` (`attempts`) and `out/verdicts.json`
+    (`calibration`, which `scan_report.json` never carries at all)."""
+    generated_dir, out_dir = _materialise_pilot_run(tmp_path, "e2e_pilot_openai_kept")
+    result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
+    assert result["classification"] == scorer.KEPT
+    # The real scan recorded TWO findings (delete_entities first in attempts
+    # order, proof_level "dispatched-tool-linked"; create_relations second,
+    # "effect-confirmed") but only create_relations was the one `generate`/
+    # `validate` actually processed (its own exploit file, co-located in
+    # generated/) -- the "first finding in list order" reading would have
+    # returned the WRONG attempt's proof level.
+    assert result["proof_level"] == "effect-confirmed"
+    assert result["calibration_status"] == "confirm_only"
+    assert result["calibration_reason_code"] == "MYL-INC-003"
+
+
+def test_e2e_pilot_scan_dir_parent_resolves_the_timestamped_child(tmp_path: Path) -> None:
+    """`scan --output-dir out` writes into `out/<timestamp>/`. The workflow can
+    pass the parent `out`; the scorer must then find the real report in its
+    newest child instead of silently scoring proof level and calibration as null."""
+    import shutil
+
+    generated_dir, out_dir = _materialise_pilot_run(tmp_path, "e2e_pilot_openai_kept")
+    parent = tmp_path / "parent-out"
+    shutil.copytree(out_dir, parent / "2026-10-04T21-08-01Z")
+    result = scorer.score_run(generated_dir, scan_dir=parent, pattern="")
+    assert result["proof_level"] == "effect-confirmed"
+    assert result["calibration_status"] == "confirm_only"
+    assert result["exercised"] is True
+
+
+def test_e2e_pilot_kept_run_is_exercised(tmp_path: Path) -> None:
+    """The second bug: `exercised` read False on this real KEPT run, because
+    it was computed from `load_scan_dir(generated_dir)` -- whose own
+    `scan_report.json` is the trimmed stub with no `attempts` list at all,
+    so nothing could ever look exercised there, whatever the real scan
+    found."""
+    generated_dir, out_dir = _materialise_pilot_run(tmp_path, "e2e_pilot_openai_kept")
+    result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
+    assert result["classification"] == scorer.KEPT
+    assert result["exercised"] is True
+
+
+def test_e2e_pilot_kept_run_unfiltered_pattern_reports_w4_not_w1(tmp_path: Path) -> None:
+    """The third bug: this cell was dispatched with no `--weakness-class`
+    filter (blank `pattern`), and the old scorer defaulted a blank pattern
+    to a hardcoded "w1" -- reporting an all-zero `w1` block for a target
+    that declared, and only ever ran, W2/W4 seeds. The fix reports counts
+    per class actually present among the run's own attempts instead."""
+    generated_dir, out_dir = _materialise_pilot_run(tmp_path, "e2e_pilot_openai_kept")
+    result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
+    assert result["classification"] == scorer.KEPT
+    assert "w1" not in result
+    assert result["w4"] == {"fired": 2, "resisted": 1, "kept": 1}
+
+
+def test_e2e_pilot_not_kept_run_reads_real_proof_level_and_calibration(tmp_path: Path) -> None:
+    """The second pilot run (anthropic, REJECTED): proof_level and
+    calibration must be read correctly for a NOT_KEPT result too, not only
+    a KEPT one -- the same `_resolve_scan_dir`/`_calibration_info` fix
+    applies to every classification branch."""
+    generated_dir, out_dir = _materialise_pilot_run(tmp_path, "e2e_pilot_anthropic_not_kept")
+    result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
+    assert result["classification"] == scorer.NOT_KEPT
+    assert result["label"] == "REJECTED"
+    assert result["proof_level"] == "dispatched-tool-linked"
+    assert result["calibration_status"] == "confirm_only"
+    assert result["calibration_reason_code"] == "MYL-INC-003"
+    assert result["exercised"] is True
+    assert "w1" not in result
+    assert result["w4"]["fired"] == 1
+
+
+def test_e2e_pilot_not_tested_abort_reads_calibration_from_the_real_scan_dir(
+    tmp_path: Path,
+) -> None:
+    """NOT_TESTED must not lose the real calibration/proof_level defaults
+    either (integrity rule 7: they travel with EVERY scored run) -- scored
+    from the pilot's own `out/` directory even though no `validate.log`/
+    `validation_report.json` exist at all in this scenario."""
+    _, out_dir = _materialise_pilot_run(tmp_path, "e2e_pilot_openai_kept")
+    # Simulate a scan-ceiling abort on the SAME real scan directory: no
+    # validation ever ran, so `run_dir` IS the scan directory this time
+    # (matches a real abort: there is no `generated/` at all).
+    data = json.loads((out_dir / "scan_report.json").read_text(encoding="utf-8"))
+    data["aborted"] = "ceiling"
+    (out_dir / "scan_report.json").write_text(json.dumps(data), encoding="utf-8")
+    log = _write_log(tmp_path, "[MYL-ABT-001] request ceiling reached")
+    result = scorer.score_run(out_dir, run_log=log, pattern="")
+    assert result["classification"] == scorer.NOT_TESTED
+    assert result["calibration_status"] == "confirm_only"
