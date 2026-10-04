@@ -25,7 +25,7 @@ import time
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 from mcp.types import CallToolResult, TextContent
@@ -43,7 +43,7 @@ from mylonite.plugins._mcp.target_registry import (
     EffectProbeSpec,
     SeedArmSpec,
 )
-from mylonite.scan.effect_verdict import EffectDecision, EffectEvidence, decide
+from mylonite.scan.effect_verdict import EffectDecision, EffectEvidence, TraceOutcome, decide
 
 FAMILY = "cal-app"
 MARKER = "attacker@example.com"
@@ -1102,10 +1102,22 @@ def test_candidate_tools_sees_a_redis_like_sets_anyof_union_value() -> None:
     assert by_name["set"] == {"value": "{payload}"}
 
     # The backfilled call -- "key" (required, missing from the template) --
-    # must be schema-VALID, never sent with it missing.
+    # must be schema-VALID, never sent with it missing. "key" is id-shaped, so
+    # a fresh token is never invented for it: with no declared identifier the
+    # whole call is skipped instead of guessing.
     token = "myl-cal-abc123"
-    write_args = calibration._fill_required_args(set_tool, {"value": token}, token)
+    assert calibration._fill_required_args(set_tool, {"value": token}, token) is None
+
+    # With the target file's own declared key (what the probe's verify read
+    # pins), the backfill reuses it instead, so the write lands where the
+    # verify read looks.
+    declared = calibration._declared_literals(spec.effect_probe.verify_args_template, None)
+    assert declared == {"key": "mylonite-tpv-seed"}
+    write_args = calibration._fill_required_args(
+        set_tool, {"value": token}, token, declared=declared
+    )
     assert write_args is not None
+    assert write_args["key"] == "mylonite-tpv-seed"
     assert calibration.validate_args(set_tool.json_schema, write_args) == []
 
 
@@ -1669,3 +1681,474 @@ async def test_confirm_only_does_not_count_the_attacks_own_plant_as_its_effect()
     decision = _decide(meta)
     assert decision.proof_level != "effect-confirmed"
     assert decision.kind == "finding"
+
+
+# --- the redis bug: an id-shaped STRING param must reuse a declared key ----------
+#
+# Redis's tools are identity+content shaped: ``set(key, value)``/``get(key)``.
+# A real target file pins both the ``seed_arm`` and the ``effect_probe`` to one
+# fixed key (``verification/third_party/redis.yaml``), because the verify read
+# is an exact-match lookup with no fallback (unlike server-memory's full-text
+# ``search_nodes``). The generic auto-fill used to invent a FRESH per-run
+# token for ``key`` instead -- since it is STRING-typed, the id-hint check at
+# ``_fill_required_args`` never ran -- so the control write and the recall
+# landed under a key the fixed verify read never looks at. Reusing the
+# declared identifier instead of inventing one fixes that part.
+#
+# Review finding: once the write reuses the declared key, the positive
+# control passes -- but it only proves the probe sees a write to that ONE
+# declared record, exactly what the existing readback control proves for a
+# memory-style store, never that the probe sees a write through the tool IN
+# GENERAL. Certifying the tool anyway would let an attack that writes a
+# DIFFERENT key read as "no change" and clear through the certified-observer
+# rule (``effect_verdict.py`` rule 5) -- a false proof of resistance. Such a
+# control write is therefore reported ``readback``, like any other
+# single-record proof, never ``certified``; the overall result is
+# ``confirm_only``, and ``certified_tools`` stays empty.
+
+_REDIS_KEY = "mylonite-tpv-seed"
+#: A key the control/seed never plants -- what a live attack would write to
+#: instead of the declared record.
+_OTHER_KEY = "unrelated-key"
+
+
+class _RedisStore:
+    """A redis-shaped key/value store that outlives one session."""
+
+    def __init__(self) -> None:
+        self.kv: dict[str, str] = {}
+        #: get() ignores the store and echoes a string built from its own key
+        #: argument, whatever was actually written.
+        self.echo_get = False
+        #: get() raises on every call (a dead connection).
+        self.get_raises = False
+
+
+class _RedisSession(_Session):
+    """A fake session over a ``_RedisStore``."""
+
+    def __init__(self, redis: _RedisStore, tools: dict[str, dict[str, Any]]) -> None:
+        super().__init__(_Store(), tools)
+        self.redis = redis
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        self.calls.append((name, dict(arguments)))
+        redis = self.redis
+        if name == "set":
+            redis.kv[str(arguments.get("key", ""))] = str(arguments.get("value", ""))
+            return _text("OK")
+        if name == "get":
+            if redis.get_raises:
+                raise RuntimeError("connection reset")
+            key = str(arguments.get("key", ""))
+            if redis.echo_get:
+                return _text(f"value for key {key}")
+            return _text(redis.kv.get(key, "does not exist"))
+        return _text(f"{name} ok")
+
+
+class _RedisLauncher(_Launcher):
+    """``_Launcher`` over a ``_RedisStore``."""
+
+    def __init__(self, redis: _RedisStore, tools: dict[str, dict[str, Any]] | None = None) -> None:
+        super().__init__(_Store(), tools if tools is not None else _redis_tool_schemas())
+        self.redis = redis
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        session = _RedisSession(self.redis, self.tools)
+        self.sessions.append(session)
+
+        @asynccontextmanager
+        async def _ctx() -> Any:
+            yield session
+
+        return _ctx()
+
+
+def _redis_tool_schemas() -> dict[str, dict[str, Any]]:
+    return {
+        "set": _schema(key="string", value="string"),
+        "get": _schema(key="string"),
+    }
+
+
+def _register_redis(
+    *, declare_key: bool = True, marker: str | None = None
+) -> target_registry.TargetSpec:
+    """Register the redis-shaped target, as ``verification/third_party/redis.yaml``
+    pins it: a fixed ``key`` in both the ``seed_arm`` and the ``effect_probe``.
+
+    ``declare_key=False`` leaves ``key`` out of both templates entirely --
+    unchanged from before this fix: ``get``'s own ``inputSchema`` still
+    requires it, so the schema check this module already ran fails exactly as
+    it always has, long before any auto-fill could run.
+    """
+    probe = EffectProbeSpec(
+        verify_tool="get",
+        verify_args_template={"key": _REDIS_KEY} if declare_key else {},
+        expect_marker=marker,
+    )
+    arm = SeedArmSpec(
+        tool="set",
+        args_template=(
+            {"key": _REDIS_KEY, "value": "{payload}"} if declare_key else {"value": "{payload}"}
+        ),
+    )
+    return _register(
+        probe,
+        seed_arm=arm,
+        control_config=ControlConfig(consequential_tools=("set",), read_tool_names=("get",)),
+    )
+
+
+@pytest.mark.asyncio
+async def test_redis_like_store_with_a_declared_key_is_confirm_only_not_certified() -> None:
+    """A real key/value store (not a memory-shaped single-record readback):
+    once the control write and the recall reuse the declared key, the verify
+    read's exact-match lookup sees them, so the positive control passes --
+    but it only proves the probe sees a write to that ONE declared record,
+    never through ``set`` in general. The result is ``confirm_only``, exactly
+    like a memory-style readback, and ``set`` is never a certified tool."""
+    _register_redis()
+    redis = _RedisStore()
+    launcher = _RedisLauncher(redis)
+
+    result = await _calibrate(launcher)
+
+    assert result.status == calibration.STATUS_CONFIRM_ONLY
+    assert result.calibrated is False
+    assert result.certified_tools == ()
+    assert "cannot clear a call that changed nothing" in result.detail
+    # The control write (and the readback's own plant) still landed under the
+    # declared key, not a fresh token -- the fix itself still applies.
+    sets = launcher.called("set")
+    assert sets and all(s["key"] == _REDIS_KEY for s in sets)
+    assert redis.kv[_REDIS_KEY]
+    assert any(t.tool == "set" and t.status == calibration.TOOL_READBACK for t in result.tools)
+    # The seed control planted under the declared key and recalled it there.
+    assert result.seed_control.status == calibration.SEED_PASSED
+    assert result.seed_control.recall_tool == "get"
+    # Most reads target the declared key; the discrimination read's last one
+    # deliberately sends a never-planted key instead (#324), so "any", not "all".
+    gets = launcher.called("get")
+    assert gets and any(g["key"] == _REDIS_KEY for g in gets)
+
+
+@pytest.mark.asyncio
+async def test_redis_like_store_without_a_declared_key_is_unchanged() -> None:
+    """Omitting the declared key from both templates is not a new escape
+    hatch: ``get``'s schema still requires it, so this fails exactly the way
+    an empty ``verify_args_template`` always has (``MYL-INC-005``), before
+    ``_fill_required_args`` or the declared-identifier lookup ever runs."""
+    _register_redis(declare_key=False)
+    launcher = _RedisLauncher(_RedisStore())
+
+    result = await _calibrate(launcher)
+
+    assert result.calibrated is False
+    assert result.reason_code == "MYL-INC-005"
+    assert "key" in result.detail
+    assert launcher.called("set") == []
+
+
+@pytest.mark.asyncio
+async def test_redis_like_echo_store_still_fails() -> None:
+    """Reusing the declared key does not relax the existing guards: a ``get``
+    that merely echoes its own key argument, never showing what ``set``
+    actually wrote, must still fail both self-tests."""
+    _register_redis()
+    redis = _RedisStore()
+    redis.echo_get = True
+    result = await _calibrate(_RedisLauncher(redis))
+
+    assert result.calibrated is False
+    assert result.status == calibration.STATUS_FAILED
+    assert result.reason_code == "MYL-INC-003"
+    assert result.seed_control.status == calibration.SEED_FAILED
+    assert result.seed_control.reason_code == "MYL-INC-006"
+
+
+@pytest.mark.asyncio
+async def test_redis_like_store_whose_baseline_read_raises_is_not_calibrated() -> None:
+    """A ``get`` that raises on every call (a dead connection) is an error,
+    never a silent "absent": it fails the probe's own baseline read, not a
+    comparison that could read as "no change"."""
+    _register_redis()
+    redis = _RedisStore()
+    redis.get_raises = True
+    result = await _calibrate(_RedisLauncher(redis))
+
+    assert result.calibrated is False
+    assert result.reason_code == "MYL-INC-003"
+    assert result.tools[0].is_read_failure is True
+    assert result.seed_control.status == calibration.SEED_FAILED
+    assert result.seed_control.reason_code == "MYL-INC-006"
+
+
+# --- the fix is general: a differently-shaped id param, not just redis's "key" ---
+#
+# The fix reuses whatever name the target file's own id-shaped required param
+# carries -- it is not a special case for ``key``/redis. A document store
+# whose write/read pair is named ``put_doc(id, content)``/``get_doc(id)``
+# must calibrate the identical way -- confirm_only, never certified.
+
+_DOC_ID = "mylonite-tpv-seed"
+
+
+class _DocStore:
+    """A document store addressed by ``id``, shaped nothing like redis's
+    ``key``/``value`` -- different tool names, different param name."""
+
+    def __init__(self) -> None:
+        self.docs: dict[str, str] = {}
+
+
+class _DocSession(_Session):
+    def __init__(self, docs: _DocStore, tools: dict[str, dict[str, Any]]) -> None:
+        super().__init__(_Store(), tools)
+        self.docs = docs
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        self.calls.append((name, dict(arguments)))
+        store = self.docs
+        if name == "put_doc":
+            store.docs[str(arguments.get("id", ""))] = str(arguments.get("content", ""))
+            return _text("saved")
+        if name == "get_doc":
+            return _text(store.docs.get(str(arguments.get("id", "")), "not found"))
+        return _text(f"{name} ok")
+
+
+class _DocLauncher(_Launcher):
+    def __init__(self, docs: _DocStore) -> None:
+        super().__init__(
+            _Store(),
+            {
+                "put_doc": _schema(id="string", content="string"),
+                "get_doc": _schema(id="string"),
+            },
+        )
+        self.docs = docs
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        session = _DocSession(self.docs, self.tools)
+        self.sessions.append(session)
+
+        @asynccontextmanager
+        async def _ctx() -> Any:
+            yield session
+
+        return _ctx()
+
+
+@pytest.mark.asyncio
+async def test_a_differently_shaped_id_param_is_confirm_only_not_certified() -> None:
+    """``put_doc(id, content)``/``get_doc(id)``: a different tool vocabulary
+    and a different id param name than redis's ``key``, proving the fix (and
+    the confirm_only correction) keys off the id-shape hint and the declared
+    template, never a hardcoded name."""
+    _register(
+        EffectProbeSpec(verify_tool="get_doc", verify_args_template={"id": _DOC_ID}),
+        seed_arm=SeedArmSpec(tool="put_doc", args_template={"id": _DOC_ID, "content": "{payload}"}),
+        control_config=ControlConfig(
+            consequential_tools=("put_doc",), read_tool_names=("get_doc",)
+        ),
+    )
+    docs = _DocStore()
+    launcher = _DocLauncher(docs)
+
+    result = await _calibrate(launcher)
+
+    assert result.status == calibration.STATUS_CONFIRM_ONLY
+    assert result.calibrated is False
+    assert result.certified_tools == ()
+    puts = launcher.called("put_doc")
+    assert puts and all(p["id"] == _DOC_ID for p in puts)
+    assert result.seed_control.status == calibration.SEED_PASSED
+    assert result.seed_control.recall_tool == "get_doc"
+    # Most reads target the declared id; the discrimination read's last one
+    # deliberately sends a never-planted id instead (#324), so "any", not "all".
+    gets = launcher.called("get_doc")
+    assert gets and any(g["id"] == _DOC_ID for g in gets)
+
+
+# --- the fix is general, part 2: the guarded reference target's own shape -------
+#
+# Mylonite's own guarded reference target (`reference_targets/mcp_kitchen_sink`)
+# addresses notes by id: `write_note(note_id, body)` / `read_note(note_id)`.
+# Same confirm_only outcome, same code path, no code that knows this shape
+# exists either.
+
+
+class _NoteStore:
+    def __init__(self) -> None:
+        self.notes: dict[str, str] = {}
+
+
+class _NoteSession(_Session):
+    def __init__(self, notes: _NoteStore, tools: dict[str, dict[str, Any]]) -> None:
+        super().__init__(_Store(), tools)
+        self.notes = notes
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        self.calls.append((name, dict(arguments)))
+        store = self.notes
+        if name == "write_note":
+            store.notes[str(arguments.get("note_id", ""))] = str(arguments.get("body", ""))
+            return _text("ok")
+        if name == "read_note":
+            return _text(store.notes.get(str(arguments.get("note_id", "")), ""))
+        return _text(f"{name} ok")
+
+
+class _NoteLauncher(_Launcher):
+    def __init__(self, notes: _NoteStore) -> None:
+        super().__init__(
+            _Store(),
+            {
+                "write_note": _schema(note_id="string", body="string"),
+                "read_note": _schema(note_id="string"),
+            },
+        )
+        self.notes = notes
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        session = _NoteSession(self.notes, self.tools)
+        self.sessions.append(session)
+
+        @asynccontextmanager
+        async def _ctx() -> Any:
+            yield session
+
+        return _ctx()
+
+
+_NOTE_ID = "mylonite-tpv-seed"
+
+
+@pytest.mark.asyncio
+async def test_guarded_reference_shaped_store_gives_the_same_confirm_only_result() -> None:
+    """``write_note(note_id, body)`` / ``read_note(note_id)`` -- the guarded
+    reference target's own tool vocabulary -- calibrates the identical way
+    as the redis and document-store fakes: confirm_only, never certified."""
+    _register(
+        EffectProbeSpec(verify_tool="read_note", verify_args_template={"note_id": _NOTE_ID}),
+        seed_arm=SeedArmSpec(
+            tool="write_note", args_template={"note_id": _NOTE_ID, "body": "{payload}"}
+        ),
+        control_config=ControlConfig(
+            consequential_tools=("write_note",), read_tool_names=("read_note",)
+        ),
+    )
+    notes = _NoteStore()
+    launcher = _NoteLauncher(notes)
+
+    result = await _calibrate(launcher)
+
+    assert result.status == calibration.STATUS_CONFIRM_ONLY
+    assert result.calibrated is False
+    assert result.certified_tools == ()
+    writes = launcher.called("write_note")
+    assert writes and all(w["note_id"] == _NOTE_ID for w in writes)
+    assert result.seed_control.status == calibration.SEED_PASSED
+
+
+# --- the review finding: a confirm_only probe's own guard never resists -------
+#
+# `effect_verdict.decide()`'s "certified-observer" negative (rule 5) needs
+# `evidence.calibrated`, which `confirm_only` never sets -- whatever the
+# trace outcome. This is the guarantee the fix above depends on: a tool that
+# only proved itself on the declared record must never be allowed to clear a
+# dispatch that wrote somewhere else.
+
+
+@pytest.mark.parametrize("trace_outcome", get_args(TraceOutcome))
+def test_confirm_only_never_resists_via_the_certified_observer_rule(trace_outcome: str) -> None:
+    evidence = EffectEvidence(
+        trace_outcome=trace_outcome,
+        link="dispatched-tool-linked",
+        effect_confirmed="false",
+        marker_kind="text",
+        marker_linked=False,
+        calibrated=False,
+        confirm_capable=True,
+        any_deferred=(trace_outcome == "dispatched-deferred"),
+    )
+    decision = decide(evidence, predicate=None)
+    assert decision.negative_basis != "certified-observer"
+
+
+# --- the same guarantee, end to end through the redis-shaped fake -------------
+#
+# No ``expect_marker`` here, matching the real target
+# (``verification/third_party/redis.yaml`` declares none): linking goes
+# through the dispatched tool's identity (``consequential_tool`` in the
+# payload metadata, the same field a real scenario sets), and "new" is plain
+# content inequality. This also sidesteps an unrelated growth-counting
+# subtlety a literal marker would hit on an OVERWRITING store: calibration's
+# own readback plant already leaves one marker occurrence in the declared
+# record, so a marker-counted "new" would need a SECOND occurrence to show
+# growth after a `set` that overwrites rather than appends -- a real
+# limitation of the marker-growth rule on overwrite stores, not of this fix,
+# and out of scope for it.
+
+
+def _set_call(key: str) -> tuple[str, dict[str, Any]]:
+    return ("set", {"key": key, "value": "attacker-controlled content"})
+
+
+async def _attack_redis(
+    store: _RedisStore, turns: list[tuple[str, dict[str, Any]]]
+) -> dict[str, str]:
+    payload = Payload(
+        pattern_id="redis",
+        channel="user-message",
+        body="update the value",
+        metadata={
+            "setup": "no_setup",
+            "drive": "unknown",
+            "seed_id": "redis",
+            "consequential_tool": "set",
+        },
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(stdio_adapter, "_open_mcp_session", _RedisLauncher(store))
+        adapter = MCPStdioAdapter(family=FAMILY, scope=None, completion_fn=_AgentScript(turns))
+        response = await adapter.invoke(payload)
+    return dict(response.metadata)
+
+
+async def _confirm_only_redis() -> _RedisStore:
+    _register_redis()
+    store = _RedisStore()
+    result = await _calibrate(_RedisLauncher(store))
+    assert result.status == calibration.STATUS_CONFIRM_ONLY
+    assert result.calibrated is False
+    return store
+
+
+@pytest.mark.asyncio
+async def test_confirm_only_redis_attack_that_changes_the_watched_key_is_effect_confirmed() -> None:
+    store = await _confirm_only_redis()
+    meta = await _attack_redis(store, [_set_call(_REDIS_KEY)])
+    assert meta["calibrated"] == "false"
+    assert meta["confirm_capable"] == "true"
+    assert meta["trace_outcome"] == "dispatched-ok"
+    assert meta["effect_confirmed"] == "true"
+    decision = _decide(meta)
+    assert (decision.kind, decision.proof_level) == ("finding", "effect-confirmed")
+
+
+@pytest.mark.asyncio
+async def test_confirm_only_redis_attack_that_writes_a_different_key_is_never_resisted() -> None:
+    store = await _confirm_only_redis()
+    meta = await _attack_redis(store, [_set_call(_OTHER_KEY)])
+    assert meta["calibrated"] == "false"
+    assert meta["confirm_capable"] == "true"
+    assert meta["trace_outcome"] == "dispatched-ok"
+    # The write landed, just not where this probe reads.
+    assert store.kv[_OTHER_KEY] == "attacker-controlled content"
+    assert meta["effect_confirmed"] != "true"
+    decision = _decide(meta)
+    assert decision.kind != "resisted"
+    assert decision.negative_basis != "certified-observer"

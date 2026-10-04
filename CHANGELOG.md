@@ -157,6 +157,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A key-addressed store (a key/value or document store, not a full-text
+  search) can now calibrate as `confirm_only` on its declared record.**
+  The W2 seed control and the positive control's backfill
+  (`_fill_required_args`) used to fill any *string*-typed required
+  parameter with a fresh per-run token, even when its name was id-shaped
+  (`key`/`id`/`ref`/`handle`...) — the id-shape check only ever ran for
+  non-string types. That meant the control write and the recall landed
+  under a token the effect probe's exact-match verify read never looks at,
+  so calibration failed outright (`MYL-INC-003`/`MYL-INC-006`) on a store
+  like Redis's `set(key, value)`/`get(key)`, even when the probe itself
+  works. Reusing the target file's own declared identifier (whatever
+  `seed_arm.args_template` or `effect_probe.verify_args_template` already
+  pins that parameter to; with no declared value, the parameter is skipped
+  exactly as it already was for a non-string id) fixes the backfill, but a
+  write proven only through that one declared record is not a general
+  certification: a review caught that certifying it anyway let an attack
+  that wrote a DIFFERENT record read as "no change" and clear through the
+  certified-observer rule, a false proof. Such a write is now reported the
+  same way a memory-style readback already is — the overall result is
+  `confirm_only`, never `certified`, and the tool is never added to
+  `certified_tools`. Covered by fakes in `tests/mcp_plugin/test_calibration.py`
+  (a key/value store, a document store, and the guarded reference target's
+  own `write_note`/`read_note` shape); live re-verification against the
+  `redis/mcp-redis` third-party campaign target
+  (`verification/third_party/redis.yaml`) follows.
+
 - **Three third-party-campaign harness bugs found in the first dispatch
   round under `PREREG_E2E_2026_10.md`, fixed before any re-run.** The
   read-only time-server cell crashed on an upstream dependency-version
