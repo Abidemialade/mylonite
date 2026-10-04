@@ -519,9 +519,9 @@ jobs:
           # declares.
           TPV_PATTERN: ${{ inputs.pattern }}
         run: |
-          EXTRA_SCAN_FLAGS=""
+          EXTRA_SCAN_FLAGS=()
           if [ -n "$TPV_PATTERN" ]; then
-            EXTRA_SCAN_FLAGS="--weakness-class $TPV_PATTERN"
+            EXTRA_SCAN_FLAGS+=(--weakness-class "$TPV_PATTERN")
           fi
           case "$TPV_TARGET" in
             tpv-server-memory)      TARGET_FILE=memory.yaml;         FULL_JOURNEY=true ;;
@@ -530,7 +530,7 @@ jobs:
             # pair, so there is no seed_arm; the prereg expects W2 to read
             # NOT TESTED here rather than the scan refusing to start.
             tpv-streamablehttp)     TARGET_FILE=streamablehttp.yaml; FULL_JOURNEY=true
-                                    EXTRA_SCAN_FLAGS="$EXTRA_SCAN_FLAGS --allow-no-seed-arm" ;;
+                                    EXTRA_SCAN_FLAGS+=(--allow-no-seed-arm) ;;
             tpv-server-everything)  TARGET_FILE=everything.yaml;     FULL_JOURNEY=false ;;
             tpv-go-memory)          TARGET_FILE=go_memory.yaml;      FULL_JOURNEY=false ;;
             tpv-agents-sdk-ollama)  TARGET_FILE=agents_rest.yaml;    FULL_JOURNEY=false ;;
@@ -566,7 +566,7 @@ jobs:
           MYLONITE_MAX_LLM_REQUESTS="$TPV_SCAN_CEILING" "$MYLONITE" scan \
             --target-file "verification/third_party/$TARGET_FILE" \
             --authorize "$TPV_TARGET" --model "$TPV_MODEL" --max-llm-calls 60 \
-            --output-dir out $EXTRA_SCAN_FLAGS 2>&1 | tee run.log scan.log
+            --output-dir out "${EXTRA_SCAN_FLAGS[@]}" 2>&1 | tee run.log scan.log
           scan_rc=${PIPESTATUS[0]}
           set -e
           echo "scan exited $scan_rc" >> run.log
