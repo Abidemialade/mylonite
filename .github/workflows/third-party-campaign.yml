@@ -435,10 +435,31 @@ jobs:
         # the in-process reference path other scans already cover.
         run: python -m pip install "./reference_targets/mcp_kitchen_sink[mcp]"
 
-      - name: "e2e-readonly-time: install the official MCP time server"
+      - name: "e2e-readonly-time: install the official MCP time server into its own venv (pinned mcp dependency)"
         if: steps.guard.outputs.run == 'true' && env.TPV_TARGET == 'e2e-readonly-time'
         shell: bash
-        run: python -m pip install "mcp-server-time==0.6.2"
+        # mcp-server-time==0.6.2 declares `mcp>=1.0.0` with no upper bound
+        # and imports `McpError` from `mcp.shared.exceptions`. `mcp` 2.0.0
+        # (2026-07-28) renamed that to `MCPError` and restructured its other
+        # imports, so a plain `pip install mcp-server-time==0.6.2` resolves
+        # whatever `mcp` is newest on the day CI runs and crashes on import
+        # (verification/SOURCE.md's e2e-readonly-time row has the version
+        # check). The server gets its own venv, exactly like target 6's
+        # Agents-SDK shim above, with `mcp` explicitly pinned to 1.30.0 --
+        # the last 1.x release that still exports `McpError` -- so it never
+        # has to agree with whatever `mcp` version the campaign venv or the
+        # runner's system Python carries. Prepending this venv's own bin/
+        # directory to PATH (rather than editing
+        # verification/third_party/e2e_readonly_time.yaml's `command:
+        # mcp-server-time`) means every later step that launches the target
+        # by that bare command -- the Scaffold sanity check below and the
+        # real scan/generate/validate run, which reads the command from the
+        # checked-in target file -- resolves it to this isolated install
+        # with no further change.
+        run: |
+          python -m venv "$RUNNER_TEMP/tpv-time-venv"
+          "$RUNNER_TEMP/tpv-time-venv/bin/python" -m pip install --quiet "mcp==1.30.0" "mcp-server-time==0.6.2"
+          echo "$RUNNER_TEMP/tpv-time-venv/bin" >> "$GITHUB_PATH"
 
       # e2e-readonly-b reuses target 4's own binary (server-everything --
       # see verification/SOURCE.md's e2e-readonly-b row for why: a static
@@ -562,7 +583,15 @@ jobs:
                                     EXTRA_SCAN_FLAGS+=(--allow-no-seed-arm) ;;
             tpv-server-everything)  TARGET_FILE=everything.yaml;     FULL_JOURNEY=false ;;
             tpv-go-memory)          TARGET_FILE=go_memory.yaml;      FULL_JOURNEY=false ;;
-            tpv-agents-sdk-ollama)  TARGET_FILE=agents_rest.yaml;    FULL_JOURNEY=false ;;
+            # Runs the full journey (verification/PREREG_E2E_2026_10.md's
+            # "Fix re-test 2"): STABLE, NOT PROVEN (a candidate) on 2+/3 runs
+            # per provider is this cell's bar, and only `validate` can assign
+            # that label. `testkit`'s differential path already special-cases
+            # `transport: rest`, so `generate`+`validate` need no change here
+            # -- offline coverage: tests/plugins/test_http_adapter.py,
+            # tests/plugins/test_validator_evidence_tier.py,
+            # tests/test_rest_effect_probe.py.
+            tpv-agents-sdk-ollama)  TARGET_FILE=agents_rest.yaml;    FULL_JOURNEY=true ;;
             # Precision cells (verification/PREREG_E2E_2026_10.md): full
             # journey, because "0 kept" is a validate-stage verdict, not a
             # bare scan-findings count.
@@ -628,9 +657,12 @@ jobs:
           # real report even when scoring a validated run.
           echo "scan_dir=${scan_dir:-out}" >> "$GITHUB_OUTPUT"
 
-          # Targets 4-6 are N=1 smoke cells (prereg: "claim no verdict") --
+          # Targets 4-5 are N=1 smoke cells (prereg: "claim no verdict") --
           # scan only. generate/validate need an actual finding to run on,
-          # which a smoke cell makes no promise of producing.
+          # which a smoke cell makes no promise of producing. Target 6
+          # (tpv-agents-sdk-ollama) is promoted to the full journey by
+          # verification/PREREG_E2E_2026_10.md's "Fix re-test 2" -- see the
+          # FULL_JOURNEY case statement above.
           if [ "$FULL_JOURNEY" = "true" ] && [ -n "$scan_dir" ]; then
             # Pass ONE exploit file explicitly (sorted first by pattern_id),
             # never `--latest`/a bare scan dir: with 2+ findings, `generate`

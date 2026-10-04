@@ -136,7 +136,7 @@ real vulnerability.
 | # | Target | Upstream | License | Pinned commit (or tag) | No prior live run |
 | --- | --- | --- | --- | --- | --- |
 | 1 | `mcp-kitchen-sink-guarded` (the kitchen-sink guarded twin, launched as a REAL stdio server via its own console script) | `reference_targets/mcp_kitchen_sink` (this repo) | Apache-2.0 | in-repo, `mcp-kitchen-sink` package version `0.2.1` | n/a -- in-repo, not a third-party fetch; the in-process `reference:guarded` adapter runs elsewhere, but this is the first time it is scanned as a real stdio server through Mylonite's own stdio adapter |
-| 2 | `@modelcontextprotocol/time` (`mcp-server-time`) | github.com/modelcontextprotocol/servers | MIT | PyPI `mcp-server-time==0.6.2`; repo tag `python-servers-0.6.2` (commit `e7e1c85058e029ca1102efe6b2797f0ed608221b`) | confirmed -- no mention anywhere in `verification/`, `docs/`, `CHANGELOG.md` |
+| 2 | `@modelcontextprotocol/time` (`mcp-server-time`) | github.com/modelcontextprotocol/servers | MIT | PyPI `mcp-server-time==0.6.2`, installed with `mcp==1.30.0` pinned alongside it in its own venv (see "Notes on the choices" below); repo tag `python-servers-0.6.2` (commit `e7e1c85058e029ca1102efe6b2797f0ed608221b`) | confirmed -- no mention anywhere in `verification/`, `docs/`, `CHANGELOG.md` |
 | 3 | `@modelcontextprotocol/server-everything` (reused from target 4 above, under a separate family/target file) | github.com/modelcontextprotocol/servers | repo-wide MIT/Apache-2.0 relicensing split | npm `2026.8.31`; repo tag `typescript-servers-0.6.2` (commit `94a36286d2ea49d095704167846283f0c2c2d5d1`) | the pin itself was already vetted for `tpv-server-everything`; the precision measurement under `e2e-readonly-b` is new -- that cell has never run |
 
 Notes on the choices:
@@ -153,7 +153,19 @@ Notes on the choices:
 - **Target 2 (read-only server A).** `get_current_time`/`convert_time` are
   pure local timezone arithmetic -- no state, no network, no write/send/
   delete/exec tool. Confirmed from the pinned tag's own
-  `src/time/README.md` tool list.
+  `src/time/README.md` tool list. `mcp-server-time==0.6.2` declares
+  `mcp>=1.0.0` with no upper bound and imports `McpError` from
+  `mcp.shared.exceptions`; `mcp` `2.0.0` (released 2026-07-28, confirmed
+  from its own PyPI-published wheel) renamed that to `MCPError` and
+  restructured its other imports, so letting pip resolve `mcp` freely
+  crashes this server on import against any `mcp>=2.0.0` released after
+  this pin was set. `mcp==1.30.0` (the newest 1.x release as of this pin,
+  confirmed to still export `McpError` from the same module by reading its
+  published wheel) is pinned explicitly, installed into this target's own
+  venv -- the same per-target isolation `tpv-agents-sdk-ollama`'s Agents-SDK
+  shim already uses -- so the installed `mcp` version here never depends on
+  whatever version the campaign venv or the runner's system Python
+  resolves.
 - **Target 3 (read-only server B).** Picked from `server-everything`'s own
   tool list, verified from the actual TypeScript source
   (`src/everything/everything.ts`) at the exact pinned commit, not just its

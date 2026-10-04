@@ -50,7 +50,20 @@ Classification, in order of precedence
    never-exercised scan with no reason code anywhere. Per the prereg,
    PRODUCT_DEFECT is NEVER counted toward the N=3 bar and is NEVER
    auto-re-run -- it is logged as a product issue instead.
-2. ``INVALID`` -- the run directory is missing or unreadable AND the
+2. ``INFRA`` -- Mylonite's own commands never ran at all: ``--run-log`` names
+   a file that does not exist, and neither ``--scan-log`` nor
+   ``--validate-log`` has any content either. In the campaign workflow,
+   ``run.log``/``scan.log``/``validate.log`` are written only by the "Run
+   the real journey" step's own ``tee``; their total absence means an
+   EARLIER step -- the scaffold sanity check, a target install, a server
+   launch -- failed first and stopped the job before ``scan``, ``generate``
+   or ``validate`` was ever invoked. That is a target/harness pre-flight
+   failure, not a Mylonite defect, and reads ``INFRA`` instead of falling
+   through to the ``PRODUCT_DEFECT`` default in #1. Like ``PRODUCT_DEFECT``
+   and ``INVALID``, ``INFRA`` never counts toward a pass and is never
+   exercised (:func:`_run_exercised`), so it cannot contribute to a
+   precision cell's vacuous-pass guard either.
+3. ``INVALID`` -- the run directory is missing or unreadable AND the
    captured log carries a positively-evidenced infrastructure signature (an
    anchored provider/network exception class name, or a specific,
    unambiguous line such as a DNS-resolution failure or a GitHub Actions
@@ -58,21 +71,21 @@ Classification, in order of precedence
    number like "503", both of which can appear in ordinary, non-error log
    text, e.g. a token count). This is the ONLY classification a re-run is
    allowed for.
-3. ``KEPT`` -- a ``validation_report.json`` exists and
+4. ``KEPT`` -- a ``validation_report.json`` exists and
    ``mylonite._verdict.verdict_label(report) == "KEPT"``. Reading the label,
    not the bare ``ValidationReport.kept`` boolean, matters: ``kept=True``
    also covers a ``STABLE, NOT PROVEN`` report (e.g. a judge-only keep, or
    one missing the build/differential-or-effect legs), which under
    never-keep-unproven counts as **not kept** for this campaign.
-4. ``NOT_KEPT`` -- a ``validation_report.json`` exists and the label is
+5. ``NOT_KEPT`` -- a ``validation_report.json`` exists and the label is
    ``REJECTED`` or ``STABLE, NOT PROVEN``, or the scan was cleanly exercised
    (a judged ``no_finding``, with every other attempt explained) and found
    nothing.
-5. ``FOUND_UNVALIDATED`` -- ``scan_report.json`` recorded a finding but no
+6. ``FOUND_UNVALIDATED`` -- ``scan_report.json`` recorded a finding but no
    ``validation_report.json`` sits beside it (and no traceback was found --
    see #1). Under never-keep-unproven this is a candidate, never a verdict
    -- deliberately NOT folded into KEPT.
-6. ``NOT_TESTED`` -- no attempt reached a verdict at all (every attempt
+7. ``NOT_TESTED`` -- no attempt reached a verdict at all (every attempt
    skipped, not-applicable, or undecided) or the scan aborted, AND a reason
    code for it was found somewhere -- in an attempt's own text fields, or
    printed to the captured log (the abort-reason codes, e.g.
@@ -137,6 +150,7 @@ if str(_ROOT) not in sys.path:
 from verification._scan_dir import ScanDirIntegrityError, load_scan_dir  # noqa: E402
 
 PRODUCT_DEFECT = "PRODUCT_DEFECT"
+INFRA = "INFRA"
 INVALID = "INVALID"
 KEPT = "KEPT"
 NOT_KEPT = "NOT_KEPT"
@@ -411,15 +425,33 @@ def _unexplained_attempts(raw_report: dict) -> list[dict]:
     return unexplained
 
 
-def _classify_missing_report(run_dir: Path, log_text: str) -> dict[str, object]:
-    """Decide PRODUCT_DEFECT vs INVALID when no report exists at all.
+def _classify_missing_report(
+    run_dir: Path, log_text: str, *, preflight_failure: bool = False
+) -> dict[str, object]:
+    """Decide INFRA vs PRODUCT_DEFECT vs INVALID when no report exists at all.
 
     Called only after the caller has already ruled out a traceback in
-    ``log_text`` (see :func:`score_run`). Defaults to PRODUCT_DEFECT -- an
-    infra failure must be POSITIVELY evidenced, never assumed, since
-    PRODUCT_DEFECT is the only classification that keeps a real crash from
-    being quietly re-run away.
+    ``log_text`` (see :func:`score_run`). ``preflight_failure`` (see
+    :func:`score_run`) takes precedence over everything else here: when
+    ``--run-log`` names a file that was never written and neither
+    ``--scan-log`` nor ``--validate-log`` has any content either, no
+    Mylonite command ran at all -- an earlier pre-flight step failed first,
+    which is a target/harness outcome, not a product defect, whatever text
+    (or lack of it) happens to be in the log. Otherwise defaults to
+    PRODUCT_DEFECT -- an infra failure must be POSITIVELY evidenced, never
+    assumed, since PRODUCT_DEFECT is the only classification that keeps a
+    real crash from being quietly re-run away.
     """
+    if preflight_failure:
+        return {
+            "classification": INFRA,
+            "reason": (
+                f"{run_dir}: no run.log was written and no scan.log/validate.log "
+                "has any content either -- an earlier pre-flight step (e.g. the "
+                "scaffold sanity check or a target install) failed before any "
+                "mylonite command ran"
+            ),
+        }
     signature = _infra_signature_in(log_text)
     if signature is not None:
         return {
@@ -573,6 +605,20 @@ def score_run(
     scan_text = _read_log(scan_log)
     validate_text = _read_log(validate_log)
     log_text = _read_log(run_log)
+    # A run-log PATH was given (the campaign workflow always passes
+    # `--run-log run.log`) but no such file exists, and neither of the two
+    # per-stage logs has any content either -- every stage log the harness
+    # could have written is absent, so no mylonite command ran at all (see
+    # `_classify_missing_report`'s docstring). `run_log is None` (no
+    # `--run-log` given at all) is a different, legacy call shape some
+    # callers and tests still use and is deliberately left out of this
+    # check.
+    preflight_failure = (
+        run_log is not None
+        and not run_log.is_file()
+        and scan_text is None
+        and validate_text is None
+    )
     if log_text is None:
         log_text = "\n".join(t for t in (scan_text, validate_text) if t is not None)
 
@@ -606,7 +652,12 @@ def score_run(
             else:
                 codes_text = log_text
             result = _score_run_normally(
-                run_dir, log_text, codes_text, pattern=pattern, scan_dir=scan_dir
+                run_dir,
+                log_text,
+                codes_text,
+                pattern=pattern,
+                scan_dir=scan_dir,
+                preflight_failure=preflight_failure,
             )
     if target_noise_traceback:
         result["target_noise_traceback"] = True
@@ -758,6 +809,7 @@ def _score_run_normally(
     *,
     pattern: str | None = None,
     scan_dir: Path | None = None,
+    preflight_failure: bool = False,
 ) -> dict[str, object]:
     """Every classification branch except rule #1 (the traceback check,
     handled by the caller, :func:`score_run`, before this is reached).
@@ -770,13 +822,14 @@ def _score_run_normally(
     :func:`_resolve_scan_dir`) -- used only to source the data fields below
     (calibration, proof level, weakness counts, reason codes FROM attempts);
     the structural "does this directory exist at all" checks below still
-    read ``run_dir`` itself.
+    read ``run_dir`` itself. ``preflight_failure`` (see :func:`score_run`)
+    is forwarded to :func:`_classify_missing_report` unchanged.
     """
     report_path = run_dir / "scan_report.json"
     validation_path = run_dir / "validation_report.json"
 
     if not report_path.is_file() and not validation_path.is_file():
-        return _classify_missing_report(run_dir, log_text)
+        return _classify_missing_report(run_dir, log_text, preflight_failure=preflight_failure)
 
     scan_result = None
     if report_path.is_file():
