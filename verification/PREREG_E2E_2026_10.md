@@ -403,3 +403,53 @@ spells out, in exact terms, what Breadth 3's bar already meant.
   existing classification-plus-reason-code agreement already computes (see
   that script's `_rollup_key`) -- it does not change what counts as a pass,
   only removes the ambiguity in "agree" for a future reader.
+
+### 2026-10-04 -- voiding and re-run after the first dispatch round
+
+Recorded after the first round of counted dispatches against this file
+turned up two harness defects, and before either affected cell is
+re-dispatched. Per "Integrity rules" item 3 above, a re-run needs a named
+cause, logged here, never a result nobody liked -- both causes below are
+named, and neither changes any bar.
+
+- **Precision 2 (`e2e-readonly-time`) -- all 6 runs void, a harness defect,
+  not a target result.** The pinned `mcp-server-time==0.6.2` declares
+  `mcp>=1.0.0` with no upper bound and imports a symbol that a newer `mcp`
+  release renamed, so every run crashed on import during the Scaffold
+  sanity check step, before the "Run the real journey" step -- and so
+  `run.log` -- ever existed. The scorer read this as `PRODUCT_DEFECT` on
+  every run, which is itself wrong: the crash is a third-party dependency
+  version mismatch the harness let happen, not Mylonite code behaving
+  unexpectedly. Both defects are fixed: the time server now installs into
+  its own venv with `mcp` pinned to a version confirmed compatible
+  (`verification/SOURCE.md`'s target-2 row), and the scorer now reads a run
+  with no `run.log`/`scan.log`/`validate.log` at all as an infrastructure
+  outcome, never `PRODUCT_DEFECT`. This cell will be re-run in full (3 runs
+  per provider) on the fixed harness. The bar is unchanged.
+- **Fix re-test 2 (`tpv-agents-sdk-ollama`) -- all 6 runs void, a harness
+  defect, not a target result.** The workflow ran this cell scan-only, so
+  `generate`/`validate` never executed and `STABLE, NOT PROVEN` -- a label
+  only `validate` can assign, and this cell's own pass bar -- was
+  structurally unreachable no matter how many times it was re-run. The
+  workflow now runs the full journey for this cell, matching every other
+  full-journey target; offline tests confirm `validate` already handles a
+  `transport: rest` target correctly, so no product change was needed, only
+  the workflow's own `FULL_JOURNEY` flag. This cell will be re-run in full
+  (3 runs per provider) on the fixed harness. The bar is unchanged.
+- **Precision 3 (`e2e-readonly-b`, "server-everything") -- NOT re-run.** 4 of
+  6 runs read `NOT_TESTED` (`MYL-NT-002`, a target subprocess crash during
+  the W1 rug-pull probe) and 2 read `NOT_KEPT`; `findings_count: 0` on every
+  run. The crash is non-deterministic on an otherwise-identical pinned
+  build and reproduces unevenly across providers, which is third-party
+  target flakiness, not an infrastructure or product defect -- there is no
+  named cause this file's re-run rule would accept. This cell is published
+  as measured: 2 exercised runs with 0 kept, and 4 inconclusive. No
+  re-dispatch.
+- **Fix re-test 1 (`tpv-streamablehttp`) -- met its bar as measured.** Every
+  run read `NOT TESTED` (`MYL-NT-005`, no seed arm), with no traceback and
+  no product defect on any run -- exactly the honest "no seedable surface"
+  result this target's own header comment already states (it has no
+  store-and-recall pair for an indirect-injection payload to use). This is
+  reported exactly that way: `NOT TESTED MYL-NT-005`, because the target has
+  no seedable surface, not as a pass or a fail on the W2 class itself. No
+  re-dispatch.

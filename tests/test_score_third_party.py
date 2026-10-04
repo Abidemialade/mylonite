@@ -406,6 +406,36 @@ def test_missing_report_with_no_log_defaults_to_product_defect(tmp_path: Path) -
     assert result["classification"] == scorer.PRODUCT_DEFECT
 
 
+def test_preflight_failure_before_run_log_exists_is_infra_not_product_defect(
+    tmp_path: Path,
+) -> None:
+    """Redacted minimal excerpt of a real third-party-campaign artefact
+    (`e2e-batch1/e2e-readonly-time-anthropic-1`,
+    `third-party-e2e-readonly-time-anthropic-small`): the Scaffold sanity
+    check step crashed on an upstream `mcp-server-time`/`mcp` version
+    mismatch before the "Run the real journey" step ever ran, so
+    `run.log`/`scan.log`/`validate.log` were never written at all. That
+    run's real `score.json` read `classification: PRODUCT_DEFECT` with
+    `reason: "no scan_report.json or validation_report.json found, and no
+    recognised infrastructure signature in run.log"` and `cost.json` read
+    `reason: "no run.log found -- an earlier step failed before any
+    mylonite command ran"` -- the two artefacts already disagreed about
+    whose fault this was. This must now read INFRA: Mylonite's own code
+    never ran, never mind crashed, and it must not count as exercised for a
+    precision cell either."""
+    run_log = tmp_path / "run.log"
+    scan_log = tmp_path / "scan.log"
+    validate_log = tmp_path / "validate.log"
+    result = scorer.score_run(
+        tmp_path / "out",
+        run_log=run_log,
+        scan_log=scan_log,
+        validate_log=validate_log,
+    )
+    assert result["classification"] == scorer.INFRA
+    assert result["exercised"] is False
+
+
 def test_missing_report_with_an_anchored_exception_class_name_is_invalid(tmp_path: Path) -> None:
     log = _write_log(tmp_path, "httpx.ConnectTimeout: connection to api failed\n")
     result = scorer.score_run(tmp_path / "does-not-exist", run_log=log)

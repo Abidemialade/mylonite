@@ -157,6 +157,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Three third-party-campaign harness bugs found in the first dispatch
+  round under `PREREG_E2E_2026_10.md`, fixed before any re-run.** The
+  read-only time-server cell crashed on an upstream dependency-version
+  mismatch (a pinned `mcp-server-time` release importing a symbol a newer
+  `mcp` SDK release had renamed) before any Mylonite command ran at all —
+  the time server now installs into its own venv, with `mcp` pinned to a
+  version confirmed compatible, isolated from whatever `mcp` version the
+  rest of the job carries (`verification/SOURCE.md`). `scripts/
+  score_third_party.py` was separately misclassifying that exact
+  no-`run.log` shape as `PRODUCT_DEFECT`; it now reads `INFRA` instead —
+  a target/harness pre-flight failure never counts toward a pass or a
+  precision-cell pass. The Agents-SDK/REST cell was dispatched scan-only,
+  so `STABLE, NOT PROVEN` — a label only `validate` can assign, and that
+  cell's own pre-registered bar — was structurally unreachable; the
+  workflow now runs the full `scan`→`generate`→`validate` journey for it,
+  like every other full-journey target. See `PREREG_E2E_2026_10.md`'s
+  "Amendments" section for which runs are void and why.
+
 - **A first `npx`/`uvx` server launch no longer fails `scan --scaffold`,
   `check`, or a scan's first connect.** The journey's own step 3 (the
   official MCP memory server over `npx`) failed on a clean CI runner: the

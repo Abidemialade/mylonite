@@ -80,6 +80,16 @@ should ever be kept, and repeats the two smoke-only targets at a statistically
 meaningful count on a second, mid-tier model pair. Results land here, and in
 `verification/results/`, once the runs are in.
 
+The first dispatch round under that prereg found two harness defects, logged and
+fixed in that file's "Amendments" section: the read-only time-server cell crashed on
+an upstream dependency-version mismatch before any Mylonite command ran, and the
+Agents-SDK cell was dispatched scan-only, so its own pass bar was unreachable. Both
+cells' 6 runs are void and will be re-run in full once the fix lands. The other two
+cells in that round already stand: one benign precision target hit reproducible,
+non-deterministic upstream crashes (reported as measured, not re-run — that is target
+flakiness, not a harness problem) and the streamable-HTTP cell met its bar exactly as
+expected, with NOT TESTED, because that target has no surface to plant a payload on.
+
 ## Launch rehearsal: the journey docs, run as written
 
 `verification/rehearsal/` holds a script that a reader wrote from the
