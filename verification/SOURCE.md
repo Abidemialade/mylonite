@@ -126,6 +126,56 @@ Notes on the choices (plan asked for a documented pick for targets 5 and 6):
   NOT TESTED entry — an absence, not a run-and-skip (an earlier draft of the prereg
   said otherwise; fixed there).
 
+## E2E precision-cell targets (`verification/third_party/e2e_*.yaml`)
+
+Three more targets, added for the end-to-end verification campaign's
+precision cells (`verification/PREREG_E2E_2026_10.md`): benign configurations
+where "0 kept" is the pass bar, because no finding on any of them is ever a
+real vulnerability.
+
+| # | Target | Upstream | License | Pinned commit (or tag) | No prior live run |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `mcp-kitchen-sink-guarded` (the kitchen-sink guarded twin, launched as a REAL stdio server via its own console script) | `reference_targets/mcp_kitchen_sink` (this repo) | Apache-2.0 | in-repo, `mcp-kitchen-sink` package version `0.2.1` | n/a -- in-repo, not a third-party fetch; the in-process `reference:guarded` adapter runs elsewhere, but this is the first time it is scanned as a real stdio server through Mylonite's own stdio adapter |
+| 2 | `@modelcontextprotocol/time` (`mcp-server-time`) | github.com/modelcontextprotocol/servers | MIT | PyPI `mcp-server-time==0.6.2`; repo tag `python-servers-0.6.2` (commit `e7e1c85058e029ca1102efe6b2797f0ed608221b`) | confirmed -- no mention anywhere in `verification/`, `docs/`, `CHANGELOG.md` |
+| 3 | `@modelcontextprotocol/server-everything` (reused from target 4 above, under a separate family/target file) | github.com/modelcontextprotocol/servers | repo-wide MIT/Apache-2.0 relicensing split | npm `2026.8.31`; repo tag `typescript-servers-0.6.2` (commit `94a36286d2ea49d095704167846283f0c2c2d5d1`) | the pin itself was already vetted for `tpv-server-everything`; the precision measurement under `e2e-readonly-b` is new -- that cell has never run |
+
+Notes on the choices:
+
+- **Target 1 (the guarded precision cell).** `reference_targets/mcp_kitchen_sink/src/mcp_kitchen_sink/server_guarded.py`'s
+  mitigations (M1 tool-description constraints, M5 the taint gate, M3 the
+  `web_fetch` hostname allowlist, M4 `send_email`'s two-step stage/confirm)
+  are real, server-side guards covering all four weakness classes -- not
+  Mylonite's own synthetic boundary shim -- so a KEPT result against it is a
+  false positive to triage, never a real finding. Launched as the real
+  `mcp-kitchen-sink-guarded` console script (stdio), matching how every
+  other third-party target in this campaign is launched, rather than the
+  in-process `reference:guarded` adapter other Mylonite scans already use.
+- **Target 2 (read-only server A).** `get_current_time`/`convert_time` are
+  pure local timezone arithmetic -- no state, no network, no write/send/
+  delete/exec tool. Confirmed from the pinned tag's own
+  `src/time/README.md` tool list.
+- **Target 3 (read-only server B).** Picked from `server-everything`'s own
+  tool list, verified from the actual TypeScript source
+  (`src/everything/everything.ts`) at the exact pinned commit, not just its
+  README: `echo`, `add`, `longRunningOperation`, `sampleLLM`,
+  `getTinyImage` -- an arithmetic/demo surface, none of which write, send,
+  delete, execute or fetch outbound. Also checked: its resource pair
+  (`ListResourcesRequestSchema`/`ReadResourceRequestSchema`) serves only
+  100 in-memory-generated, static demo strings/blobs, and an exhaustive
+  text search of the same file for `printEnv`, `process.env`, `readFile`,
+  `fetch(` and `http` returns no matches -- this exact pinned version has
+  no environment-, file-, secret- or network-exposing tool at all. See
+  `verification/PREREG_E2E_2026_10.md`'s "Read-only server B: verified tool
+  list" for the full table. Cross-checked against Mylonite's own tool-role
+  code too, not just the upstream source: none of the five tool names
+  match `mylonite.scan.tool_roles._SINK_NAME_HINTS` (the W4/
+  consequential-tool vocabulary) or `mylonite.scan.tool_classifier`'s
+  egress-name hints, so no synthesised W3/W4 seed ever targets a tool here.
+  Reused rather than picking a different package specifically so this
+  precision measurement rides a pin already vetted end-to-end in this
+  file, under its own `family` (`e2e-readonly-b`) so its result is never
+  conflated with `tpv-server-everything`'s own N=1 connectivity smoke cell.
+
 **Known, accepted pinning gaps (not full supply-chain pins):**
 
 - **Target 3's own dependency on the MCP Python SDK (`mcp[cli]`) is resolved from
