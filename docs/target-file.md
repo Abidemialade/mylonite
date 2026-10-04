@@ -263,10 +263,22 @@ Select the record by a fixed value, or use a verify tool that takes no arguments
 Calibration is recorded per launch, so a result from the default launch is not reused
 for a `vulnerable_launch` twin.
 
-On a memory-style store (a knowledge graph, a key-value store) the probe reads back the
-one record `seed_arm` writes, so no consequential tool's control write can show up in it.
-When no consequential tool passes, and the probe neither changed on its own nor failed to
-read, calibration checks the probe on that record instead, in this order:
+On an identity-plus-content store (a key/value store, a document store) a consequential
+tool typically needs a required id-shaped argument (`key`, `id`, `ref`, `handle`...) that
+no `{payload}` slot fills. Calibration fills it with the value the target file already
+pins for that same name in `seed_arm.args_template` or `verify_args_template` — never a
+freshly minted token — so the W2 recall lands under the exact record the probe reads.
+With no declared value for that argument, the tool is skipped rather than guessed.
+
+A consequential tool whose only usable form needs that same substitution is never tried
+as a general certification candidate, whatever the write itself would show: proving the
+probe sees a write to the one record the target file declares says no more than a
+memory-style readback already proves, never that the probe sees a write through that tool
+in general. On a memory-style store (a knowledge graph), or a key-addressed store whose
+consequential write can only reach the declared record this way, the probe reads back
+that one record `seed_arm` writes instead. When no consequential tool passes (or none is
+eligible to be tried, for the id-substitution reason above), and the probe neither changed
+on its own nor failed to read, calibration checks the probe on that record, in this order:
 
 1. Two verify reads before the plant, with no change between them.
 2. The plant through `seed_arm`, carrying a fresh `myl-cal-` token. It is the seed

@@ -510,35 +510,66 @@ def _changed(before: str, after: str, marker: str) -> bool:
     return after != before
 
 
-def _fill_required_args(tool: ToolSpec, args: dict[str, Any], value: str) -> dict[str, Any] | None:
+def _declared_literals(template: Any, scope: str | None) -> dict[str, str]:
+    """Top-level string values ``template`` pins to a fixed identifier, keyed
+    by param name — the ``seed_arm.args_template`` or
+    ``effect_probe.verify_args_template`` a target file declares.
+
+    A leaf containing ``{payload}`` is an attempt's whole attack text, not a
+    fixed identifier, so it is excluded; ``{scope}`` (and the unused
+    ``{exfil_*}`` placeholders) render through :func:`_render_seed_args` the
+    same way the real plant/verify call renders them.
+    """
+    if not isinstance(template, Mapping):
+        return {}
+    return {
+        name: _render_seed_args(value, "", scope)
+        for name, value in template.items()
+        if isinstance(value, str) and "{payload}" not in value
+    }
+
+
+def _fill_required_args(
+    tool: ToolSpec,
+    args: dict[str, Any],
+    value: str,
+    *,
+    declared: Mapping[str, str] | None = None,
+) -> dict[str, Any] | None:
     """``args`` with each missing required top-level param filled in, or
     ``None`` when a required param has no schema-valid value to fill.
 
-    A missing required STRING param gets ``value`` (the control's own
-    token), so the call still carries what the probe looks for. A missing
-    required integer/number param gets ``0``, boolean gets ``False`` —
-    ``"type"`` is resolved through a nullable-type list and ``anyOf``/
-    ``oneOf`` first (:func:`mylonite.scan.tool_roles._concrete_spec`), so a
-    union- or nullable-typed required param (the same Go/Pydantic schema
-    idioms the content-slot walker now unwraps, #324) still resolves to a
-    fillable primitive when one of its branches is one — this is what makes
-    mcp-redis's two-required-argument ``expire(name, expire_seconds)`` a
-    usable control candidate instead of a guaranteed schema failure.
+    An id-shaped required param (its name is a whole ``_ID_PARAM_HINTS``
+    token — ``chat_id``, ``parentId``, a bare ``key``/``ref``/``handle``) is
+    checked FIRST, whatever its type, and never invented: when ``declared``
+    (the target file's own ``seed_arm.args_template`` or
+    ``effect_probe.verify_args_template``, via :func:`_declared_literals`)
+    pins a value for that exact name, that value is reused — the write or
+    recall must land on the identifier the probe actually reads, not a fresh
+    token that can never match a fixed, identity-shaped key (Redis's
+    ``get``/``set(key=...)`` is the motivating case: a per-run token here
+    means the write and the read never address the same record). With no
+    declared value this returns ``None`` for the WHOLE call, exactly as
+    before: a bare ``0``/``False`` filled into an integer or boolean id CAN
+    BE a real, often root or default, resource (``parent_id: 0``,
+    ``chat_id: 0``), and a minted string token can never collide with a real
+    record but also can never equal a required FIXED one — either way,
+    guessing is never safe, so the caller must skip this tool rather than
+    send a call with that param missing or guessed (#324 review I3).
+
+    A missing required STRING param that is NOT id-shaped gets ``value``
+    (the control's own token), so the call still carries what the probe
+    looks for. A missing required integer/number param gets ``0``, boolean
+    gets ``False`` — ``"type"`` is resolved through a nullable-type list and
+    ``anyOf``/``oneOf`` first (:func:`mylonite.scan.tool_roles._concrete_spec`),
+    so a union- or nullable-typed required param (the same Go/Pydantic
+    schema idioms the content-slot walker now unwraps, #324) still resolves
+    to a fillable primitive when one of its branches is one — this is what
+    makes mcp-redis's two-required-argument ``expire(name, expire_seconds)``
+    a usable control candidate instead of a guaranteed schema failure.
 
     A required param of any other shape (array, object, or one with no
-    concrete primitive branch at all) returns ``None`` for the WHOLE call:
-    the caller must then skip this tool rather than send a call with that
-    param missing or guessed — never an invalid call.
-
-    An id-shaped NON-STRING required param (its name is a whole
-    ``_ID_PARAM_HINTS`` token — ``chat_id``, ``parentId``, a bare
-    ``key``/``ref``/``handle``) also returns ``None`` for the whole call,
-    whatever its type: a string fill uses ``value`` (the control's own
-    per-run token), which can never collide with a real record, but a bare
-    ``0``/``False`` filled into an integer or boolean id CAN BE a real,
-    often root or default, resource (``parent_id: 0``, ``chat_id: 0``) —
-    calibration would then call a consequential tool against a resource the
-    operator never scoped (#324 review I3).
+    concrete primitive branch at all) returns ``None`` for the WHOLE call.
     """
     schema: dict[str, Any] = tool.json_schema if isinstance(tool.json_schema, dict) else {}
     raw_props = schema.get("properties")
@@ -549,11 +580,14 @@ def _fill_required_args(tool: ToolSpec, args: dict[str, Any], value: str) -> dic
     for name in required:
         if name in out:
             continue
+        if hint_matches(name, _ID_PARAM_HINTS):
+            if declared is not None and name in declared:
+                out[name] = declared[name]
+                continue
+            return None
         kinds = _schema_type_kinds(_concrete_spec(props.get(name)))
         if "string" in kinds:
             out[name] = value
-        elif hint_matches(name, _ID_PARAM_HINTS):
-            return None
         elif "integer" in kinds or "number" in kinds:
             out[name] = 0
         elif "boolean" in kinds:
@@ -664,6 +698,36 @@ async def _probe_controls(
             True,
         )
 
+    # A candidate whose only required id-shaped argument can be filled only
+    # from the target file's own declared value (Redis's `key`, a document
+    # store's `id`...) can never be tried for GENERAL certification: the
+    # write would land on the one record the probe reads, which proves no
+    # more than the readback control already proves for a memory-style
+    # store. Excluding it here -- rather than running the write and
+    # downgrading it after -- also keeps this record untouched until the
+    # readback control's own baseline read, so a declared marker's count
+    # isn't inflated by a write this function already knows cannot certify.
+    declared = _declared_literals(probe.verify_args_template, scope)
+    record_only_names = [
+        tool.name for tool, template in candidates if _declared_fill_used(tool, template, declared)
+    ]
+    candidates = [
+        (tool, template)
+        for tool, template in candidates
+        if not _declared_fill_used(tool, template, declared)
+    ]
+    if not candidates:
+        return (
+            STATUS_FAILED,
+            INC_POSITIVE_FAILED,
+            f"{record_only_names[0]!r}'s only usable required argument is filled from the "
+            "target file's own declared value, so a write through it would prove the probe "
+            "sees that one record, never the tool in general -- the readback control is the "
+            "only path to confirm_only here",
+            (),
+            True,
+        )
+
     controls: list[ToolControl] = []
     for tool, template in candidates:
         control = await _control_one_tool(adapter, session, probe, tool, template, token)
@@ -679,11 +743,27 @@ async def _probe_controls(
     ):
         certified = ", ".join(c.tool for c in controls if c.status == TOOL_CERTIFIED)
         return STATUS_CERTIFIED, None, f"certified through {certified}", tuple(controls), False
+    eligible = not any(c.reason_code == INC_NEGATIVE_FAILED or c.is_read_failure for c in controls)
+    record_only = [c for c in controls if c.status == TOOL_READBACK]
+    if record_only and eligible:
+        # Every candidate either passed only via a declared-id fill (never a
+        # general certification -- see _control_one_tool) or did not run. The
+        # readback control below may still independently prove confirm_only
+        # through the same declared record; this is not that proof on its
+        # own, so it is reported exactly like any other not-yet-certified
+        # result until the readback either confirms or fails to.
+        first = record_only[0]
+        return (
+            STATUS_FAILED,
+            INC_POSITIVE_FAILED,
+            f"{first.tool}: {first.detail}",
+            tuple(controls),
+            True,
+        )
     first = next(
         (c for c in controls if c.reason_code == INC_NEGATIVE_FAILED),
         next(c for c in controls if c.status == TOOL_FAILED),
     )
-    eligible = not any(c.reason_code == INC_NEGATIVE_FAILED or c.is_read_failure for c in controls)
     return (
         STATUS_FAILED,
         first.reason_code,
@@ -708,6 +788,31 @@ def _read_failed(probe: target_registry.EffectProbeSpec) -> str:
     return f"the verify read {probe.verify_tool!r} raised or timed out"
 
 
+def _declared_fill_used(
+    tool: ToolSpec, args_before_fill: Mapping[str, Any], declared: Mapping[str, str]
+) -> bool:
+    """Whether :func:`_fill_required_args` would reuse a target-declared
+    literal for at least one required id-shaped param missing from
+    ``args_before_fill``.
+
+    When it would, the call only validates because of that substitution, not
+    because the tool's own content slot covers an id-shaped field on its own
+    — so a positive control that passes through it has shown the probe sees
+    a write to that ONE declared record, never through this tool in general
+    (the same record a readback control would plant and recall). The caller
+    must not count that as a general certification.
+    """
+    if not declared:
+        return False
+    schema: dict[str, Any] = tool.json_schema if isinstance(tool.json_schema, dict) else {}
+    raw_required = schema.get("required")
+    required: list[Any] = raw_required if isinstance(raw_required, list) else []
+    return any(
+        name not in args_before_fill and name in declared and hint_matches(name, _ID_PARAM_HINTS)
+        for name in required
+    )
+
+
 async def _control_one_tool(
     adapter: MCPSessionAdapterBase,
     session: ClientSession,
@@ -725,7 +830,10 @@ async def _control_one_tool(
     scope = adapter._scope
     marker = _render_seed_args(probe.expect_marker or "", token, scope)
     value = token if not marker or token in marker else f"{token} {marker}"
-    write_args = _fill_required_args(tool, _render_seed_args(template, value, scope), token)
+    declared = _declared_literals(probe.verify_args_template, scope)
+    rendered_template = _render_seed_args(template, value, scope)
+    used_declared = _declared_fill_used(tool, rendered_template, declared)
+    write_args = _fill_required_args(tool, rendered_template, token, declared=declared)
     if write_args is None:
         return ToolControl(
             tool.name,
@@ -778,6 +886,21 @@ async def _control_one_tool(
         return failed(
             INC_POSITIVE_FAILED,
             f"{probe.verify_tool!r} did not show the control record written through {tool.name!r}",
+        )
+    if used_declared:
+        # The write only validated because a required id-shaped argument was
+        # filled from the target file's own declared value (Redis's own
+        # `key`, a document store's `id`...), so this control proves the
+        # probe sees a write to that one record, never through `tool` in
+        # general -- never a certified tool, whatever the readback control
+        # below decides.
+        return ToolControl(
+            tool.name,
+            TOOL_READBACK,
+            None,
+            f"the control write passed only because a required id-shaped argument was "
+            f"filled from the target file's own declared value, so this proves the probe "
+            f"sees a write to that one record, not through {tool.name!r} in general",
         )
     return ToolControl(tool.name, TOOL_CERTIFIED, None, "negative and positive controls passed")
 
@@ -877,10 +1000,11 @@ async def _plant_and_recall(
             INC_SCHEMA,
             f"seed_arm args_template fails {arm.tool!r}'s inputSchema: {errors[0]}",
         )
+    declared = _declared_literals(arm.args_template, scope)
     calls: list[tuple[ToolSpec, dict[str, Any]]] = []
     schema_errors: list[str] = []
     for recall in recalls:
-        args = _fill_required_args(recall, {}, token)
+        args = _fill_required_args(recall, {}, token, declared=declared)
         if args is None:
             schema_errors.append(
                 f"{recall.name!r} has a required argument with no schema-valid value to fill"
