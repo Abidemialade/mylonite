@@ -680,3 +680,283 @@ def test_cli_round_trips_score_then_rollup(tmp_path: Path) -> None:
     rollup_result = json.loads(rollup_out.read_text(encoding="utf-8"))
     assert rollup_result["met_bar"] is True
     assert rollup_result["result"] == scorer.KEPT
+
+
+# --- E2E integrity-rule extensions: calibration, proof level, adjudication, --
+# --- W1 counts and the precision-cell rollup (plan item (e)) ----------------
+
+
+def test_kept_run_emits_calibration_status_from_the_scan_report(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run1"
+    _write_scan_report(
+        run_dir,
+        weakness_classes=["W2"],
+        attempts=[
+            {
+                "seed_id": "s1",
+                "pattern_id": "synth-w2-seed",
+                "outcome": "finding",
+                "judge_evidence": {"proof_level": "effect-confirmed"},
+            }
+        ],
+        findings_count=1,
+        calibration={"status": "certified", "reason_code": None},
+    )
+    (run_dir / f"exploit_{_exploit_record()['pattern_id']}.json").write_text(
+        json.dumps(_exploit_record()), encoding="utf-8"
+    )
+    _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
+    result = scorer.score_run(run_dir)
+    assert result["classification"] == scorer.KEPT
+    assert result["calibration_status"] == "certified"
+    assert result["calibration_reason_code"] is None
+    assert result["proof_level"] == "effect-confirmed"
+    assert result["adjudication"] == {"status": "unadjudicated", "reason": None}
+
+
+def test_not_kept_run_emits_a_failed_calibration_status(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run1"
+    _write_scan_report(
+        run_dir,
+        calibration={"status": "failed", "reason_code": "MYL-INC-005"},
+    )
+    _write_validation_report(run_dir, kept=False, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_FAILED])
+    result = scorer.score_run(run_dir)
+    assert result["classification"] == scorer.NOT_KEPT
+    assert result["calibration_status"] == "failed"
+    assert result["calibration_reason_code"] == "MYL-INC-005"
+    # NOT_KEPT never carries an adjudication field -- that is reserved for a
+    # KEPT finding, which is the only thing the controller ever adjudicates.
+    assert "adjudication" not in result
+
+
+def test_a_report_with_no_calibration_block_reads_both_fields_as_none(tmp_path: Path) -> None:
+    """A bundled/reference target, or a precision cell with no effect_probe
+    at all, never runs the calibration controls -- both fields are None,
+    not absent and not a crash."""
+    run_dir = tmp_path / "run1"
+    _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
+    result = scorer.score_run(run_dir)
+    assert result["calibration_status"] is None
+    assert result["calibration_reason_code"] is None
+    assert result["proof_level"] is None
+
+
+def _w1_exploit_record(pattern_id: str = "synth-w1-rug-pull") -> dict:
+    record = _exploit_record(pattern_id)
+    record["payload"]["metadata"] = {"weakness": "W1"}
+    return record
+
+
+def test_w1_counts_tally_fired_and_resisted_attempts_by_pattern_id(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run1"
+    _write_scan_report(
+        run_dir,
+        weakness_classes=["W1"],
+        attempts=[
+            {"seed_id": "a", "pattern_id": "synth-w1-rug-pull", "outcome": "no_finding"},
+            {
+                "seed_id": "b",
+                "pattern_id": "synth-w1-tool-description-read_note",
+                "outcome": "finding",
+            },
+            {"seed_id": "c", "pattern_id": "synth-w2-seed", "outcome": "finding"},
+        ],
+        findings_count=1,
+    )
+    (run_dir / "exploit_synth-w1-tool-description-read_note.json").write_text(
+        json.dumps(_w1_exploit_record("synth-w1-tool-description-read_note")), encoding="utf-8"
+    )
+    result = scorer.score_run(run_dir)
+    assert result["w1"] == {"fired": 1, "resisted": 1, "kept": 0}
+
+
+def test_w1_kept_is_one_only_when_the_run_is_actually_kept_and_w1_declared(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run1"
+    _write_scan_report(
+        run_dir,
+        weakness_classes=["W1"],
+        attempts=[{"seed_id": "a", "pattern_id": "synth-w1-rug-pull", "outcome": "finding"}],
+        findings_count=1,
+    )
+    (run_dir / "exploit_synth-w1-rug-pull.json").write_text(
+        json.dumps(_w1_exploit_record()), encoding="utf-8"
+    )
+    _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
+    result = scorer.score_run(run_dir)
+    assert result["classification"] == scorer.KEPT
+    assert result["w1"]["kept"] == 1
+
+
+def test_exercised_is_true_for_a_clean_resist_and_false_for_an_unexercised_abort(
+    tmp_path: Path,
+) -> None:
+    exercised_dir = tmp_path / "exercised"
+    _write_scan_report(
+        exercised_dir,
+        attempts=[{"seed_id": "a", "pattern_id": "p", "outcome": "no_finding"}],
+    )
+    assert scorer.score_run(exercised_dir)["exercised"] is True
+
+    unexercised_dir = tmp_path / "unexercised"
+    _write_scan_report(
+        unexercised_dir,
+        aborted="ceiling",
+        attempts=[],
+    )
+    _write_log(tmp_path, "[MYL-ABT-001] request ceiling reached", name="unexercised_run.log")
+    result = scorer.score_run(unexercised_dir, run_log=tmp_path / "unexercised_run.log")
+    assert result["classification"] == scorer.NOT_TESTED
+    assert result["exercised"] is False
+
+
+def _precision_score(classification: str, *, exercised: bool) -> dict:
+    return {"classification": classification, "exercised": exercised}
+
+
+def test_precision_rollup_passes_on_zero_kept_with_every_run_exercised() -> None:
+    scores = [_precision_score(scorer.NOT_KEPT, exercised=True) for _ in range(3)]
+    result = scorer.precision_rollup(scores)
+    assert result == {"n": 3, "kept_count": 0, "unexercised_runs": 0, "result": "PASS"}
+
+
+def test_precision_rollup_fails_on_any_kept_run() -> None:
+    scores = [
+        _precision_score(scorer.KEPT, exercised=True),
+        _precision_score(scorer.NOT_KEPT, exercised=True),
+        _precision_score(scorer.NOT_KEPT, exercised=True),
+    ]
+    result = scorer.precision_rollup(scores)
+    assert result["result"] == "FAIL"
+    assert result["kept_count"] == 1
+
+
+def test_precision_rollup_is_inconclusive_when_any_run_is_all_not_tested() -> None:
+    """A vacuous pass is a failure to measure: one unexercised run makes the
+    whole cell inconclusive, even though the other two cleanly resisted."""
+    scores = [
+        _precision_score(scorer.NOT_KEPT, exercised=True),
+        _precision_score(scorer.NOT_KEPT, exercised=True),
+        _precision_score(scorer.NOT_TESTED, exercised=False),
+    ]
+    result = scorer.precision_rollup(scores)
+    assert result["result"] == "INCONCLUSIVE"
+    assert result["unexercised_runs"] == 1
+
+
+def test_cli_precision_rollup_round_trip(tmp_path: Path) -> None:
+    score_files = []
+    for i in range(3):
+        run_dir = tmp_path / f"run{i}"
+        _write_scan_report(
+            run_dir, attempts=[{"seed_id": "a", "pattern_id": "p", "outcome": "no_finding"}]
+        )
+        out_file = tmp_path / f"score{i}.json"
+        rc = scorer.main(
+            ["score", str(run_dir), "--target", "e2e-guarded-reference", "--out", str(out_file)]
+        )
+        assert rc == 0
+        score_files.append(out_file)
+
+    out = tmp_path / "precision.json"
+    rc = scorer.main(["precision-rollup", *[str(f) for f in score_files], "--out", str(out)])
+    assert rc == 0
+    result = json.loads(out.read_text(encoding="utf-8"))
+    assert result["result"] == "PASS"
+    assert result["unexercised_runs"] == 0
+
+
+# --- round 2 (review) fixes: pattern-keyed weakness counts, an empty ---
+# --- precision rollup, and calibration/proof_level on every scored run -
+
+
+def test_w2_pattern_reports_its_own_counts_under_its_own_key(tmp_path: Path) -> None:
+    """The breadth cell on tpv-server-memory dispatches with pattern=W2 --
+    the scorer must report W2's fired/resisted counts under "w2", not
+    silently report an all-zero "w1" block for a scan that never ran a W1
+    seed at all."""
+    run_dir = tmp_path / "run1"
+    _write_scan_report(
+        run_dir,
+        weakness_classes=["W2"],
+        attempts=[
+            {"seed_id": "a", "pattern_id": "synth-w2-seed", "outcome": "finding"},
+            {"seed_id": "b", "pattern_id": "synth-w2-seed-2", "outcome": "no_finding"},
+            {"seed_id": "c", "pattern_id": "synth-w1-rug-pull", "outcome": "finding"},
+        ],
+        findings_count=1,
+    )
+    exploit = _exploit_record("synth-w2-seed")
+    (run_dir / "exploit_synth-w2-seed.json").write_text(json.dumps(exploit), encoding="utf-8")
+    _write_validation_report(run_dir, kept=True, outcomes=[_BUILD_PASSED, _DIFFERENTIAL_PASSED])
+
+    result = scorer.score_run(run_dir, pattern="W2")
+
+    assert result["classification"] == scorer.KEPT
+    assert "w1" not in result
+    assert result["w2"] == {"fired": 1, "resisted": 1, "kept": 1}
+
+
+def test_an_unspecified_pattern_still_defaults_to_w1(tmp_path: Path) -> None:
+    """Backward compatibility: every pre-existing cell never passes
+    --pattern, and must keep reading its counts under "w1"."""
+    run_dir = tmp_path / "run1"
+    _write_scan_report(
+        run_dir,
+        attempts=[{"seed_id": "a", "pattern_id": "synth-w1-rug-pull", "outcome": "no_finding"}],
+    )
+    result = scorer.score_run(run_dir)
+    assert "w1" in result
+    assert "w2" not in result
+
+
+def test_precision_rollup_of_an_empty_list_is_inconclusive_not_pass() -> None:
+    """A glob that matched zero score files (or any other empty input) must
+    never silently read as "0 kept, every run exercised"."""
+    result = scorer.precision_rollup([])
+    assert result == {"n": 0, "kept_count": 0, "unexercised_runs": 0, "result": "INCONCLUSIVE"}
+
+
+def test_calibration_and_proof_level_are_present_as_explicit_none_on_not_tested(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "run1"
+    _write_scan_report(run_dir, aborted="ceiling", attempts=[])
+    log = _write_log(tmp_path, "[MYL-ABT-001] request ceiling reached")
+    result = scorer.score_run(run_dir, run_log=log)
+    assert result["classification"] == scorer.NOT_TESTED
+    assert "calibration_status" in result
+    assert result["calibration_status"] is None
+    assert "calibration_reason_code" in result
+    assert result["calibration_reason_code"] is None
+    assert "proof_level" in result
+    assert result["proof_level"] is None
+
+
+def test_calibration_and_proof_level_are_present_as_explicit_none_on_product_defect(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "missing"
+    result = scorer.score_run(run_dir)
+    assert result["classification"] == scorer.PRODUCT_DEFECT
+    assert result["calibration_status"] is None
+    assert result["calibration_reason_code"] is None
+    assert result["proof_level"] is None
+
+
+def test_calibration_and_proof_level_are_present_on_a_mylonite_traceback_product_defect(
+    tmp_path: Path,
+) -> None:
+    log = _write_log(
+        tmp_path,
+        'Traceback (most recent call last):\n  File "/x/mylonite/scan/engine.py", line 1\nValueError\n',
+    )
+    result = scorer.score_run(tmp_path / "missing", run_log=log)
+    assert result["classification"] == scorer.PRODUCT_DEFECT
+    assert result["calibration_status"] is None
+    assert result["proof_level"] is None
+    # exercised still gets computed on this path too (previously skipped by
+    # an early return that bypassed the rest of score_run entirely).
+    assert "exercised" in result

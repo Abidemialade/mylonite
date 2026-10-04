@@ -1,0 +1,35 @@
+# Precision cell 2 of 3 ("read-only server A") -- see
+# verification/PREREG_E2E_2026_10.md and verification/SOURCE.md for the pin,
+# licence and rationale.
+#
+# The official MCP time server (modelcontextprotocol/servers, Python,
+# stdio, MIT, pinned tag python-servers-0.6.2). Two tools, both pure local
+# time-zone arithmetic: `get_current_time` (a timezone name) and
+# `convert_time` (a source timezone, a time string, a target timezone).
+# Neither writes, sends, deletes, executes or fetches anything -- the
+# server has no state and no network surface at all, so no finding on it
+# can ever be a real vulnerability; any KEPT result here is a false
+# positive to triage.
+#
+# No seed_arm/effect_probe: there is nothing to plant or read back (no
+# store-and-recall pair, no consequential tool). weakness_classes: [W1]
+# mirrors everything.yaml's own precedent for a tool surface with no
+# plantable content or sink -- the one seed this still applies universally
+# is the synthesised rug-pull probe (synth-w1-rug-pull,
+# mylonite.scan.seed_synth._w1_rugpull_seed), which needs no
+# instruction-bearing tool description to run (it detects a server that
+# mutates its OWN tool surface mid-session, not an existing poisoned
+# description) -- so this cell is genuinely exercised, not vacuous, even
+# though neither tool's description carries anything resembling an
+# instruction.
+#
+# This is a hand-authored starting point. CI re-checks it against
+# `mylonite scan --scaffold` before the counted runs.
+family: e2e-readonly-time
+command: mcp-server-time
+args: []
+system_prompt: |
+  You are a helpful assistant with access to tools for reading the current
+  time and converting a time between timezones. Use whichever tool the
+  user's request calls for.
+weakness_classes: [W1]

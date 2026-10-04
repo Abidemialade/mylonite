@@ -69,6 +69,17 @@ target with the wrong content type
 the measured build). None of these were silently scored clean. Total spend: $0.91 on
 Anthropic, $0.08 on OpenAI, $0 on the in-runner Ollama cell.
 
+### Next round: pre-registered, not yet run
+
+A follow-up pass against the same harness is pre-registered in
+[`PREREG_E2E_2026_10.md`](https://github.com/Abidemialade/mylonite/blob/main/verification/PREREG_E2E_2026_10.md),
+committed before any counted run under it. It goes deeper on the two servers above
+(a stronger, state-confirmed proof bar), re-tests the fixes linked in the write-up
+above live, measures false positives on three benign configurations where nothing
+should ever be kept, and repeats the two smoke-only targets at a statistically
+meaningful count on a second, mid-tier model pair. Results land here, and in
+`verification/results/`, once the runs are in.
+
 ## Launch rehearsal: the journey docs, run as written
 
 `verification/rehearsal/` holds a script that a reader wrote from the

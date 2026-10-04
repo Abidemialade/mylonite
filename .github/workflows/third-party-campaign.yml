@@ -1,13 +1,19 @@
 # Third-party verification campaign: proves the product works on systems
 # Mylonite has never run against before (verification/SOURCE.md,
-# verification/PREREG_THIRD_PARTY_2026_10.md), with every LLM call made in
-# CI.
+# verification/PREREG_THIRD_PARTY_2026_10.md and, for the `tier`/`pattern`
+# inputs and the three `e2e-*` precision targets below,
+# verification/PREREG_E2E_2026_10.md), with every LLM call made in CI.
 #
 # Manual dispatch only, EXACTLY one target and one provider per dispatch --
 # no "all"/"both" fan-out and no free-text model override (both were cut
 # after review: an unbounded fan-out times an unbounded --max-llm-calls
 # times an overridable model was an unbounded spend). The model is fixed
-# per provider below. scan's own --max-llm-calls is fixed at 60 and
+# per tier x provider below (the `tier` input is `small` (unchanged) or
+# `mid`, never a model string) -- the one place that mapping lives is the
+# "Resolve the fixed model" step. The `pattern` input is the CLI's own
+# existing --weakness-class filter (one of W1/W2/W3/W4, or blank),
+# hard-validated against that allowlist in "Validate inputs" before any
+# step that could spend. scan's own --max-llm-calls is fixed at 60 and
 # validate's --iterations is fixed at 3 -- neither is dispatch-configurable
 # any more. What IS dispatch-configurable, and hard-clamped, is each
 # process's own MYLONITE_MAX_LLM_REQUESTS ceiling (scan_ceiling <= 150,
@@ -64,7 +70,12 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Exactly one target (verification/SOURCE.md)."
+        description: >-
+          Exactly one target (verification/SOURCE.md and
+          verification/PREREG_E2E_2026_10.md). The three e2e-* options are the
+          precision cells (verification/PREREG_E2E_2026_10.md): no finding on any
+          of them is ever a vulnerability, so a KEPT result there is scored
+          as a false positive to triage, never published as a real finding.
         required: true
         type: choice
         options:
@@ -74,6 +85,9 @@ on:
           - tpv-server-everything
           - tpv-go-memory
           - tpv-agents-sdk-ollama
+          - e2e-guarded-reference
+          - e2e-readonly-time
+          - e2e-readonly-b
       provider:
         description: >-
           Exactly one provider. 'ollama' is valid ONLY with
@@ -84,6 +98,32 @@ on:
           - anthropic
           - openai
           - ollama
+      tier:
+        description: >-
+          Model tier. 'small' is the original campaign's pins (no change).
+          'mid' is the breadth tier (verification/PREREG_E2E_2026_10.md's
+          "Models" section): claude-sonnet-5 / gpt-5.1, never free text --
+          the tier x provider -> model id mapping is fixed in one place
+          below ("Resolve the fixed model"). Ignored (always the small-tier
+          Ollama model) when provider=ollama: there is no mid-tier Ollama
+          cell in the plan.
+        required: true
+        type: choice
+        options:
+          - small
+          - mid
+        default: small
+      pattern:
+        description: >-
+          Optional single weakness-class filter (W1/W2/W3/W4), passed through
+          to the CLI's existing --weakness-class flag (mylonite.scan.weakness
+          -- filters a target's declared weakness_classes; naming a class the
+          target doesn't declare matches nothing and the CLI refuses before
+          any spend). Blank runs every class the target declares, as before.
+          Validated against the W1-W4 allowlist before any step that could
+          spend; a bad value fails the "Validate inputs" step.
+        required: false
+        default: ""
       scan_ceiling:
         description: >-
           Per-process hard LLM-request ceiling for the scan phase
@@ -141,8 +181,10 @@ jobs:
       # steps in this job hold a provider key (see the file header).
       TPV_TARGET: ${{ inputs.target }}
       TPV_PROVIDER: ${{ inputs.provider }}
+      TPV_TIER: ${{ inputs.tier }}
+      TPV_PATTERN: ${{ inputs.pattern }}
     steps:
-      - name: Validate inputs -- hard-clamp both ceilings; reject a bad target/provider combo
+      - name: Validate inputs -- hard-clamp both ceilings; reject a bad target/provider/pattern combo
         id: inputs
         shell: bash
         env:
@@ -186,6 +228,18 @@ jobs:
             echo "::error::provider=ollama is only valid with target=tpv-server-memory (see the prereg)."
             exit 1
           fi
+
+          # --weakness-class (mylonite.scan.weakness.WEAKNESS_CLASSES): exact,
+          # uppercase W1-W4, or blank. Checked here -- before checkout, before
+          # any key is even read -- so a typo refuses the whole dispatch
+          # rather than spending on a flag the CLI itself would also refuse.
+          case "$TPV_PATTERN" in
+            ''|W1|W2|W3|W4) ;;
+            *)
+              echo "::error::pattern must be one of W1/W2/W3/W4 (exact, uppercase) or blank, got '$TPV_PATTERN'."
+              exit 1
+              ;;
+          esac
 
       # No `secrets.*` in this (or any) step's `if:` -- GitHub rejects that
       # outright ("Unrecognized named-value: 'secrets'"), which would stop
@@ -238,22 +292,51 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Node only for the two @modelcontextprotocol/* servers (targets 1, 4).
+      # Node only for the three @modelcontextprotocol/* servers (targets 1, 4,
+      # and e2e-readonly-b, which reuses target 4's own binary -- see
+      # verification/SOURCE.md's e2e-readonly-b row).
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
-        if: steps.guard.outputs.run == 'true' && (env.TPV_TARGET == 'tpv-server-memory' || env.TPV_TARGET == 'tpv-server-everything')
+        if: >-
+          steps.guard.outputs.run == 'true' && (
+            env.TPV_TARGET == 'tpv-server-memory' ||
+            env.TPV_TARGET == 'tpv-server-everything' ||
+            env.TPV_TARGET == 'e2e-readonly-b'
+          )
         with:
           node-version: "22"
 
-      - name: Resolve the fixed model for this provider (no override)
+      # The tier x provider -> model id mapping lives HERE ONLY -- the one
+      # place verification/PREREG_E2E_2026_10.md's "Models" table and this
+      # workflow must agree. 'small' is the unchanged original-campaign
+      # pin; 'mid' is the breadth tier. ollama ignores tier: there is no
+      # mid-tier Ollama cell in the plan, and the "Validate inputs" step
+      # above already refuses ollama for any target but tpv-server-memory.
+      - name: Resolve the fixed model for this tier/provider (no override)
         if: steps.guard.outputs.run == 'true'
         id: model
         shell: bash
         run: |
           case "$TPV_PROVIDER" in
-            anthropic) echo "model=anthropic/claude-haiku-4-5-20251001" >> "$GITHUB_OUTPUT" ;;
-            openai)    echo "model=openai/gpt-4o-mini" >> "$GITHUB_OUTPUT" ;;
-            ollama)    echo "model=ollama_chat/llama3.2:3b" >> "$GITHUB_OUTPUT" ;;
-            *) echo "::error::unknown provider $TPV_PROVIDER"; exit 1 ;;
+            ollama)
+              echo "model=ollama_chat/llama3.2:3b" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+          case "$TPV_TIER:$TPV_PROVIDER" in
+            # Unchanged from the first campaign (verification/SOURCE.md).
+            small:anthropic) echo "model=anthropic/claude-haiku-4-5-20251001" >> "$GITHUB_OUTPUT" ;;
+            small:openai)    echo "model=openai/gpt-4o-mini" >> "$GITHUB_OUTPUT" ;;
+            # the breadth tier's mid model (verification/PREREG_E2E_2026_10.md's "Models"
+            # section). The OpenAI side is gpt-5.1, NOT gpt-6.1-sol --
+            # gpt-6.1-sol is OpenAI's own current mid-tier label, but its
+            # tool/function calling only works through the Responses API,
+            # not the Chat Completions shape LiteLLM's completion() call
+            # (mylonite.scan.llm_planner) uses, so it cannot drive Mylonite's
+            # planner at all. See the prereg's "OpenAI mid tier" section for
+            # the full verification trail.
+            mid:anthropic)   echo "model=anthropic/claude-sonnet-5" >> "$GITHUB_OUTPUT" ;;
+            mid:openai)      echo "model=openai/gpt-5.1" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::unknown tier/provider combination $TPV_TIER/$TPV_PROVIDER"; exit 1 ;;
           esac
 
       - name: Build the wheel and install it into a clean venv
@@ -329,6 +412,33 @@ jobs:
             --host 127.0.0.1 --port 8099 &
           for _ in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:8099/docs && break; sleep 1; done
 
+      # --- precision-cell targets (verification/PREREG_E2E_2026_10.md) -----------
+      # No finding on any of these three is ever a vulnerability -- a KEPT
+      # result here is scored as a false positive, never published as a real
+      # finding (see the "target" input's own description above).
+
+      - name: "e2e-guarded-reference: install the kitchen-sink guarded twin as a real stdio server"
+        if: steps.guard.outputs.run == 'true' && env.TPV_TARGET == 'e2e-guarded-reference'
+        shell: bash
+        # The REAL stdio server (mcp-kitchen-sink-guarded, its own console
+        # script), not the in-process reference:guarded adapter -- this cell
+        # exercises Mylonite's stdio adapter against the guarded twin exactly
+        # the way it exercises every other third-party target, rather than
+        # the in-process reference path other scans already cover.
+        run: python -m pip install "./reference_targets/mcp_kitchen_sink[mcp]"
+
+      - name: "e2e-readonly-time: install the official MCP time server"
+        if: steps.guard.outputs.run == 'true' && env.TPV_TARGET == 'e2e-readonly-time'
+        shell: bash
+        run: python -m pip install "mcp-server-time==0.6.2"
+
+      # e2e-readonly-b reuses target 4's own binary (server-everything --
+      # see verification/SOURCE.md's e2e-readonly-b row for why: a static
+      # tool inventory with no write/send/delete/exec/fetch-out tool,
+      # confirmed from mylonite.scan.tool_roles/tool_classifier). npx
+      # fetches it on demand in the scaffold-check and run steps below, the
+      # same as target 4 -- no separate install step needed.
+
       # --- scaffold sanity check (no provider key; see the prereg) ----------
 
       - name: Scaffold sanity check -- re-introspect via the unchanged CLI (not for target 3; see the prereg)
@@ -354,6 +464,18 @@ jobs:
               ;;
             tpv-agents-sdk-ollama)
               "$MYLONITE" scan --rest-url http://127.0.0.1:8099/chat --rest-response-path reply \
+                --scaffold scaffold-check.yaml --scope "$TPV_TARGET" --force
+              ;;
+            e2e-guarded-reference)
+              "$MYLONITE" scan --command mcp-kitchen-sink-guarded \
+                --scaffold scaffold-check.yaml --scope "$TPV_TARGET" --force
+              ;;
+            e2e-readonly-time)
+              "$MYLONITE" scan --command mcp-server-time \
+                --scaffold scaffold-check.yaml --scope "$TPV_TARGET" --force
+              ;;
+            e2e-readonly-b)
+              "$MYLONITE" scan --command npx --arg -y --arg "@modelcontextprotocol/server-everything@2026.8.31" \
                 --scaffold scaffold-check.yaml --scope "$TPV_TARGET" --force
               ;;
           esac
@@ -392,8 +514,15 @@ jobs:
           # uncounted dispatch before any counted run.
           TPV_SCAN_CEILING: ${{ steps.inputs.outputs.scan_ceiling }}
           TPV_VALIDATE_CEILING: ${{ steps.inputs.outputs.validate_ceiling }}
+          # --weakness-class (validated in "Validate inputs" above): a
+          # single W1-W4 class, or blank for every class the target
+          # declares.
+          TPV_PATTERN: ${{ inputs.pattern }}
         run: |
           EXTRA_SCAN_FLAGS=""
+          if [ -n "$TPV_PATTERN" ]; then
+            EXTRA_SCAN_FLAGS="--weakness-class $TPV_PATTERN"
+          fi
           case "$TPV_TARGET" in
             tpv-server-memory)      TARGET_FILE=memory.yaml;         FULL_JOURNEY=true ;;
             tpv-mcp-redis)          TARGET_FILE=redis.yaml;          FULL_JOURNEY=true ;;
@@ -401,10 +530,16 @@ jobs:
             # pair, so there is no seed_arm; the prereg expects W2 to read
             # NOT TESTED here rather than the scan refusing to start.
             tpv-streamablehttp)     TARGET_FILE=streamablehttp.yaml; FULL_JOURNEY=true
-                                    EXTRA_SCAN_FLAGS="--allow-no-seed-arm" ;;
+                                    EXTRA_SCAN_FLAGS="$EXTRA_SCAN_FLAGS --allow-no-seed-arm" ;;
             tpv-server-everything)  TARGET_FILE=everything.yaml;     FULL_JOURNEY=false ;;
             tpv-go-memory)          TARGET_FILE=go_memory.yaml;      FULL_JOURNEY=false ;;
             tpv-agents-sdk-ollama)  TARGET_FILE=agents_rest.yaml;    FULL_JOURNEY=false ;;
+            # Precision cells (verification/PREREG_E2E_2026_10.md): full
+            # journey, because "0 kept" is a validate-stage verdict, not a
+            # bare scan-findings count.
+            e2e-guarded-reference)  TARGET_FILE=e2e_guarded_reference.yaml; FULL_JOURNEY=true ;;
+            e2e-readonly-time)      TARGET_FILE=e2e_readonly_time.yaml;     FULL_JOURNEY=true ;;
+            e2e-readonly-b)         TARGET_FILE=e2e_readonly_b.yaml;        FULL_JOURNEY=true ;;
             *) echo "::error::unknown target $TPV_TARGET"; exit 1 ;;
           esac
 
@@ -507,10 +642,15 @@ jobs:
         shell: bash
         env:
           TPV_SCORE_DIR: ${{ steps.run.outputs.score_dir }}
+          # So the scorer reports this cell's own weakness class's
+          # fired/resisted/kept counts (e.g. "w2" for the third-party
+          # injection breadth cell) instead of always defaulting to "w1".
+          TPV_PATTERN: ${{ inputs.pattern }}
         run: |
           "$RUNNER_TEMP/campaign-venv/bin/python" scripts/score_third_party.py score \
-            "${TPV_SCORE_DIR:-out}" --target "$TPV_TARGET" --run-log run.log \
-            --scan-log scan.log --validate-log validate.log --out score.json
+            "${TPV_SCORE_DIR:-out}" --target "$TPV_TARGET" --pattern "$TPV_PATTERN" \
+            --run-log run.log --scan-log scan.log --validate-log validate.log \
+            --out score.json
 
       - name: Compute this run's $ cost from the printed token counts
         if: always() && steps.guard.outputs.run == 'true'
@@ -520,10 +660,19 @@ jobs:
           TPV_COMMIT_SHA: ${{ steps.commit.outputs.sha }}
         run: |
           case "$TPV_PROVIDER" in
-            anthropic) IN_RATE=1.0;  OUT_RATE=5.0 ;;   # claude-haiku-4-5 (verification/README.md)
-            openai)    IN_RATE=0.15; OUT_RATE=0.60 ;;  # gpt-4o-mini (the prereg)
-            ollama)    IN_RATE=0;    OUT_RATE=0 ;;      # local model, no provider cost
+            ollama) IN_RATE=0; OUT_RATE=0 ;; # local model, no provider cost, tier-independent
           esac
+          if [ "$TPV_PROVIDER" != "ollama" ]; then
+            case "$TPV_TIER:$TPV_PROVIDER" in
+              small:anthropic) IN_RATE=1.0;  OUT_RATE=5.0 ;;   # claude-haiku-4-5 (verification/README.md)
+              small:openai)    IN_RATE=0.15; OUT_RATE=0.60 ;;  # gpt-4o-mini (the prereg)
+              # the breadth tier's mid model (verification/PREREG_E2E_2026_10.md's "Models"
+              # and "OpenAI mid tier" sections). gpt-5.1, not gpt-6.1-sol --
+              # see the "Resolve the fixed model" step above for why.
+              mid:anthropic)   IN_RATE=2.0;  OUT_RATE=10.0 ;;  # claude-sonnet-5 (claude.com/pricing)
+              mid:openai)      IN_RATE=1.25; OUT_RATE=10.00 ;; # gpt-5.1 (developers.openai.com/api/docs/pricing)
+            esac
+          fi
           python scripts/compute_run_cost.py run.log \
             --model "$TPV_MODEL" --in-rate "$IN_RATE" --out-rate "$OUT_RATE" \
             --ref "${TPV_COMMIT_SHA:-unknown}" --out cost.json
@@ -537,7 +686,7 @@ jobs:
         if: always() && steps.guard.outputs.run == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: third-party-${{ inputs.target }}-${{ inputs.provider }}
+          name: third-party-${{ inputs.target }}-${{ inputs.provider }}-${{ inputs.tier }}
           path: |
             out/**
             generated/**

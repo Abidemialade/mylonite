@@ -236,6 +236,95 @@ def _dedupe(codes: list[str]) -> list[str]:
     return sorted(set(codes))
 
 
+#: Lazily built, then cached -- {pattern_id: weakness} for every bundled
+#: catalogue seed (``mylonite.scan.seeds.SEED_CATALOGUE``), the exact table
+#: ``mylonite.gate.mitigation._PATTERN_TO_WEAKNESS`` already builds for a kept
+#: exploit. Built here too (rather than imported) because that one is private
+#: and keyed for ``ExploitRecord`` objects, not the bare ``pattern_id`` strings
+#: a raw ``scan_report.json`` attempt carries.
+_PATTERN_TO_WEAKNESS: dict[str, str] | None = None
+
+#: A descriptor-synthesised seed's pattern_id always starts ``synth-w<N>-``
+#: (see ``seed_synth.py``'s ``_w1_seed``/``_w1_rugpull_seed`` and friends) --
+#: the catalogue lookup above only covers the bundled kitchen-sink seeds, so a
+#: synthesised one is read from its own id instead of a table.
+_SYNTH_PATTERN_RE = re.compile(r"^synth-(w[1-4])-", re.IGNORECASE)
+
+
+def _pattern_to_weakness() -> dict[str, str]:
+    global _PATTERN_TO_WEAKNESS
+    if _PATTERN_TO_WEAKNESS is None:
+        from mylonite.scan.seeds import SEED_CATALOGUE
+
+        _PATTERN_TO_WEAKNESS = {s.pattern_id: s.weakness for s in SEED_CATALOGUE}
+    return _PATTERN_TO_WEAKNESS
+
+
+def _weakness_for_pattern(pattern_id: str) -> str | None:
+    """The W1-W4 class a scan attempt's own ``pattern_id`` belongs to, or
+    ``None`` when neither the bundled catalogue nor the synthesised-id shape
+    recognises it (an adaptively-named custom-target pattern_id)."""
+    mapping = _pattern_to_weakness()
+    if pattern_id in mapping:
+        return mapping[pattern_id]
+    match = _SYNTH_PATTERN_RE.match(pattern_id)
+    if match:
+        return match.group(1).upper()
+    return None
+
+
+def _calibration_info(raw_report: dict) -> dict[str, object]:
+    """``{"calibration_status": ..., "calibration_reason_code": ...}``, read
+    from ``scan_report.json``'s own ``calibration`` block
+    (``mylonite.plugins._mcp.calibration.CalibrationResult.to_dict()``,
+    written only for a custom target that declares an ``effect_probe``).
+    Both are ``None`` when the target has no probe to calibrate (a bundled
+    reference target, or a precision cell with no ``seed_arm``/
+    ``effect_probe`` at all) or the report predates this field."""
+    calibration = raw_report.get("calibration") if isinstance(raw_report, dict) else None
+    if not isinstance(calibration, dict):
+        return {"calibration_status": None, "calibration_reason_code": None}
+    return {
+        "calibration_status": calibration.get("status"),
+        "calibration_reason_code": calibration.get("reason_code"),
+    }
+
+
+def _finding_proof_level(raw_report: dict) -> str | None:
+    """The ``proof_level`` (``judge_evidence["proof_level"]``) of the FIRST
+    ``outcome=finding`` attempt -- the only one ``generate``/``validate`` ever
+    act on, per the prereg's multi-finding note. ``None`` when nothing fired,
+    or the attempt carries no such key (an older report)."""
+    for attempt in raw_report.get("attempts", []) if isinstance(raw_report, dict) else []:
+        if isinstance(attempt, dict) and attempt.get("outcome") == "finding":
+            evidence = attempt.get("judge_evidence")
+            if isinstance(evidence, dict) and evidence.get("proof_level"):
+                return str(evidence["proof_level"])
+            return None
+    return None
+
+
+def _weakness_counts(raw_report: dict, weakness: str) -> dict[str, int]:
+    """Fired (``outcome=finding``) and resisted (``outcome=no_finding``)
+    attempt counts for one weakness class, read from the attempts list.
+    ``kept`` always starts at 0 -- the caller fills it in once the run's
+    verdict label is known, since only the first finding is ever validated
+    (the multi-finding note), so "kept" is a cell-level fact, not something
+    countable from the attempts list alone."""
+    fired = 0
+    resisted = 0
+    for attempt in raw_report.get("attempts", []) if isinstance(raw_report, dict) else []:
+        if not isinstance(attempt, dict):
+            continue
+        if _weakness_for_pattern(str(attempt.get("pattern_id", ""))) != weakness:
+            continue
+        if attempt.get("outcome") == "finding":
+            fired += 1
+        elif attempt.get("outcome") == "no_finding":
+            resisted += 1
+    return {"fired": fired, "resisted": resisted, "kept": 0}
+
+
 def _unexplained_attempts(raw_report: dict) -> list[dict]:
     """Attempts that are neither a judged ``finding``/``no_finding`` NOR
     carry a reason code anywhere in their own text fields -- an outcome with
@@ -326,12 +415,32 @@ def _classify_validate_without_report(run_dir: Path, validate_text: str) -> dict
     }
 
 
+def _read_raw_report_safe(run_dir: Path) -> dict:
+    """``scan_report.json``'s own dict, or ``{}`` when it is missing or
+    unreadable -- never raises. Used only to fill in ``calibration_status``/
+    ``calibration_reason_code``/``proof_level`` as an explicit ``None`` on a
+    path that never reads the report for its own classification (a missing
+    report, an aborted scan with no reason code, a traceback). Those paths'
+    own dict already carries a ``reason``/``reason_codes`` field explaining
+    WHY there is nothing to calibrate or confirm; this never duplicates that
+    text, it only guarantees the three keys are always present."""
+    report_path = run_dir / "scan_report.json"
+    if not report_path.is_file():
+        return {}
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def score_run(
     run_dir: Path,
     *,
     run_log: Path | None = None,
     scan_log: Path | None = None,
     validate_log: Path | None = None,
+    pattern: str | None = None,
 ) -> dict[str, object]:
     """Classify one run directory per the prereg's pass rule.
 
@@ -339,6 +448,10 @@ def score_run(
     and, when no ``scan_log`` is given, for scan-stage reason codes.
     ``scan_log`` and ``validate_log`` are each stage's own output; a
     ``validate_log`` path whose file does not exist means validate never ran.
+    ``pattern`` is the cell's own ``--weakness-class``/``pattern`` dispatch
+    value (``W1``-``W4``, or ``None``/blank for the first campaign's
+    unfiltered cells, which default to ``W1`` -- see
+    :func:`_weakness_counts`'s caller below).
     """
     scan_text = _read_log(scan_log)
     validate_text = _read_log(validate_log)
@@ -353,42 +466,86 @@ def score_run(
     # not blocked -- it falls through to ordinary classification below.
     has_traceback = _TRACEBACK_MARKER in log_text
     target_noise_traceback = False
-    if has_traceback:
-        if _mylonite_traceback_present(log_text):
-            return {
-                "classification": PRODUCT_DEFECT,
-                "reason": (
-                    "a Python traceback with a mylonite stack frame is present in "
-                    "run.log -- investigate as a product crash, never auto-re-run"
-                ),
-            }
-        target_noise_traceback = True
-
-    if validate_text is not None and not (run_dir / "validation_report.json").is_file():
-        result = _classify_validate_without_report(run_dir, validate_text)
+    if has_traceback and _mylonite_traceback_present(log_text):
+        result: dict[str, object] = {
+            "classification": PRODUCT_DEFECT,
+            "reason": (
+                "a Python traceback with a mylonite stack frame is present in "
+                "run.log -- investigate as a product crash, never auto-re-run"
+            ),
+        }
     else:
-        # Reason codes come from the stage whose result is being scored:
-        # validate's log when it wrote the report, otherwise scan's.
-        if validate_text is not None:
-            codes_text = validate_text
-        elif scan_text is not None:
-            codes_text = scan_text
+        if has_traceback:
+            target_noise_traceback = True
+        if validate_text is not None and not (run_dir / "validation_report.json").is_file():
+            result = _classify_validate_without_report(run_dir, validate_text)
         else:
-            codes_text = log_text
-        result = _score_run_normally(run_dir, log_text, codes_text)
+            # Reason codes come from the stage whose result is being scored:
+            # validate's log when it wrote the report, otherwise scan's.
+            if validate_text is not None:
+                codes_text = validate_text
+            elif scan_text is not None:
+                codes_text = scan_text
+            else:
+                codes_text = log_text
+            result = _score_run_normally(run_dir, log_text, codes_text, pattern=pattern)
     if target_noise_traceback:
         result["target_noise_traceback"] = True
+    result["exercised"] = _run_exercised(run_dir, result)
+
+    # Integrity rule 7 (the prereg): calibration status and proof level
+    # travel with EVERY scored run, not only KEPT/NOT_KEPT/FOUND_UNVALIDATED
+    # -- a NOT_TESTED/PRODUCT_DEFECT/INVALID run gets both as an explicit
+    # ``None`` (present, not omitted) rather than leaving a downstream
+    # reader to ``dict.get()`` defensively. ``setdefault`` is a no-op for
+    # every branch above that already computed a real value.
+    raw_report_for_defaults = _read_raw_report_safe(run_dir)
+    defaults = _calibration_info(raw_report_for_defaults)
+    result.setdefault("calibration_status", defaults["calibration_status"])
+    result.setdefault("calibration_reason_code", defaults["calibration_reason_code"])
+    result.setdefault("proof_level", _finding_proof_level(raw_report_for_defaults))
     return result
 
 
-def _score_run_normally(run_dir: Path, log_text: str, codes_text: str) -> dict[str, object]:
+def _run_exercised(run_dir: Path, result: dict[str, object]) -> bool:
+    """Whether at least one attempt in this run reached a real verdict
+    (``finding``/``no_finding``) -- the integrity rule's "a cell counts only
+    if attacks were actually exercised" (used by :func:`precision_rollup`).
+
+    Prefers re-reading ``scan_report.json`` directly (the same
+    ``ScanDirResult.exercised`` every other classification already trusts).
+    When no ``scan_report.json`` sits in this directory but ``validate`` ran
+    anyway -- the "scan stopped at its ceiling but still recorded a finding"
+    path, scored from ``validate``'s own log -- the prereg says that always
+    follows a real recorded finding, so it counts as exercised even though
+    the finding itself lives in a directory this function was not pointed
+    at. Anything else defaults to whether the classification itself required
+    a judged outcome.
+    """
+    report_path = run_dir / "scan_report.json"
+    if report_path.is_file():
+        try:
+            return load_scan_dir(run_dir).exercised
+        except ScanDirIntegrityError:
+            return False
+    if result.get("stage") == "validate":
+        return True
+    return result.get("classification") in (KEPT, NOT_KEPT, FOUND_UNVALIDATED)
+
+
+def _score_run_normally(
+    run_dir: Path, log_text: str, codes_text: str, *, pattern: str | None = None
+) -> dict[str, object]:
     """Every classification branch except rule #1 (the traceback check,
     handled by the caller, :func:`score_run`, before this is reached).
     ``log_text`` is the whole log, searched for infra signatures;
     ``codes_text`` is the scored stage's own log, the only place reason
-    codes are read from."""
+    codes are read from. ``pattern`` is the cell's own weakness-class
+    filter (``W1``-``W4``); blank/``None`` defaults to ``W1`` (the first
+    campaign's cells, all unfiltered, only ever cared about W1's counts)."""
     report_path = run_dir / "scan_report.json"
     validation_path = run_dir / "validation_report.json"
+    weakness_key = (pattern or "W1").upper()
 
     if not report_path.is_file() and not validation_path.is_file():
         return _classify_missing_report(run_dir, log_text)
@@ -409,6 +566,10 @@ def _score_run_normally(run_dir: Path, log_text: str, codes_text: str) -> dict[s
     log_reason_codes = _REASON_CODE_RE.findall(codes_text)
     reason_codes = _dedupe(_reason_codes_in_attempts(raw_report) + log_reason_codes)
     weakness_classes = sorted(scan_result.weakness_classes) if scan_result is not None else []
+    calibration_info = _calibration_info(raw_report)
+    proof_level = _finding_proof_level(raw_report)
+    pattern_counts = _weakness_counts(raw_report, weakness_key)
+    pattern_key = weakness_key.lower()
 
     if validation_path.is_file():
         from mylonite._verdict import verdict_label
@@ -417,11 +578,17 @@ def _score_run_normally(run_dir: Path, log_text: str, codes_text: str) -> dict[s
         report = ValidationReport.model_validate_json(validation_path.read_text(encoding="utf-8"))
         label = verdict_label(report)
         if label == "KEPT":
+            if weakness_key in weakness_classes:
+                pattern_counts["kept"] = 1
             return {
                 "classification": KEPT,
                 "label": label,
                 "weakness_classes": weakness_classes,
                 "reason_codes": reason_codes,
+                "proof_level": proof_level,
+                pattern_key: pattern_counts,
+                "adjudication": {"status": "unadjudicated", "reason": None},
+                **calibration_info,
             }
         failing = next(
             (o for o in report.outcomes if not o.passed and not o.report_only),
@@ -434,6 +601,9 @@ def _score_run_normally(run_dir: Path, log_text: str, codes_text: str) -> dict[s
             "detail": detail,
             "weakness_classes": weakness_classes,
             "reason_codes": reason_codes,
+            "proof_level": proof_level,
+            pattern_key: pattern_counts,
+            **calibration_info,
         }
 
     aborted = raw_report.get("aborted")
@@ -474,6 +644,9 @@ def _score_run_normally(run_dir: Path, log_text: str, codes_text: str) -> dict[s
             "classification": FOUND_UNVALIDATED,
             "weakness_classes": weakness_classes,
             "reason_codes": reason_codes,
+            "proof_level": proof_level,
+            pattern_key: pattern_counts,
+            **calibration_info,
         }
 
     if scan_result is not None and not scan_result.exercised:
@@ -496,6 +669,9 @@ def _score_run_normally(run_dir: Path, log_text: str, codes_text: str) -> dict[s
         "detail": "exercised, 0 findings, no unexplained attempts (a clean resist)",
         "weakness_classes": weakness_classes,
         "reason_codes": reason_codes,
+        "proof_level": proof_level,
+        pattern_key: pattern_counts,
+        **calibration_info,
     }
 
 
@@ -530,6 +706,43 @@ def rollup(
     }
 
 
+def precision_rollup(scores: list[dict[str, object]]) -> dict[str, object]:
+    """Combine N re-drives of a precision cell: a cell passes only on
+    0 KEPT across every run, and only when every run was itself exercised.
+
+    Per the integrity rules, "0 kept" is a vacuous, un-countable pass unless
+    attacks were actually dispatched: a run where every attempt read
+    NOT_TESTED proves nothing about the target's precision, so a single
+    unexercised run makes the WHOLE cell ``INCONCLUSIVE``, not a clean
+    ``PASS`` -- a cell is only as trustworthy as its least-exercised run.
+    ``FAIL`` means at least one run was classified ``KEPT`` (a false
+    positive to triage) and every run was exercised.
+    """
+    n = len(scores)
+    if n == 0:
+        # An empty input is never a clean pass -- a glob that matched nothing,
+        # or a bug upstream, must not silently read as "0 kept, all exercised".
+        # Every real call site today either requires >=1 score file (the CLI's
+        # `nargs="+"`) or raises before reaching here on a missing/empty file,
+        # but the bare function gets its own explicit guard rather than
+        # relying on that.
+        return {"n": 0, "kept_count": 0, "unexercised_runs": 0, "result": "INCONCLUSIVE"}
+    kept_runs = [s for s in scores if s.get("classification") == KEPT]
+    unexercised_runs = sum(1 for s in scores if not s.get("exercised"))
+    if unexercised_runs > 0:
+        result = "INCONCLUSIVE"
+    elif kept_runs:
+        result = "FAIL"
+    else:
+        result = "PASS"
+    return {
+        "n": n,
+        "kept_count": len(kept_runs),
+        "unexercised_runs": unexercised_runs,
+        "result": result,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -558,6 +771,13 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="validate's own captured output; a missing file means validate never ran.",
     )
+    score_p.add_argument(
+        "--pattern",
+        default=None,
+        help="The cell's own --weakness-class/pattern value (W1-W4). Controls which "
+        "class's fired/resisted/kept counts are reported, and under which key "
+        "('w2' for W2, etc.) -- blank/omitted defaults to W1.",
+    )
     score_p.add_argument("--out", type=Path, required=True)
 
     rollup_p = sub.add_parser(
@@ -568,6 +788,13 @@ def main(argv: list[str] | None = None) -> int:
     rollup_p.add_argument("--bar-denominator", type=int, default=3)
     rollup_p.add_argument("--out", type=Path, required=True)
 
+    precision_p = sub.add_parser(
+        "precision-rollup",
+        help="Combine N re-drives of a precision cell (0 KEPT, every run exercised).",
+    )
+    precision_p.add_argument("score_files", nargs="+", type=Path)
+    precision_p.add_argument("--out", type=Path, required=True)
+
     args = parser.parse_args(argv)
 
     if args.command == "score":
@@ -576,6 +803,7 @@ def main(argv: list[str] | None = None) -> int:
             run_log=args.run_log,
             scan_log=args.scan_log,
             validate_log=args.validate_log,
+            pattern=args.pattern,
         )
         result["target"] = args.target
         args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
@@ -589,6 +817,13 @@ def main(argv: list[str] | None = None) -> int:
             bar_numerator=args.bar_numerator,
             bar_denominator=args.bar_denominator,
         )
+        args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(result, indent=2))
+        return 0
+
+    if args.command == "precision-rollup":
+        scores = [json.loads(f.read_text(encoding="utf-8")) for f in args.score_files]
+        result = precision_rollup(scores)
         args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(result, indent=2))
         return 0

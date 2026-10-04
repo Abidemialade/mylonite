@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **A second third-party campaign is pre-registered.**
+  `verification/PREREG_E2E_2026_10.md` fixes every cell, model and pass bar
+  before the first counted run. It covers proof depth on third-party servers,
+  live re-tests of the fixes the first campaign forced, false positives on
+  benign servers, and injection classes on mid-tier models. A benign cell
+  passes only when attacks were actually exercised, and every kept finding is
+  checked against its trace before results are published.
+
 - **A CI rehearsal now runs the launch journey exactly as the docs write
   it.** `rehearsal.yml` (manual dispatch) runs
   `verification/rehearsal/journey.sh` on clean Linux and Windows runners,
