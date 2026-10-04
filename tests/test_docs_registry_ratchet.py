@@ -69,6 +69,9 @@ from mylonite._experimental import ENV_VAR as _EXPERIMENTAL_ENV
 from mylonite.cli import app
 from mylonite.config import _EnvRunConfig
 from mylonite.layout import ROOT_ENV_VAR as _ROOT_ENV
+from mylonite.plugins._mcp._session_adapter import (
+    MCP_STARTUP_TIMEOUT_ENV_VAR as _MCP_STARTUP_TIMEOUT_ENV_VAR,
+)
 from mylonite.plugins._mcp.target_file import TargetFile
 from mylonite.plugins._mcp.target_registry import (
     CalibrationSettings,
@@ -362,6 +365,7 @@ def _live_env_vars() -> frozenset[str]:
         REDRIVE_ATTEMPTS_ENV,
         _ROOT_ENV,
         _EXPERIMENTAL_ENV,
+        _MCP_STARTUP_TIMEOUT_ENV_VAR,
     }
     return frozenset(flat | named | _DIRECT_ENV_VAR_LITERALS)
 

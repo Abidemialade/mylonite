@@ -318,6 +318,11 @@ jobs:
             ${{ runner.temp }}/rehearsal-scratch/reh_timing.csv
             ${{ runner.temp }}/rehearsal-scratch/.mylonite/**
           if-no-files-found: warn
+          # The scratch repo's Mylonite output dir is `.mylonite/` (hidden);
+          # upload-artifact skips hidden files by default, which silently
+          # dropped the scans/reports (including LLM usage) this upload
+          # exists to capture.
+          include-hidden-files: true
 
   # No ollama cell ever reaches this job (the plan job drops every
   # Windows + ollama combination), so there is no service container and no
@@ -442,3 +447,8 @@ jobs:
             ${{ runner.temp }}/rehearsal-scratch/reh_timing.csv
             ${{ runner.temp }}/rehearsal-scratch/.mylonite/**
           if-no-files-found: warn
+          # The scratch repo's Mylonite output dir is `.mylonite/` (hidden);
+          # upload-artifact skips hidden files by default, which silently
+          # dropped the scans/reports (including LLM usage) this upload
+          # exists to capture.
+          include-hidden-files: true

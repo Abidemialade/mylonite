@@ -226,6 +226,7 @@ class MCPStdioAdapter(MCPSessionAdapterBase):
         extra_env: dict[str, str] | None,
         command: str | None,
         args: list[str] | None,
+        read_timeout: timedelta | None = None,
     ) -> AbstractAsyncContextManager[ClientSession]:
         # Reference the module-global ``_open_mcp_session`` (not a captured
         # alias) so tests that ``patch.object(stdio_adapter, "_open_mcp_session")``
@@ -237,7 +238,7 @@ class MCPStdioAdapter(MCPSessionAdapterBase):
             command=command,
             args=args,
             cwd=self._spec.cwd,
-            read_timeout=self._mcp_read_timeout,
+            read_timeout=read_timeout if read_timeout is not None else self._mcp_read_timeout,
         )
 
     def _describe_data_sources(self) -> list[str]:
@@ -265,7 +266,8 @@ class MCPStdioAdapter(MCPSessionAdapterBase):
             return await super().describe()
         except AdapterDescribeFailed:
             # The base class already produced an operator-ready message (a
-            # timeout naming timeout_s) -- show it verbatim.
+            # first-contact timeout naming its effective budget and the knob
+            # to raise it) -- show it verbatim.
             raise
         except Exception as exc:
             # #210: a launch failure (a typo'd `command:`, a binary not on

@@ -23,6 +23,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import re
 import secrets
 import sys
@@ -88,6 +89,43 @@ DEFAULT_PLANNER_TIMEOUT_S = 60.0
 #: ``stdio_adapter._open_mcp_session``) so the bound and its rationale live
 #: in exactly one place.
 DEFAULT_MCP_READ_TIMEOUT = timedelta(seconds=60.0)
+
+#: Env var that raises describe()'s own first-contact budget (see
+#: ``DEFAULT_MCP_CONNECT_TIMEOUT`` below) for a flow with no target file to
+#: declare ``timeout_s`` in -- a bundled family (``mcp:filesystem`` etc.) or an
+#: ad hoc ``scan --scaffold --command ...`` probe. Read fresh on every adapter
+#: construction, not cached at import time, so a test can set/unset it per case.
+MCP_STARTUP_TIMEOUT_ENV_VAR = "MYLONITE_MCP_STARTUP_TIMEOUT_S"
+
+#: Budget for describe()'s own first contact with the target: launching the
+#: subprocess (or connecting, for a remote transport) AND the MCP
+#: ``initialize()`` handshake. Kept separate from ``DEFAULT_MCP_READ_TIMEOUT``
+#: (the PER-CALL budget ``invoke()``'s own, later session stays bound by,
+#: unchanged by this): a first ``npx -y <pkg>`` / ``uvx <pkg>`` run downloads
+#: the package before the server can answer AT ALL, routinely taking well
+#: over 60s on a slow or fresh machine/CI runner -- and a brand-new user
+#: following the quickstart has no target file yet in which to raise
+#: ``timeout_s``. An explicit ``timeout_s`` (today's documented knob — see
+#: docs/target-file.md#mcp-session-timeout) still overrides this too, exactly
+#: as before; this default only applies when nothing else was set.
+DEFAULT_MCP_CONNECT_TIMEOUT = timedelta(seconds=120.0)
+
+
+def _env_startup_timeout() -> timedelta | None:
+    """``MCP_STARTUP_TIMEOUT_ENV_VAR``, parsed, or ``None`` when unset, empty
+    or not a positive number (falls back silently -- a malformed env var
+    should not itself become the failure the operator has to debug)."""
+    raw = os.environ.get(MCP_STARTUP_TIMEOUT_ENV_VAR)
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    if value <= 0:
+        return None
+    return timedelta(seconds=value)
+
 
 #: Minimum length (chars) for a string call_tool argument to be treated as a
 #: PLANTED PAYLOAD candidate rather than an incidental id/path/title. Every
@@ -441,6 +479,16 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             if mcp_read_timeout_s is not None
             else DEFAULT_MCP_READ_TIMEOUT
         )
+        # describe()'s own first-contact budget: an explicit timeout_s (the
+        # caller passed mcp_read_timeout_s) wins outright and applies here
+        # too, unchanged from before. Otherwise MCP_STARTUP_TIMEOUT_ENV_VAR,
+        # for a flow with no target file to set timeout_s in. Otherwise
+        # DEFAULT_MCP_CONNECT_TIMEOUT. See that constant's docstring.
+        self._mcp_connect_timeout: timedelta = (
+            self._mcp_read_timeout
+            if mcp_read_timeout_s is not None
+            else (_env_startup_timeout() or DEFAULT_MCP_CONNECT_TIMEOUT)
+        )
         # Boundary controls synthesize a guarded twin of THIS real target: they
         # guard only the planner's view (see invoke()). Empty = raw target.
         self._controls: list[BoundaryControl] = controls or []
@@ -462,12 +510,17 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         extra_env: dict[str, str] | None,
         command: str | None,
         args: list[str] | None,
+        read_timeout: timedelta | None = None,
     ) -> AbstractAsyncContextManager[ClientSession]:
         """Open the transport-specific MCP session (subclass seam).
 
         Returns an async context manager that yields an initialised
         ``ClientSession``. ``extra_env`` / ``command`` / ``args`` are the stdio
-        launch knobs; remote transports ignore them.
+        launch knobs; remote transports ignore them. ``read_timeout`` overrides
+        ``self._mcp_read_timeout`` for THIS session only when given (``None``:
+        use ``self._mcp_read_timeout``, today's behaviour) -- :meth:`describe`
+        passes its own, larger, first-contact budget here; every other caller
+        (``invoke()``, a plant, calibration) leaves it unset.
         """
         raise NotImplementedError
 
@@ -478,6 +531,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         extra_env: dict[str, str] | None,
         command: str | None,
         args: list[str] | None,
+        read_timeout: timedelta | None = None,
     ) -> AsyncIterator[ClientSession]:
         """:meth:`_session`, with the target's ``never_call`` guard applied.
 
@@ -487,7 +541,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         list the transport's session is yielded unchanged.
         """
         names = never_call_names(self._spec.control_config)
-        async with self._session(extra_env=extra_env, command=command, args=args) as session:
+        async with self._session(
+            extra_env=extra_env, command=command, args=args, read_timeout=read_timeout
+        ) as session:
             if not names:
                 yield session
             else:
@@ -596,24 +652,59 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             "raise timeout_s in the target file if this target legitimately needs longer per turn"
         )
 
+    def _connect_timeout_remedy(self) -> str:
+        """The fix-hint half of a first-contact timeout message -- names
+        whichever knob actually applies: a bundled family (no target file to
+        edit) only has the env var; a custom target also has ``timeout_s``."""
+        if self._family in target_registry.BUNDLED_TARGETS:
+            return f"raise the timeout with the {MCP_STARTUP_TIMEOUT_ENV_VAR} env var"
+        return (
+            f"raise timeout_s in the target file, or set the {MCP_STARTUP_TIMEOUT_ENV_VAR} env var"
+        )
+
+    def _connect_timeout_message(self, effective_s: float) -> str:
+        """Operator-facing text for a first-contact (launch + MCP
+        ``initialize()``) timeout -- distinct from the per-call ``timeout_s``
+        message (:meth:`_timeout_s_remedy`'s caller): the target has not
+        answered at all yet, most often because a first ``npx``/``uvx`` run is
+        still downloading the package, so the likely cause and the fix differ.
+        """
+        remedy = self._connect_timeout_remedy()
+        if self._spec.transport == "stdio":
+            return (
+                f"the server did not answer within {effective_s:.0f}s. A first npx or "
+                "uvx run downloads the package before the server can respond, which can "
+                "take longer than this on a slow or fresh machine. Run the server's "
+                f"launch command once yourself first, or install the package, or {remedy}."
+            )
+        return f"the server did not answer within {effective_s:.0f}s. {remedy}."
+
     async def describe(self) -> TargetDescriptor:
         try:
             async with self._guarded_session(
                 extra_env=self._effective_env(),
                 command=self._launch_command,
                 args=self._launch_args,
+                read_timeout=self._mcp_connect_timeout,
             ) as session:
                 shim = MCPSessionAsServerLike(
-                    session, page_timeout_s=self._mcp_read_timeout.total_seconds()
+                    session, page_timeout_s=self._mcp_connect_timeout.total_seconds()
                 )
                 tools = _serialise_tools(await shim.list_tools())
         except Exception as exc:
-            if _is_timeout_error(exc):
-                effective_s = self._mcp_read_timeout.total_seconds()
-                raise AdapterDescribeFailed(
-                    f"describe() timed out after {effective_s:.0f}s (timeout_s) -- "
-                    f"{self._timeout_s_remedy()}."
-                ) from exc
+            # `_is_timeout_error` must see the UNWRAPPED cause -- the
+            # MCP SDK's own session plumbing wraps whatever escapes its task
+            # group in an ExceptionGroup (see _unwrap_sole_exception's
+            # docstring), so a timeout raised by `session.initialize()` inside
+            # `_guarded_session`'s `async with` arrives here as
+            # ExceptionGroup(ExceptionGroup(McpError)), not a bare McpError.
+            # Checking the wrapped `exc` directly let every such timeout fall
+            # through to the generic "could not launch" message below,
+            # silently losing this one's effective-timeout/remedy text.
+            cause = _unwrap_sole_exception(exc)
+            if _is_timeout_error(cause):
+                effective_s = self._mcp_connect_timeout.total_seconds()
+                raise AdapterDescribeFailed(self._connect_timeout_message(effective_s)) from exc
             raise
         descriptor = TargetDescriptor(
             target_id=self._target_id(),

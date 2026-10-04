@@ -128,6 +128,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A first `npx`/`uvx` server launch no longer fails `scan --scaffold`,
+  `check`, or a scan's first connect.** The journey's own step 3 (the
+  official MCP memory server over `npx`) failed on a clean CI runner: the
+  first `npx -y` run downloads the package before the server can answer at
+  all, which took longer than the 60-second budget `describe()` shared with
+  every later per-call turn. `describe()` — launching the server and
+  introspecting its tools — now gets its own, separate first-contact budget,
+  120 seconds by default; the per-call budget `invoke()`'s own, later turns
+  use is unchanged. Raise the new budget with `timeout_s` in the target
+  file (unchanged — it already covered this) or, with no target file yet to
+  set that in, the new `MYLONITE_MCP_STARTUP_TIMEOUT_S` env var. A real
+  first-contact timeout was also silently falling through to the generic
+  "could not launch" message instead of the operator-ready one naming the
+  budget and the fix, because the MCP SDK wraps a timeout from its own
+  session setup in nested `ExceptionGroup`s that the timeout check compared
+  against directly; it now unwraps them first, the way every other
+  exception-classifying catch site in the adapter already did. The message
+  now says plainly that the server didn't answer in time, names the npx/uvx
+  download as the likely cause, and gives both fixes: run the launch command
+  once yourself (or install the package), or raise the timeout. See
+  [target-file.md](docs/target-file.md#mcp-session-timeout).
+
+- **The rehearsal workflow's uploaded artefacts now include its scans and
+  reports.** Each cell's `.mylonite/` output dir is hidden (leading dot), and
+  `actions/upload-artifact` skips hidden files by default — the upload
+  silently dropped everything under it, including LLM usage, on both the
+  Linux and Windows jobs. Both uploads now pass `include-hidden-files: true`.
+
 - **Calibration now shows when a memory-style store's probe sees its own
   planted record (#324).** On a knowledge graph or key-value store the probe
   reads back the record `seed_arm` writes, so the positive control, which

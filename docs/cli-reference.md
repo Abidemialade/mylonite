@@ -259,6 +259,15 @@ when it finds them (see [target-file.md](target-file.md)). A candidate that stil
 a value from you stays commented. Add `--force` to overwrite. Review it, then scan with
 `--target-file`.
 
+The one launch `--scaffold` makes (and `check`'s, and the first connect a scan/gate
+makes) gets a generous 120-second budget by default, since a first `npx -y <package>`
+or `uvx <package>` run downloads the package before the server can answer at all. If it
+still times out, the message names the budget and both fixes: run the server's launch
+command once yourself first (or install the package), or raise the timeout — there is
+no `--target-file` yet at this point to set `timeout_s` in, so set the
+`MYLONITE_MCP_STARTUP_TIMEOUT_S` env var instead (ignored once a target file sets
+`timeout_s`; see [target-file.md](target-file.md#mcp-session-timeout)).
+
 The file also lists every tool in a comment block, the tool inventory: each tool's role
 (consequential, egress, read, store, recall), where that role came from (`declared` in
 the target file, the server's MCP `annotation`, a `schema` parameter, the tool's `name`,

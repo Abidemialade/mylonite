@@ -178,20 +178,32 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
 [`request.timeout_s`](http-agent.md#the-target-file) instead) overrides BOTH the
 planner's per-turn budget and the MCP `ClientSession`'s read timeout, which otherwise
 default to 60 seconds each. Raise it for a target that legitimately takes longer per
-turn — a local model, a slow server, or a first-run `npx`/`uvx` download. Both the
-planner-timeout error (raised mid-scan, on a slow turn) and the `describe()`-timeout
-error (raised on connect, e.g. a hung server) name `timeout_s` and its effective
-value. The one-off `seed_arm` auto-wire probe (a single `describe()` call `scan`
-makes up front to infer a `seed_arm` — see [CLI reference](cli-reference.md)) also
-names `timeout_s`, but its own budget is `max(20, timeout_s)`: even a smaller
-`timeout_s` never shrinks that first probe below 20 seconds. Omitting the field
-keeps today's fixed 60s default for the planner and session, so an existing target
-file loads unchanged. Must be greater than 0; declaring it on a `transport: rest`
-target is rejected — set `request.timeout_s` there instead.
+turn — a local model or a slow server. Both the planner-timeout error (raised
+mid-scan, on a slow turn) and the `describe()`-timeout error (raised on connect, e.g.
+a hung server) name `timeout_s` and its effective value. The one-off `seed_arm`
+auto-wire probe (a single `describe()` call `scan` makes up front to infer a
+`seed_arm` — see [CLI reference](cli-reference.md)) also names `timeout_s`, but its
+own budget is `max(20, timeout_s)`: even a smaller `timeout_s` never shrinks that
+first probe below 20 seconds. Omitting the field keeps today's fixed 60s default for
+the planner and session, so an existing target file loads unchanged. Must be greater
+than 0; declaring it on a `transport: rest` target is rejected — set
+`request.timeout_s` there instead.
 
 ```yaml
 timeout_s: 90
 ```
+
+`describe()` itself — the one call that launches the server and introspects its
+tools (`scan --scaffold`, `check`, and the first connect a scan or gate makes) — uses
+a separate, larger first-contact budget: 120 seconds by default, not 60. A first `npx
+-y <package>` or `uvx <package>` run downloads the package before the server can
+answer at all, which routinely takes longer than 60 seconds on a slow or fresh
+machine — and a brand-new user running `scan --scaffold --command npx ...` has no
+target file yet in which to set `timeout_s`. Setting `timeout_s` still overrides this
+budget too, exactly as before. With no target file (a bundled family, or an ad hoc
+`--scaffold`/`--command` probe), set the `MYLONITE_MCP_STARTUP_TIMEOUT_S` env var
+instead — it raises the 120s default and is ignored once `timeout_s` is set. Either
+way, re-running once the package is cached is usually faster than raising anything.
 
 ## Probes per class
 

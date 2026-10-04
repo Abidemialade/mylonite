@@ -823,9 +823,11 @@ async def test_describe_timeout_message_points_at_the_target_file_for_a_custom_t
 
 
 @pytest.mark.asyncio
-async def test_describe_timeout_message_says_bundled_targets_cannot_set_it() -> None:
-    """A bundled family (no target file at all) must not be told to edit a
-    target file it doesn't have."""
+async def test_describe_timeout_message_points_bundled_targets_at_the_env_var() -> None:
+    """A bundled family (no target file at all) has no ``timeout_s`` field to
+    set -- the first-contact timeout message must point it at the env var
+    instead of a dead end, and must not tell it to edit a target file it
+    doesn't have."""
     from contextlib import asynccontextmanager
 
     from mylonite.scan._types import AdapterDescribeFailed
@@ -839,9 +841,89 @@ async def test_describe_timeout_message_says_bundled_targets_cannot_set_it() -> 
         adapter = MCPStdioAdapter(family="fetch", scope=None)
         with pytest.raises(AdapterDescribeFailed) as excinfo:
             await adapter.describe()
-    message = str(excinfo.value).lower()
-    assert "bundled" in message
-    assert "can't" in message or "cannot" in message
+    message = str(excinfo.value)
+    assert "MYLONITE_MCP_STARTUP_TIMEOUT_S" in message
+    assert "target file" not in message.lower()
+
+
+def test_describe_connect_timeout_defaults_to_120s_and_leaves_per_call_timeout_at_60s() -> None:
+    """A first `npx -y`/`uvx` run downloads the package before the server
+    can answer `initialize()` at all, routinely exceeding 60s on a slow or
+    fresh machine -- describe()'s own first-contact budget defaults to
+    120s, while invoke()'s per-call read timeout stays at today's 60s."""
+    adapter = MCPStdioAdapter(family="fetch", scope=None)
+    assert adapter._mcp_connect_timeout.total_seconds() == 120.0
+    assert adapter._mcp_read_timeout.total_seconds() == 60.0
+
+
+@pytest.mark.asyncio
+async def test_describe_timeout_message_names_npx_uvx_and_both_remedies() -> None:
+    """The first-contact timeout message must say plainly that the server
+    didn't answer within N seconds, name a first npx/uvx run's download as
+    the likely cause, and give both remedies: run the launch command once
+    (or install the package), or raise the timeout -- naming the knob."""
+    from contextlib import asynccontextmanager
+
+    from mylonite.scan._types import AdapterDescribeFailed
+
+    @asynccontextmanager
+    async def _timing_out_open(*_a: Any, **_kw: Any):
+        raise TimeoutError("read timed out")
+        yield  # pragma: no cover - never reached
+
+    with patch.object(stdio_adapter, "_open_mcp_session", _timing_out_open):
+        adapter = MCPStdioAdapter(family="fetch", scope=None)
+        with pytest.raises(AdapterDescribeFailed) as excinfo:
+            await adapter.describe()
+    message = str(excinfo.value)
+    lowered = message.lower()
+    assert "120s" in message
+    assert "npx" in lowered
+    assert "uvx" in lowered
+    assert "run the server's launch command once" in lowered
+    assert "install the package" in lowered
+    assert "MYLONITE_MCP_STARTUP_TIMEOUT_S" in message
+
+
+def test_mcp_startup_timeout_env_var_raises_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MYLONITE_MCP_STARTUP_TIMEOUT_S raises describe()'s first-contact
+    budget for a flow with no target file to set timeout_s in -- a bundled
+    family, or an ad hoc `scan --scaffold --command ...` probe."""
+    monkeypatch.setenv("MYLONITE_MCP_STARTUP_TIMEOUT_S", "200")
+    adapter = MCPStdioAdapter(family="fetch", scope=None)
+    assert adapter._mcp_connect_timeout.total_seconds() == 200.0
+    # The per-call timeout is untouched by the env var.
+    assert adapter._mcp_read_timeout.total_seconds() == 60.0
+
+
+def test_mcp_startup_timeout_env_var_ignores_a_malformed_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A malformed env var falls back to the default silently -- it must not
+    itself become the failure the operator has to debug."""
+    monkeypatch.setenv("MYLONITE_MCP_STARTUP_TIMEOUT_S", "not-a-number")
+    adapter = MCPStdioAdapter(family="fetch", scope=None)
+    assert adapter._mcp_connect_timeout.total_seconds() == 120.0
+
+
+def test_explicit_timeout_s_overrides_the_startup_env_var(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An explicit timeout_s (today's documented knob) still wins outright
+    over the env var -- it is the operator's deliberate, already-known
+    per-target override, and it applies to the connect budget exactly as it
+    did before this env var existed."""
+    from mylonite.plugins._mcp import target_registry
+
+    monkeypatch.setenv("MYLONITE_MCP_STARTUP_TIMEOUT_S", "200")
+    _register_custom_stdio_family("acme-env-override")
+    try:
+        adapter = MCPStdioAdapter(
+            family="acme-env-override", scope=str(tmp_path), mcp_read_timeout_s=45.0
+        )
+        assert adapter._mcp_connect_timeout.total_seconds() == 45.0
+    finally:
+        target_registry.clear_runtime_targets()
 
 
 @pytest.mark.asyncio

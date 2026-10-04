@@ -65,6 +65,15 @@ mylonite scan --command npx --arg "-y" --arg "@modelcontextprotocol/server-memor
   --scaffold app.yaml --scope server-memory
 ```
 
+The first `npx -y` run downloads the package before the server can answer at
+all, which can take longer than this launch's 120-second default budget on a
+slow or fresh machine. Either pre-fetch it once yourself —
+`npm install -g @modelcontextprotocol/server-memory`, or just
+`npx -y @modelcontextprotocol/server-memory` and let it exit on its own — or
+raise the budget with the `MYLONITE_MCP_STARTUP_TIMEOUT_S` env var (seconds;
+see [target-file.md](../target-file.md#mcp-session-timeout)). Either way,
+every later launch reuses the cached package and is fast.
+
 **Mylonite's own reference app** (`mcp-kitchen-sink`, Python — the deliberately
 vulnerable target [step 1](1-try.md) replays; this launches it as a real
 stdio subprocess instead). Install its `mcp` extra from PyPI, then point at

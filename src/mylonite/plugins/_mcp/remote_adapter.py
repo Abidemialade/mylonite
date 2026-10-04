@@ -181,6 +181,7 @@ class MCPRemoteAdapter(MCPSessionAdapterBase):
         extra_env: dict[str, str] | None,
         command: str | None,
         args: list[str] | None,
+        read_timeout: timedelta | None = None,
     ) -> AbstractAsyncContextManager[ClientSession]:
         # Remote transports ignore the stdio launch knobs.
         if not self._spec.url:
@@ -191,7 +192,7 @@ class MCPRemoteAdapter(MCPSessionAdapterBase):
             self._spec.transport,
             self._spec.url,
             self._spec.headers,
-            read_timeout=self._mcp_read_timeout,
+            read_timeout=read_timeout if read_timeout is not None else self._mcp_read_timeout,
         )
 
     def _describe_data_sources(self) -> list[str]:
