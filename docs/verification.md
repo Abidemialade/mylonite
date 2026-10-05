@@ -189,7 +189,7 @@ runs / 54 findings across every status, including superseded and one
 void run) — a run and the findings it carries are different counts once
 a run can keep several findings at once; every finding's true-positive
 label is adjudicated from its own trace in a committed data file, then
-checked by an independent reviewer. Counted spend: $2.75 on
+checked by a separate AI reviewer; a person's review is still pending. Counted spend: $2.75 on
 Anthropic (660 calls), $0.35 on OpenAI (946 calls) — both a measured
 lower bound, since five ceiling-stopped legs made 80 more Anthropic
 requests and 120 more OpenAI requests in total that printed no cost line;

@@ -162,7 +162,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   including superseded and one void run. Every finding's true-positive
   label is adjudicated from its own trace in a committed data file,
   `verification/results/0.12.0/e2e/adjudications.json`, then checked by
-  an independent reviewer — `scripts/build_e2e_results.py` never assigns
+  a separate AI reviewer; a person's review is still pending — `scripts/build_e2e_results.py` never assigns
   that label itself, and fails loudly if a KEPT finding has no entry
   there or an entry no longer matches a real KEPT finding. A corrected
   ceiling count adds a fifth ceiling-stopped
