@@ -153,6 +153,95 @@ class TestKeptThresholdAnyProvider:
         assert met_bar is True
         assert provider_results["openai"]["met_bar"] is False
 
+    def test_small_tier_kept_count_never_substitutes_for_the_mid_tier_bar(self) -> None:
+        """2026-10-05 amendment: Breadth 1 is now dispatched on the small
+        tier too, reported alongside the mid tier -- but the bar's own text
+        ("on at least one mid-tier model") only ever reads the mid tier
+        toward `met_bar`. A small-tier KEPT run is recorded in `by_tier`,
+        never counted toward the bar itself."""
+        by_provider = {
+            "anthropic": [
+                _run("KEPT", tier="small"),
+                _run("KEPT", tier="small"),
+                _run("NOT_KEPT", tier="mid"),
+                _run("NOT_KEPT", tier="mid"),
+            ],
+            "openai": [_run("NOT_KEPT", tier="mid") for _ in range(3)],
+        }
+        cell_runs = by_provider["anthropic"] + by_provider["openai"]
+        provider_results, met_bar = builder._apply_cell_bar(
+            "kept_threshold_any_provider",
+            {"threshold": 2, "bar_tier": "mid"},
+            by_provider,
+            cell_runs,
+        )
+        assert met_bar is False
+        anthropic = provider_results["anthropic"]
+        assert anthropic["by_tier"]["small"]["kept_count"] == 2
+        assert anthropic["by_tier"]["small"]["met_bar"] is True
+        assert anthropic["met_bar"] is False
+
+    def test_missing_tier_defaults_to_mid_for_legacy_run_dicts(self) -> None:
+        by_provider = {
+            "anthropic": [_run("KEPT"), _run("KEPT"), _run("NOT_KEPT")],
+            "openai": [_run("NOT_KEPT") for _ in range(3)],
+        }
+        cell_runs = by_provider["anthropic"] + by_provider["openai"]
+        provider_results, met_bar = builder._apply_cell_bar(
+            "kept_threshold_any_provider", {"threshold": 2}, by_provider, cell_runs
+        )
+        assert met_bar is True
+        assert provider_results["anthropic"]["by_tier"]["mid"]["kept_count"] == 2
+
+
+class TestEffectConfirmedConfirmPathByTarget:
+    """2026-10-05 amendment, the new confirm-path cell: a calibration that is
+    allowed to confirm, not required to certify (`certified` OR
+    `confirm_only`) is enough, but the bar is read per (target, provider)
+    -- one target/provider pair meeting it never carries a sibling pair
+    that does not."""
+
+    def test_confirm_only_counts_toward_this_bar(self) -> None:
+        confirmed = _run(
+            "KEPT",
+            validated_effect_proof_level="effect-confirmed",
+            calibration_status="confirm_only",
+            target="tpv-mcp-redis",
+            provider="anthropic",
+        )
+        cell_runs = [confirmed, confirmed, confirmed]
+        by_target, met_bar = builder._apply_cell_bar(
+            "effect_confirmed_confirm_path_by_target", {}, {}, cell_runs
+        )
+        assert met_bar is True
+        assert by_target["tpv-mcp-redis"]["by_provider"]["anthropic"]["met_bar"] is True
+
+    def test_one_provider_short_of_the_bar_does_not_meet_the_other_targets_pass(
+        self,
+    ) -> None:
+        memory_anthropic = _run(
+            "KEPT",
+            validated_effect_proof_level="dispatched-tool-linked",
+            calibration_status="confirm_only",
+            target="tpv-server-memory",
+            provider="anthropic",
+        )
+        memory_openai = _run(
+            "KEPT",
+            validated_effect_proof_level="effect-confirmed",
+            calibration_status="confirm_only",
+            target="tpv-server-memory",
+            provider="openai",
+        )
+        cell_runs = [memory_anthropic] * 3 + [memory_openai] * 3
+        by_target, met_bar = builder._apply_cell_bar(
+            "effect_confirmed_confirm_path_by_target", {}, {}, cell_runs
+        )
+        assert met_bar is False
+        memory = by_target["tpv-server-memory"]["by_provider"]
+        assert memory["anthropic"]["met_bar"] is False
+        assert memory["openai"]["met_bar"] is True
+
 
 class TestHonestEitherWay:
     """Breadth 2's bar has no failing outcome -- it is met as soon as every

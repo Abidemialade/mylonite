@@ -205,7 +205,7 @@ the MCP Go SDK's memory example, and the OpenAI Agents SDK driving a local Ollam
 **This is the first campaign where every counted LLM call ran live inside CI** — the
 committed `third-party-campaign.yml` workflow, never a local replay.
 
-## Run log — 2026-10-05 (end-to-end campaign, second round, 118 run directories, live in CI)
+## Run log — 2026-10-05 (end-to-end campaign, second round, 148 run directories, live in CI)
 
 Full write-up, every run and every cell's bar:
 [`results/0.12.0/e2e/README.md`](results/0.12.0/e2e/README.md). Rule:
@@ -216,8 +216,11 @@ Full write-up, every run and every cell's bar:
   nearly every one of 6 counted re-drives each, but this round's bar needs
   `effect-confirmed` under a `certified` calibration, and neither target's
   calibration reaches `certified` on any run: `server-memory` calibrates
-  `confirm_only` on every run (its own validate-measured effect leg stays at
-  `dispatched-tool-linked`). `mcp-redis` calibrated `failed` on both of its earlier,
+  `confirm_only` on every run, in every cell; its validate-measured effect leg stays
+  at `dispatched-tool-linked` on Anthropic in every cell, and on OpenAI in this
+  round's own single-exploit validation (a different pattern, `create_relations`,
+  from the one a later cell validates — see the confirm-path bullet below).
+  `mcp-redis` calibrated `failed` on both of its earlier,
   superseded rounds; a general calibration fix repaired the bug behind that false
   reading, and on the counted round calibration reads `confirm_only` — never
   `certified`, a structural ceiling of this target (its key is fixed in the target
@@ -227,51 +230,70 @@ Full write-up, every run and every cell's bar:
   a shared provider rate limit and are void, re-dispatched one at a time: 2 kept, 1
   `NOT TESTED` (validate ceiling, not "did not land"). Reported as a documented
   limit, not a pass.
-- **Fix re-tests — one met its bar, one did not.** `simple-streamablehttp` still reads
-  `NOT TESTED` on every run (no seedable surface). The Agents-SDK-on-Ollama target's
-  bar needed the `STABLE, NOT PROVEN` candidate label on 2+/3 runs per provider; only
-  1 of 6 runs reached it.
-- **Precision — one check passed mechanically, one passed cleanly, one is
-  inconclusive, not re-run.** `e2e-guarded-reference`'s 0 KEPT/6-exercised result
-  meets the prereg's mechanical bar, but on every run the attack fired 3/3 against
-  the raw build and the guarded build leaked 0/3 — the run reads REJECTED only
-  because the effect probe's own verify call fails on every run, not because of a
-  demonstrated, correctly-wired resist. `e2e-readonly-time` reads 0 KEPT, every run
-  exercised, cleanly. `server-everything`, reused as a read-only check, saw
-  non-deterministic upstream crashes leave 4 of 6 runs unexercised — target
-  flakiness, not a harness or product defect, so `precision-rollup` reads
-  `INCONCLUSIVE` and the cell stands as measured.
-- **Breadth, stronger models (`claude-sonnet-5`/`gpt-5.1`) — the flagship class
-  fired on 3 of 12 runs and kept on none; the third-party indirect-injection class
-  resisted, judge-only.** W1 fired in `scan` on 3 of 12 reference-app runs; those 3
-  then read NOT TESTED on a validate ceiling, and 0 of 12 kept — a documented limit, in the
-  prereg's own exact wording ("both tiers' numbers"; only the mid tier ran this
-  cell). W2 against `server-memory` resisted on all 6 counted runs (an earlier,
-  superseded round never engaged the planner), decided by the judge reading the full
-  trace (`evidence_tier: judge-only`), published as the honest result either way,
-  which this cell's own bar accepts. `go-sdk` memory produced a real W4 finding on
-  every run, both providers, that stays unvalidated because this cell is
-  scan-only — `generate`/`validate` never run, so no calibration check is ever
-  consulted — never a kept verdict.
-- **11 KEPT findings in this round's counted runs, every one hand-adjudicated true
+- **A later cell asks a narrower question: effect-confirmed under a calibration
+  allowed to confirm, not required to certify.** Run through the harness's
+  later multi-exploit validation (every finding a scan found, not only the
+  alphabetically-first), this "confirm path" cell meets that narrower bar on 3 of 4
+  (target, provider) pairs — both providers on `mcp-redis`, and OpenAI (not
+  Anthropic) on `server-memory`, where OpenAI's agent names the planted record
+  exactly and the SAME `delete_entities` pattern the proof-depth round already
+  flagged as independently effect-confirmed (but never processed) is finally
+  validated and KEPT. `certified` is still reached on no run in either cell.
+- **Fix re-tests — one met its bar, one did not, but its own fix is confirmed
+  live.** `simple-streamablehttp` still reads `NOT TESTED` on every run (no
+  seedable surface). The Agents-SDK-on-Ollama target hits no HTTP 422 and
+  completes the full journey on 6 of 6 runs — the first campaign's fix holds — but
+  its own bar needed the `STABLE, NOT PROVEN` candidate label on 2+/3 runs per
+  provider; only 1 of 6 runs reached it, a property of this target's own locally
+  hosted agent model, not the harness.
+- **Precision — all three checks now pass cleanly.** `e2e-guarded-reference`'s 0
+  KEPT/6-exercised result meets the prereg's mechanical bar, but on every run the
+  attack fired 3/3 against the raw build and the guarded build leaked 0/3 — the run
+  reads REJECTED only because the effect probe's own verify call fails on every
+  run, not because of a demonstrated, correctly-wired resist. `e2e-readonly-time`
+  reads 0 KEPT, every run exercised, cleanly. `server-everything`, reused as a
+  read-only check, first read `precision-rollup` `INCONCLUSIVE` (4 of 6 runs
+  unexercised after a subprocess crash), published at the time as target
+  flakiness — wrong: a session-close race during a server's own timed
+  notifications, since fixed; the counted re-run reads `PASS` on both providers.
+- **Breadth, both tiers now measured — the flagship class kept on 0 of 24 runs; the
+  third-party indirect-injection class resisted, judge-only.** W1 fired in `scan`
+  on 3 of 12 mid-tier (`claude-sonnet-5`/`gpt-5.1`) reference-app runs; those 3 then
+  read NOT TESTED on a validate ceiling. The same cell, now also dispatched on the
+  small tier (`claude-haiku-4-5-20251001`/`gpt-4o-mini`), fired on 2 of 12 — one
+  run rejected at the build gate (a pytest-config bug, fixed, superseded) and one
+  rejected at the metamorphic gate (a genuine validator reject, counted). 0 of 24
+  kept across both tiers — a documented limit, in the prereg's own exact wording
+  ("both tiers' numbers"), which both tiers now give. W2 against `server-memory`
+  resisted on all 6 counted runs (an earlier, superseded round never engaged the
+  planner), decided by the judge reading the full trace (`evidence_tier:
+  judge-only`), published as the honest result either way, which this cell's own
+  bar accepts. `go-sdk` memory produced a real W4 finding on every run, both
+  providers, that stays unvalidated because this cell is scan-only —
+  `generate`/`validate` never run, so no calibration check is ever consulted —
+  never a kept verdict.
+- **23 KEPT findings in this round's counted runs, every one hand-adjudicated true
   positive** against its own trace (the tool actually called, the attacker's own
   argument text, the effect, and validate's own effect proof level) — see the
-  write-up's "The 11 kept findings in counted runs." 30 runs read KEPT across every
+  write-up's "The kept findings in counted runs." 42 runs read KEPT across every
   status (18 on superseded rounds a fix replaced, 1 on a run voided for a provider
   rate limit); none, at any status, is false positive.
-- **Spend:** $1.34 on Anthropic (385 calls, 465 including a known ceiling floor),
-  $0.19 on OpenAI (458 calls, 538 including the floor) — a measured lower bound (four
-  ceiling-stopped runs' validate legs made 80 more requests per provider side that
-  printed no cost line), both well inside the campaign's remaining budget even at the
-  corrected call counts.
+- **Spend:** $2.75 on Anthropic (660 calls, 740 including a known ceiling floor),
+  $0.35 on OpenAI (946 calls, 1,026 including the floor) — a measured lower bound
+  (four ceiling-stopped runs' validate legs made 80 more requests per provider side
+  that printed no cost line), both well inside the campaign's remaining budget
+  even at the corrected call counts.
 
 ## Headline numbers (fill as runs complete)
 
 - **End-to-end campaign, second round, live in CI (2026-10-05):** ⚠️ **W4 kept again
   on both servers (6/6 counted re-drives on `server-memory`, 5/6 plus 1 NOT TESTED
   on a validate ceiling on `mcp-redis`), but the stronger effect-confirmed/certified
-  bar is not met on either; the flagship W1 class fired on 3 of 12 runs and kept on
-  none; one of two fix re-tests passed.** Full numbers: [`results/0.12.0/e2e/README.md`](results/0.12.0/e2e/README.md).
+  bar is not met on either; a later, narrower bar (effect-confirmed under a
+  calibration allowed to confirm, not required to certify) is met on 3 of 4 target/provider pairs;
+  the flagship W1 class fired on 5 of 24 runs across both tiers and kept on none;
+  one of two fix re-tests passed, with the other's own fix confirmed live; all
+  three precision checks now pass.** Full numbers: [`results/0.12.0/e2e/README.md`](results/0.12.0/e2e/README.md).
 - **Third-party campaign, live in CI (2026-10-03):** ✅✅ **W4 KEPT on two servers, passing
   the pre-registered 2-of-3 bar on both hosted providers** — `@modelcontextprotocol/server-memory`
   (Claude Haiku 4.5 3/3, gpt-4o-mini 2/3) and `redis/mcp-redis` (3/3 on both), at the
