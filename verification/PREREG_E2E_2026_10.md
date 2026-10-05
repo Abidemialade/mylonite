@@ -630,3 +630,28 @@ published as not met, and Breadth 1's mid-tier numbers stand as measured.
   with both tiers' numbers", and only the mid tier was measured. The same
   cell is dispatched on the small tier (Haiku and `gpt-4o-mini`), N=3 each,
   at validate ceiling 100. Both tiers are published together.
+
+### 2026-10-05 -- product fixes, and the re-runs they allow
+
+Recorded before any run below is dispatched. **No bar changes.** Every
+earlier round stays published as measured.
+
+- **Precision 3 (`e2e-readonly-b`).** Its 4 inconclusive runs were
+  published as target flakiness. That cause was wrong. A tool call can
+  make a server start sending timed notifications, and Mylonite's session
+  shutdown raced one of them, so a finished attempt was filed as a
+  subprocess crash (`MYL-NT-002`) although the server never died. That is
+  a product defect, fixed in #371 for any server that sends notifications.
+  Under this file's re-run rule (a product defect is fixed and re-run within
+  this track), the cell is re-run in full: N=3 per provider, small tier.
+- **Breadth 1, small tier.** One run's W1 finding passed its differential,
+  flakiness and metamorphic gates and was rejected at the build gate by a
+  pytest internal error. A generated test inherited the host project's
+  pytest config. That is a product defect, fixed in #373. The small-tier
+  cell is re-run in full: N=3 per provider, validate ceiling 100.
+- **Harness, before the confirm-path cell runs.** The harness now gives
+  each validated exploit a fresh target store (#374), and validate reports
+  the removal-check outcome per run (#375). Before this, exploits shared
+  one store, so a record left by one exploit made the next one's removal
+  check refuse, by design, and read `unavailable`. The scorer reads each
+  finding's own validate effect leg (#372), never the scan's proof level.
