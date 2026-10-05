@@ -22,9 +22,15 @@ def _tool(name: str, description: str = "", schema: dict | None = None) -> ToolS
     return ToolSpec(name=name, description=description, json_schema=schema or {"type": "object"})
 
 
-def _descriptor(weaknesses: list[str], tools: list[ToolSpec], kind: str = "mcp"):
+def _descriptor(
+    weaknesses: list[str], tools: list[ToolSpec], kind: str = "mcp", *, can_plant: bool = True
+):
     return SimpleNamespace(
-        target_id="mcp:custom-app", weakness_classes=weaknesses, tools=tools, kind=kind
+        target_id="mcp:custom-app",
+        weakness_classes=weaknesses,
+        tools=tools,
+        kind=kind,
+        can_plant_untrusted_content=can_plant,
     )
 
 
@@ -135,8 +141,72 @@ def test_synthesize_w2_direct_content_channel() -> None:
     assert out[0].setup == "no_setup"
 
 
-def test_synthesis_prefers_plant_recall_when_available() -> None:
-    # A store+recall surface keeps the higher-fidelity plant channel (no W2 synth).
+def test_synthesis_defers_to_the_catalogue_seed_when_it_can_actually_run() -> None:
+    """The hand-authored catalogue seed (``indirect-injection-note-body-tool-
+    chain``) is hard-keyed to a literal ``read_note`` recall tool. When a
+    target's store+recall pair genuinely IS that shape, synthesis keeps
+    deferring to it (no W2 synth) -- the higher-fidelity plant channel."""
+    tools = [
+        _tool(
+            "write_note",
+            "Store a note.",
+            {"type": "object", "properties": {"body": {"type": "string"}}},
+        ),
+        _tool("read_note", "Read a note back.", {"type": "object", "properties": {}}),
+    ]
+    assert seed_synth.synthesize_seeds(_descriptor(["W2"], tools)) == []
+
+
+#: A knowledge-graph memory server's own verbs: a real plant+recall pair the
+#: role classifier picks up (``create_entities`` stores, ``search_nodes``
+#: recalls with no id required), but nothing like ``read_note`` -- the
+#: catalogue seed can never run against them.
+_KNOWLEDGE_GRAPH_TOOLS = [
+    _tool(
+        "create_entities",
+        "Create entities in the knowledge graph.",
+        {
+            "type": "object",
+            "properties": {
+                "entities": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "observations": {"type": "array", "items": {"type": "string"}},
+                        },
+                    },
+                }
+            },
+        },
+    ),
+    _tool(
+        "search_nodes",
+        "Search the knowledge graph.",
+        {"type": "object", "properties": {"query": {"type": "string"}}},
+    ),
+]
+
+#: A plain key-value store's own verbs: also a real plant+recall pair under
+#: neither ``read_note`` nor any processor-shaped name.
+_KEY_VALUE_TOOLS = [
+    _tool(
+        "put",
+        "Store a value.",
+        {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}},
+    ),
+    _tool("get", "Return the currently stored value.", {"type": "object", "properties": {}}),
+]
+
+
+def test_synthesis_falls_back_to_generic_store_recall_when_not_note_shaped() -> None:
+    """The gap the fallback used to miss: a store+recall pair under any OTHER
+    name than ``read_note`` can never satisfy the catalogue seed's predicate
+    (it checks for that literal tool), so a target that has CONFIRMED it can
+    plant (``can_plant_untrusted_content=True``, e.g. via a declared or
+    auto-wired ``seed_arm``) must get the generic store_recall synthesis
+    instead of being silently assumed covered."""
     tools = [
         _tool(
             "save_note",
@@ -145,7 +215,46 @@ def test_synthesis_prefers_plant_recall_when_available() -> None:
         ),
         _tool("list_notes", "List recent notes.", {"type": "object", "properties": {}}),
     ]
-    assert seed_synth.synthesize_seeds(_descriptor(["W2"], tools)) == []
+    out = seed_synth.synthesize_seeds(_descriptor(["W2"], tools, can_plant=True))
+    assert len(out) == 1
+    assert out[0].pattern_id == "synth-w2-store-recall-save_note-list_notes"
+    assert out[0].weakness == "W2"
+    assert out[0].setup == "no_setup"
+    assert out[0].drive == "verbatim"
+    assert "save_note" in out[0].seed_body
+    assert "list_notes" in out[0].seed_body
+
+
+def test_synthesis_falls_back_for_a_knowledge_graph_memory_shaped_pair() -> None:
+    """A target that declares a working plant path (``can_plant=True``) with
+    a knowledge-graph-shaped store+recall pair now gets a real W2 seed --
+    the motivating repro (a memory server's own ``create_entities``/
+    ``search_nodes``, confirmed via its own declared ``seed_arm``)."""
+    out = seed_synth.synthesize_seeds(_descriptor(["W2"], _KNOWLEDGE_GRAPH_TOOLS, can_plant=True))
+    assert len(out) == 1
+    assert out[0].pattern_id == "synth-w2-store-recall-create_entities-search_nodes"
+
+
+def test_synthesis_falls_back_for_a_key_value_store_shaped_pair() -> None:
+    """Same as the knowledge-graph case, for a key-value-shaped pair."""
+    out = seed_synth.synthesize_seeds(_descriptor(["W2"], _KEY_VALUE_TOOLS, can_plant=True))
+    assert len(out) == 1
+    assert out[0].pattern_id == "synth-w2-store-recall-put-get"
+
+
+def test_synthesis_withholds_the_generic_seed_without_confirmed_plant_capability() -> None:
+    """Finding 1 of the review: the role classifier's pick is a HINT, never
+    authoritative for a verdict (``tool_roles.py``'s own docstring). A target
+    whose tools merely LOOK like a plant+recall pair, but whose descriptor
+    has not confirmed ``can_plant_untrusted_content``, must not be handed a
+    seed that reaches a real judge-decided verdict directly -- it still
+    produces nothing here, exactly as before this fix, so the kitchen-sink
+    fallback's own NOT_TESTED placeholder covers it instead (see
+    ``test_seed_capability_gate.py``)."""
+    knowledge_graph = _descriptor(["W2"], _KNOWLEDGE_GRAPH_TOOLS, can_plant=False)
+    key_value = _descriptor(["W2"], _KEY_VALUE_TOOLS, can_plant=False)
+    assert seed_synth.synthesize_seeds(knowledge_graph) == []
+    assert seed_synth.synthesize_seeds(key_value) == []
 
 
 def test_seeds_for_descriptor_uses_synthesis_not_kitchen_sink() -> None:
