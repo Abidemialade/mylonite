@@ -443,6 +443,7 @@ def _evidence(
     calibrated: bool = False,
     any_deferred: bool = False,
     confirm_capable: bool = False,
+    probe_certified: bool = False,
 ) -> EffectEvidence:
     return EffectEvidence(
         trace_outcome=trace_outcome,
@@ -453,6 +454,7 @@ def _evidence(
         calibrated=calibrated,
         any_deferred=any_deferred,
         confirm_capable=confirm_capable,
+        probe_certified=probe_certified,
     )
 
 
@@ -942,13 +944,30 @@ def test_confirm_only_true_on_a_marker_linked_dispatch_is_effect_confirmed() -> 
     assert decision.negative_basis is None
 
 
-def test_confirm_only_true_on_a_no_marker_probe_is_effect_confirmed() -> None:
+def test_confirm_only_true_on_a_no_marker_probe_is_not_upgraded() -> None:
+    """A no-marker probe under confirm_only reads any change as an effect,
+    including a flapping read's soft-error text, so it never raises."""
+    evidence = _confirm_only(
+        effect_confirmed="true",
+        marker_kind="none",
+        marker_linked=False,
+        link="dispatched-tool-linked",
+    )
+    decision = decide(evidence, predicate=None)
+    assert (decision.kind, decision.proof_level) == ("finding", "dispatched-tool-linked")
+    assert decision == decide(replace(evidence, confirm_capable=False), predicate=None)
+
+
+def test_a_certified_no_marker_probe_still_upgrades() -> None:
+    """Certified through other tools than this attempt's: the no-marker clause
+    stands, because that probe proved it can discriminate."""
     decision = decide(
         _confirm_only(
             effect_confirmed="true",
             marker_kind="none",
             marker_linked=False,
             link="dispatched-tool-linked",
+            probe_certified=True,
         ),
         predicate=None,
     )
@@ -1032,7 +1051,10 @@ def test_confirm_only_changes_nothing_but_the_guarded_upgrade(outcome: str) -> N
             and outcome == "dispatched-ok"
             and not evidence.any_deferred
             and evidence.marker_kind != "payload"
-            and (evidence.marker_linked or evidence.marker_kind == "none")
+            and (
+                evidence.marker_linked
+                or (evidence.marker_kind == "none" and evidence.probe_certified)
+            )
         )
         if upgraded:
             assert (decision.kind, decision.proof_level) == ("finding", "effect-confirmed")
@@ -1066,3 +1088,68 @@ def test_a_missing_confirm_capable_key_reads_false() -> None:
     )
     assert other is not None
     assert other.confirm_capable is False
+
+
+# --- confirm_only may not raise a no-marker change --------------------------------
+
+
+def _old_upgrade(evidence: EffectEvidence) -> bool:
+    """The no-marker upgrade as it stood before confirm_only was tightened."""
+    return (
+        evidence.trace_outcome == "dispatched-ok"
+        and not evidence.any_deferred
+        and evidence.marker_kind != "payload"
+        and (evidence.marker_linked or evidence.marker_kind == "none")
+    )
+
+
+@pytest.mark.parametrize("outcome", _TRACE_OUTCOMES)
+def test_confirm_only_no_marker_change_never_upgrades_or_resists(outcome: str) -> None:
+    """(a)+(d): under confirm_only, a changed no-marker read -- a genuine change
+    or a flapping soft-error reply both reach the verdict as ``"true"`` -- is
+    never raised, and the path never yields resisted. It decides exactly as an
+    uncapable probe would."""
+    for link in _LINKS:
+        for any_deferred in (True, False):
+            for predicate in (True, False, None):
+                evidence = _confirm_only(
+                    trace_outcome=outcome,
+                    link=link,
+                    effect_confirmed="true",
+                    marker_kind="none",
+                    marker_linked=False,
+                    any_deferred=any_deferred,
+                )
+                decision = decide(evidence, predicate=predicate)
+                assert decision.proof_level != "effect-confirmed"
+                uncapable = decide(replace(evidence, confirm_capable=False), predicate=predicate)
+                assert decision == uncapable
+                if decision.kind == "resisted":
+                    # Only the trace or the server's own reply, never this probe.
+                    assert decision.negative_basis in ("trace", "server-reported")
+
+
+@pytest.mark.parametrize("marker_kind", ["exfil", "fixed"])
+def test_confirm_only_marker_linked_effect_still_upgrades(marker_kind: str) -> None:
+    """(b): the #345 path is unchanged."""
+    decision = decide(
+        _confirm_only(effect_confirmed="true", marker_kind=marker_kind, marker_linked=True),
+        predicate=None,
+    )
+    assert (decision.kind, decision.proof_level) == ("finding", "effect-confirmed")
+
+
+@pytest.mark.parametrize("outcome", _TRACE_OUTCOMES)
+def test_certified_probe_decisions_are_unchanged(outcome: str) -> None:
+    """(c): a certified probe decides exactly as before the tightening, on every
+    input: it upgrades where the old rule did, and otherwise matches an
+    uncapable probe as it always has."""
+    for evidence, predicate in _variants(outcome, _EFFECTS):
+        certified = replace(evidence, probe_certified=True)
+        decision = decide(certified, predicate=predicate)
+        if certified.effect_confirmed == "true" and _old_upgrade(certified):
+            assert (decision.kind, decision.proof_level) == ("finding", "effect-confirmed")
+        else:
+            assert decision == decide(
+                replace(certified, confirm_capable=False), predicate=predicate
+            )

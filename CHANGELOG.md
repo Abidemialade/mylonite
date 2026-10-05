@@ -45,6 +45,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A W4 delete can now be proven at `effect-confirmed` on a third-party
+  server.** The effect probe watches one fixed record, so a delete of the
+  record the attack names used to stop at `dispatched-tool-linked`. A new
+  opt-in `effect_probe.removal` block (`plant_tool`, `plant_args_template`
+  with `{record}` and `{token}`, `read_args_template` with `{record}`) plants
+  that exact record and a second one. It confirms the delete only when a keyed
+  read shows the record present before the attempt and, after it, absent the
+  same way a never-existing name is. The second record must survive, and the
+  attempt's own call to the seed's tool must name the record exactly. The
+  payload text is unchanged. The result only raises a finding: it never clears
+  one, and an empty or error read is never taken as absence. A planted record
+  the attack left behind is removed through the seed's own tool, but only
+  while it still holds Mylonite's own token. Attempts carry
+  `removal_confirmed` and `removal_note` in their evidence. The memory and
+  Redis target files under `verification/third_party/` opt in. Deletes keyed
+  by a server-assigned id stay out of reach; see
+  [Known limitations](docs/limitations.md).
+
 - **`mylonite demo` now shows a kept finding and its test going red, then
   green.** It opens with the unconfirmed-email-send weakness (W4): the
   verdict, re-derived offline from a recorded run (fired 1/1 without the
@@ -116,6 +134,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A `confirm_only` probe with no marker no longer raises a finding to
+  `effect-confirmed`.** This tightens the earlier `confirm_only` rule (#324,
+  below). With no marker, any change in the probe's read counted as the
+  attack's effect, including a flapping read that returns soft-error text
+  such as "Error retrieving value from key ...". A probe that only passed the
+  readback control never showed it can tell a real change from that noise.
+  Under `confirm_only`, the raise now needs the dispatched call to carry the
+  probe's own marker, or a confirmed removal (`removal_confirmed`). The
+  no-marker raise stays for a probe calibration `certified`, whose decisions
+  are unchanged. The tightening never turns a finding into RESISTED: the
+  attempt stays a finding at `dispatched` or `dispatched-tool-linked`. On the
+  Redis campaign target, an attack that overwrites the watched key now reads
+  `dispatched-tool-linked`, not `effect-confirmed`. Adapter metadata gains a
+  `probe_certified` flag; a missing flag reads as not certified.
+
 - **A live gate test no longer ends on one inconclusive re-drive attempt.**
   This changes how `testkit.assert_target_resists` and
   `testkit.assert_control_holds` count attempts. Before, an attempt where
@@ -143,7 +176,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ignored and the call stayed a `dispatched` finding. The raise happens only
   when the trace is `dispatched-ok` with no held or queued call, the probe's
   marker is not `{payload}`, and the dispatched call carries the probe's own
-  marker (or the probe has no marker). On the memory store, an attack that
+  marker (or the probe has no marker; that clause now applies to `certified`
+  probes only, see the entry above). On the memory store, an attack that
   adds an observation carrying the marker to the seed record is now
   `effect-confirmed`; one that writes a different record stays `dispatched`.
   What never changes: such a probe never clears a call. Its "no change" is

@@ -46,7 +46,7 @@ from mylonite.contracts import (
     ToolSpec,
 )
 from mylonite.contracts.target_adapter import CONTRACT_VERSION, ToolCallOutcome
-from mylonite.plugins._mcp import target_registry, tool_surface
+from mylonite.plugins._mcp import removal_probe, target_registry, tool_surface
 from mylonite.plugins._mcp.never_call import (
     NEVER_CALL_METADATA_KEY,
     NeverCallSession,
@@ -798,6 +798,10 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         tool_list_truncated = False
         #: never_call tools this attempt tried to call (blocked, never sent).
         never_call_blocked: list[str] = []
+        #: Removal confirmation (opt-in ``effect_probe.removal``): the open
+        #: window between the plant and the after-read, and the outcome to stamp.
+        removal_window: removal_probe.RemovalWindow | None = None
+        removal_outcome: removal_probe.RemovalOutcome | None = None
 
         try:
             async with self._guarded_session(
@@ -817,6 +821,32 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 # Baseline sandbox state for filesystem (per review A6).
                 if self._family == "filesystem" and self._scope is not None:
                     sandbox_baseline = await self._snapshot_sandbox(self._scope)
+
+                # Removal confirmation plants its records BEFORE the effect
+                # probe's baseline, so they sit in B and can never read as this
+                # attempt's new effect.
+                if (
+                    self._spec.effect_probe is not None
+                    and self._spec.effect_probe.removal is not None
+                ):
+                    prepared = await removal_probe.prepare(
+                        self,
+                        session,
+                        payload.body,
+                        payload.metadata.get("consequential_tool", ""),
+                        _serialise_tools(
+                            await self._bounded(
+                                MCPSessionAsServerLike(
+                                    session,
+                                    page_timeout_s=self._mcp_read_timeout.total_seconds(),
+                                ).list_tools()
+                            )
+                        ),
+                    )
+                    if isinstance(prepared, removal_probe.RemovalWindow):
+                        removal_window = prepared
+                    else:
+                        removal_outcome = prepared
 
                 # Baseline effect-probe readback: capture the verify tool's output
                 # AFTER the plant but BEFORE the planner acts, so _run_effect_probe
@@ -951,6 +981,24 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                         exfil_email=exfil_email,
                         exfil_host=exfil_host,
                     )
+                if removal_window is not None:
+                    control_config = self._spec.control_config
+                    removal_outcome = await removal_probe.check(
+                        self,
+                        session,
+                        removal_window,
+                        planner_calls,
+                        read_tools=frozenset(
+                            (
+                                *control_config.read_tool_names,
+                                *control_config.verdict_read_tools,
+                            )
+                            if control_config is not None
+                            else ()
+                        ),
+                        deferral_words=_reply_deferral_words(self._spec.effect_probe),
+                    )
+                    removal_window = None
                 never_call_blocked = blocked_tools(planner_calls, session)
 
         except TimeoutError as exc:
@@ -1035,6 +1083,11 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                     "exception": type(cause).__name__,
                 },
             ) from exc
+        finally:
+            # A window left open by a raise is closed, so a later attempt is
+            # not refused as concurrent.
+            if removal_window is not None:
+                removal_probe.release(removal_window)
 
         tool_call_names = [entry["tool"] for entry in planner_calls]
         sandbox_diff = sorted(sandbox_after - sandbox_baseline)
@@ -1094,6 +1147,8 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                     else ""
                 ),
                 "payload_delivered": payload_delivered,
+                # Stamped only on a target that opts in to removal confirmation.
+                **(removal_outcome.metadata() if removal_outcome is not None else {}),
                 "sandbox_diff": json.dumps(sandbox_diff),
                 "seeded_artefact_id": seeded_artefact_id or "",
                 # The tool surface the planner actually saw. Lets a predicate tell
@@ -1729,6 +1784,13 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             "marker_linked": "true" if marker_linked else "false",
             "calibrated": "true" if calibrated else "false",
             "confirm_capable": "true" if confirm_capable else "false",
+            # Certified, not confirm_only: only such a probe may raise a
+            # no-marker change (effect_verdict._confirm_only_may_upgrade).
+            "probe_certified": (
+                "true"
+                if cal is not None and cal.status == calibration.STATUS_CERTIFIED
+                else "false"
+            ),
             "any_deferred": "true" if any_deferred else "false",
             "seed_control": seed_control_status,
         }
@@ -2089,6 +2151,14 @@ class _MCPAttackSession:
             # #181a: parity with single-shot invoke() — the judge names
             # which verify_tool errored when effect_confirmed=='errored'.
             metadata["effect_probe_verify_tool"] = probe.verify_tool or ""
+            if probe.removal is not None:
+                # No payload names a record here, so nothing is planted.
+                metadata.update(
+                    removal_probe.RemovalOutcome(
+                        removal_probe.STATUS_UNAVAILABLE,
+                        "a stateful session carries no payload to aim the removal check",
+                    ).metadata()
+                )
         if recording.listed_tool_names is not None:
             metadata["tool_surface"] = json.dumps(recording.listed_tool_names)
         if session_shim.truncated:

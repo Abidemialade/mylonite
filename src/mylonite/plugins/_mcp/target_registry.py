@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from mylonite._paths import PathEscapesBase, resolve_contained
 
@@ -108,6 +108,61 @@ class RequestSpec(BaseModel):
     timeout_s: float = 30.0
 
 
+#: The placeholder a removal template names the planted record by.
+REMOVAL_RECORD_PLACEHOLDER: Final = "{record}"
+#: The placeholder a removal plant template carries the fresh token in.
+REMOVAL_TOKEN_PLACEHOLDER: Final = "{token}"  # noqa: S105 - a template placeholder
+
+
+def _template_mentions(value: Any, placeholder: str) -> bool:
+    if isinstance(value, str):
+        return placeholder in value
+    if isinstance(value, dict):
+        return any(_template_mentions(v, placeholder) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_template_mentions(v, placeholder) for v in value)
+    return False
+
+
+class RemovalProbeSpec(BaseModel):
+    """Opt-in removal confirmation for name-keyed destructive tools (W4).
+
+    Mylonite plants the record the W4 payload already names, through
+    ``plant_tool`` (never a destructive tool), reads it back through the
+    effect probe's ``verify_tool`` with ``read_args_template``, and confirms a
+    deletion only when that keyed read shows the record present before the
+    attempt and absent after, the attempt's own call to the seed's tool named
+    it exactly, and a second planted record survived. It can only raise a
+    finding to "effect-confirmed"; it never clears one.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    plant_tool: str
+    plant_args_template: dict[str, Any]
+    read_args_template: dict[str, Any]
+
+    @field_validator("plant_args_template")
+    @classmethod
+    def _plant_names_record_and_token(cls, v: dict[str, Any]) -> dict[str, Any]:
+        for placeholder in (REMOVAL_RECORD_PLACEHOLDER, REMOVAL_TOKEN_PLACEHOLDER):
+            if not _template_mentions(v, placeholder):
+                raise ValueError(f"removal.plant_args_template must contain {placeholder}")
+        return v
+
+    @field_validator("read_args_template")
+    @classmethod
+    def _read_is_keyed(cls, v: dict[str, Any]) -> dict[str, Any]:
+        # A keyed read cannot slide the record out of a bounded window, and a
+        # read for a never-existing name goes through the same slot.
+        if not _template_mentions(v, REMOVAL_RECORD_PLACEHOLDER):
+            raise ValueError(
+                "removal.read_args_template must contain {record}: the read has to be keyed "
+                "by the planted record's name"
+            )
+        return v
+
+
 class EffectProbeSpec(BaseModel):
     """How a target confirms, end-to-end, that a damaging effect materialized.
 
@@ -134,6 +189,14 @@ class EffectProbeSpec(BaseModel):
     expect_marker: str | None = None  # may reference {payload}/{scope}
     deferred_markers: tuple[str, ...] = ()
     deferred_reply_words: tuple[str, ...] = ()
+    #: Opt-in removal confirmation for name-keyed deletes; see ``RemovalProbeSpec``.
+    removal: RemovalProbeSpec | None = None
+
+    @model_validator(mode="after")
+    def _removal_needs_verify_tool(self) -> EffectProbeSpec:
+        if self.removal is not None and not self.verify_tool:
+            raise ValueError("effect_probe.removal needs effect_probe.verify_tool to read through")
+        return self
 
 
 class CalibrationSettings(BaseModel):

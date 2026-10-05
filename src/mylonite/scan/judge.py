@@ -662,6 +662,8 @@ _TRACE_METADATA_KEYS: Final = (
     "calibrated",
     "seed_control",
     "any_deferred",
+    "removal_confirmed",
+    "removal_note",
 )
 
 
