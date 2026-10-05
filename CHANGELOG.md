@@ -235,6 +235,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   like every other full-journey target. See `PREREG_E2E_2026_10.md`'s
   "Amendments" section for which runs are void and why.
 
+- **Two more third-party-campaign harness bugs, found in the next dispatch
+  round under `PREREG_E2E_2026_10.md`, fixed before any re-run.** The
+  in-repo reference app's breadth cell (`e2e-reference-w1`) installed the
+  reference package with the bare `python` on `PATH` instead of the
+  campaign's own venv `$MYLONITE` runs from, so `scan` refused with "the
+  reference app target isn't installed" on every run — the install step now
+  uses that venv's own `python` explicitly. The Go memory cell
+  (`tpv-go-memory`) failed pre-flight with `[MYL-PRE-003]
+  AdapterDescribeFailed`: a separate, correct product fix
+  (mylonite#187, "resolve a target file's relative paths against its own
+  directory") started anchoring a target file's relative `command:` to the
+  loaded YAML's own directory, and this cell's Go binary was built one
+  directory up from there — the workflow now builds it beside the target
+  file instead. `scripts/compute_run_cost.py` also failed outright on both
+  cells' `run.log` (which exists, with no `llm:` line, since neither ever
+  reached the planner); it now recognises a `MYL-PRE-*` code or the
+  reference app's "isn't installed" refusal and writes a zero-cost
+  `cost.json` with a named reason, while still raising on a `run.log` with
+  no spend line and no recognised refusal. See `PREREG_E2E_2026_10.md`'s
+  "Amendments" section for which runs are void and why.
+
 - **A first `npx`/`uvx` server launch no longer fails `scan --scaffold`,
   `check`, or a scan's first connect.** The journey's own step 3 (the
   official MCP memory server over `npx`) failed on a clean CI runner: the

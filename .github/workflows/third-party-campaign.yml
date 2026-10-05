@@ -396,11 +396,31 @@ jobs:
       - name: "Target 5: build the Go SDK's own memory example"
         if: steps.guard.outputs.run == 'true' && env.TPV_TARGET == 'tpv-go-memory'
         shell: bash
+        # Built into verification/third_party/ -- the SAME directory as
+        # go_memory.yaml, not $GITHUB_WORKSPACE -- because that target file
+        # declares `command: ./tpv-go-memory`, a relative path, and
+        # mylonite#187/ab26542c ("resolve a target file's relative paths
+        # against its own directory") now anchors every target file's
+        # relative command/args against the loaded YAML's own directory,
+        # not the caller's cwd. Building to $GITHUB_WORKSPACE (this
+        # workflow's previous behaviour, before that product fix landed)
+        # left `./tpv-go-memory` pointing at
+        # verification/third_party/tpv-go-memory, which this build step
+        # never created -- "Run the real journey" then got
+        # [MYL-PRE-003] AdapterDescribeFailed trying to spawn a binary that
+        # wasn't there, even though the unrelated Scaffold sanity check
+        # below passed (it launches the binary through an explicit
+        # `--command` flag, which keeps resolving against the caller's own
+        # cwd -- see that product fix's own commit message). Building here
+        # instead keeps both launch paths -- the scaffold check's
+        # `--command` flag below and the real run's `--target-file`
+        # relative `command:` -- pointed at the one binary, with no
+        # `$GITHUB_WORKSPACE`-relative special case left over in either.
         run: |
           go version
           git clone --quiet https://github.com/modelcontextprotocol/go-sdk.git "$RUNNER_TEMP/go-sdk"
           git -C "$RUNNER_TEMP/go-sdk" checkout --quiet 3f3b699b2b67e1ed033a63d6651671dab53c2d32
-          (cd "$RUNNER_TEMP/go-sdk/examples/server/memory" && go build -o "$GITHUB_WORKSPACE/tpv-go-memory" .)
+          (cd "$RUNNER_TEMP/go-sdk/examples/server/memory" && go build -o "$GITHUB_WORKSPACE/verification/third_party/tpv-go-memory" .)
           # No -memory flag above: the knowledge graph stays in-process only.
 
       - name: "Target 6: start the disclosed Agents-SDK/Ollama shim (pinned deps)"
@@ -471,14 +491,23 @@ jobs:
       - name: "e2e-reference-w1: install the bundled reference app (in-process twin; see the prereg's Breadth cell 1)"
         if: steps.guard.outputs.run == 'true' && env.TPV_TARGET == 'e2e-reference-w1'
         shell: bash
-        # Same install the canaries already do (canaries.yml): the in-process
+        # Unlike e2e-guarded-reference's real stdio server below, this
+        # target never spawns a subprocess for either twin: the in-process
         # `reference:vulnerable`/`reference:guarded` adapter
-        # (reference_target_adapter.py) lazily imports `mcp_kitchen_sink`, and
-        # the differential leg `validate` drives for this target needs the
-        # guarded twin from the SAME package -- no server launch here, unlike
-        # e2e-guarded-reference's real stdio install above (this target never
-        # spawns a subprocess for either twin).
-        run: python -m pip install "./reference_targets/mcp_kitchen_sink[mcp]"
+        # (reference_target_adapter.py) lazily imports `mcp_kitchen_sink`
+        # INSIDE the `$MYLONITE` process itself, so it must land in the
+        # SAME interpreter `$MYLONITE` runs under -- the campaign venv built
+        # above, not the bare `python` on PATH (the runner's setup-python
+        # install), which is a different interpreter with its own
+        # site-packages. canaries.yml's plain `pip install` is fine there
+        # because that workflow never builds a separate venv: mylonite
+        # itself and the reference app share the one environment `python`
+        # resolves to. A prior round of this workflow used that same bare
+        # `python -m pip install` here, which installed the package where
+        # `$MYLONITE` could never see it, and `scan` refused with "the
+        # reference app target isn't installed".
+        run: |
+          "$RUNNER_TEMP/campaign-venv/bin/python" -m pip install "./reference_targets/mcp_kitchen_sink[mcp]"
 
       # --- scaffold sanity check (no provider key; see the prereg) ----------
 
@@ -503,7 +532,7 @@ jobs:
                 --scaffold scaffold-check.yaml --scope "$TPV_TARGET" --force
               ;;
             tpv-go-memory)
-              "$MYLONITE" scan --command "$GITHUB_WORKSPACE/tpv-go-memory" \
+              "$MYLONITE" scan --command "$GITHUB_WORKSPACE/verification/third_party/tpv-go-memory" \
                 --scaffold scaffold-check.yaml --scope "$TPV_TARGET" --force
               ;;
             tpv-agents-sdk-ollama)

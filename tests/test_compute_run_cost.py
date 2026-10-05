@@ -154,6 +154,114 @@ def test_cli_fails_loudly_when_no_spend_line_is_present(tmp_path: Path) -> None:
     assert not out_file.exists()
 
 
+def test_preflight_refusal_signature_matches_a_myl_pre_code() -> None:
+    log = (
+        "error: [MYL-PRE-003] could not describe the server (AdapterDescribeFailed) "
+        "to check which declared weakness classes can run.\n"
+    )
+    assert cost.preflight_refusal_signature(log) == "MYL-PRE-003"
+
+
+def test_preflight_refusal_signature_matches_the_reference_app_refusal() -> None:
+    log = (
+        "the reference app target isn't installed (it's opt-in) — run "
+        "`pip install mcp-kitchen-sink`.\n"
+    )
+    assert cost.preflight_refusal_signature(log) == "isn't installed"
+
+
+def test_preflight_refusal_signature_is_none_for_an_unrecognised_crash() -> None:
+    assert cost.preflight_refusal_signature("Traceback (most recent call last):\nboom\n") is None
+
+
+def test_build_result_for_preflight_refusal_is_zero_cost_not_an_error() -> None:
+    result = cost.build_result_for_preflight_refusal(
+        model="anthropic/claude-sonnet-5", ref="abc123", signature="MYL-PRE-003"
+    )
+    assert result["calls"] == 0
+    assert result["cost_usd"] == 0.0
+    assert "MYL-PRE-003" in result["reason"]
+
+
+def test_cli_writes_a_zero_cost_json_for_a_preflight_refusal_with_no_spend_line(
+    tmp_path: Path,
+) -> None:
+    """Mirrors the real e2e-reference-w1 run: `scan` refuses before any LLM
+    call (no reference app installed), so run.log EXISTS but has no `llm:`
+    line at all -- this must read as a $0 run with a named reason, not fail
+    the job."""
+    log_file = tmp_path / "run.log"
+    log_file.write_text(
+        "Run plan (nothing has been sent yet):\n"
+        "  Model: anthropic/claude-sonnet-5 (planner, customiser and judge)\n"
+        "the reference app target isn't installed (it's opt-in) — run "
+        "`pip install mcp-kitchen-sink`, or from a checkout "
+        "`pip install -e ./reference_targets/mcp_kitchen_sink`.\n",
+        encoding="utf-8",
+    )
+    out_file = tmp_path / "cost.json"
+
+    rc = cost.main(
+        [
+            str(log_file),
+            "--model",
+            "anthropic/claude-sonnet-5",
+            "--in-rate",
+            "2.0",
+            "--out-rate",
+            "10.0",
+            "--ref",
+            "e5339d49",
+            "--out",
+            str(out_file),
+        ]
+    )
+
+    assert rc == 0
+    written = json.loads(out_file.read_text(encoding="utf-8"))
+    assert written["calls"] == 0
+    assert written["cost_usd"] == 0.0
+    assert "isn't installed" in written["reason"]
+
+
+def test_cli_still_fails_loudly_on_a_mid_run_crash_with_no_preflight_signature(
+    tmp_path: Path,
+) -> None:
+    """A log that exists, has no `llm:` line, and shows no recognised
+    pre-flight refusal signature is a genuine crash (or a signature this
+    script doesn't know about yet) -- it must still raise, never report
+    $0. Distinct from the pre-flight-refusal test above only by which
+    signature (if any) the log text carries."""
+    log_file = tmp_path / "run.log"
+    log_file.write_text(
+        "Run plan (nothing has been sent yet):\n"
+        "Traceback (most recent call last):\n"
+        '  File "mylonite/scan/engine.py", line 1, in <module>\n'
+        "RuntimeError: boom\n",
+        encoding="utf-8",
+    )
+    out_file = tmp_path / "cost.json"
+
+    rc = cost.main(
+        [
+            str(log_file),
+            "--model",
+            "x",
+            "--in-rate",
+            "1.0",
+            "--out-rate",
+            "1.0",
+            "--ref",
+            "abc",
+            "--out",
+            str(out_file),
+        ]
+    )
+
+    assert rc != 0
+    assert not out_file.exists()
+
+
 def test_build_result_for_missing_log_is_zero_cost_not_an_error() -> None:
     result = cost.build_result_for_missing_log(
         model="anthropic/claude-haiku-4-5-20251001", ref="abc123"

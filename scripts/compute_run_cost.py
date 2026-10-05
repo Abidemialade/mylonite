@@ -31,6 +31,20 @@ a server launch) failed before any ``mylonite`` command was ever invoked,
 so genuinely no LLM money was spent -- this writes a ``cost.json`` with
 zero calls/cost and a ``reason`` field, and does not raise.
 
+One more shape is genuinely zero-cost: a log that EXISTS, with no ``llm:``
+line, but whose text shows Mylonite itself refused or aborted BEFORE
+sending any request -- a pre-flight ``MYL-PRE-*`` reason code (an
+uncoverable weakness class, a describe timeout or failure, ...), or the
+reference app's "isn't installed" refusal (``mylonite._cli_io``'s
+``_exit_if_missing_kitchen_sink``). Both print and exit before the planner
+ever runs, so no spend line is expected -- unlike a genuine crash or an
+abort mid-run, which also has no spend line but DID reach the LLM and must
+still raise. This writes the same zero-cost shape as the missing-log case,
+with its own ``reason`` naming the matched signature, and does not raise.
+Anything else with no spend line -- a traceback, a budget abort after
+calls were already made but before the line printed, or simply no
+recognised signature -- still raises ``NoSpendLineFoundError``.
+
 Usage
 -----
 
@@ -65,6 +79,17 @@ _TOKENS_RE = re.compile(r"([\d,]+)\s+in\s*/\s*([\d,]+)\s+out tokens")
 #: version of this script did) hid a partial-usage run behind a complete-
 #: looking token total.
 _PARTIAL_RE = re.compile(r"reported by (\d+) of (\d+) calls")
+
+#: Signatures of a genuine pre-flight refusal: Mylonite's own ``MYL-PRE-*``
+#: reason codes (``mylonite.reason_codes``; an uncoverable weakness class, a
+#: describe timeout/failure, an empty weakness filter, ...), and the
+#: reference app's unconditional "isn't installed" refusal
+#: (``mylonite._cli_io._exit_if_missing_kitchen_sink``), which carries no
+#: reason code of its own. Both exit before the planner ever sends a
+#: request, so finding either ALONGSIDE no ``llm:`` line means the run
+#: never had a chance to spend anything -- not a crash mid-run, which also
+#: has no spend line but reached the LLM first.
+_PREFLIGHT_REFUSAL_RE = re.compile(r"MYL-PRE-\d+|isn't installed")
 
 
 class NoSpendLineFoundError(RuntimeError):
@@ -164,6 +189,41 @@ def build_result(
     return result
 
 
+def preflight_refusal_signature(log_text: str) -> str | None:
+    """Return the matched text when ``log_text`` shows a pre-flight refusal
+    (see ``_PREFLIGHT_REFUSAL_RE``), else ``None``. Callers check this only
+    after ``parse_spend`` has already found no ``llm:`` line -- a log that
+    DOES have a spend line is scored normally even if it also happens to
+    mention one of these strings elsewhere (e.g. a later stage's own
+    retry/error narration)."""
+    match = _PREFLIGHT_REFUSAL_RE.search(log_text)
+    return match.group(0) if match else None
+
+
+def build_result_for_preflight_refusal(
+    *, model: str, ref: str, signature: str
+) -> dict[str, object]:
+    """``cost.json`` for a log that exists, has no ``llm:`` line, but shows
+    Mylonite itself refusing before any request -- see the module
+    docstring's "one more shape" paragraph. Zero calls, zero cost, never
+    raises."""
+    return {
+        "model": model,
+        "ref": ref,
+        "calls": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "in_rate_per_million_usd": 0.0,
+        "out_rate_per_million_usd": 0.0,
+        "cost_usd": 0.0,
+        "reason": (
+            f"no 'llm: N calls' line found, but the log shows a pre-flight refusal "
+            f"({signature!r}) -- Mylonite exited before sending any request, so this "
+            "run is legitimately zero-cost, not a crash."
+        ),
+    }
+
+
 def build_result_for_missing_log(*, model: str, ref: str) -> dict[str, object]:
     """``cost.json`` for the "no run.log at all" case -- see the module
     docstring. Zero calls, zero cost, never raises: an earlier workflow
@@ -223,6 +283,18 @@ def main(argv: list[str] | None = None) -> int:
             ref=args.ref,
         )
     except NoSpendLineFoundError as exc:
+        signature = preflight_refusal_signature(text)
+        if signature is not None:
+            print(
+                f"::notice::no 'llm: N calls' line found, but the log shows a "
+                f"pre-flight refusal ({signature!r}) -- writing a zero-cost cost.json."
+            )
+            result = build_result_for_preflight_refusal(
+                model=args.model, ref=args.ref, signature=signature
+            )
+            args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+            print(json.dumps(result, indent=2))
+            return 0
         print(f"::error::{exc}", file=sys.stderr)
         return 1
     args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
