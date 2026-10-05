@@ -705,6 +705,20 @@ jobs:
             # single-finding mode (one explicit exploit path, writing flat
             # into its own --out), so `validate <subdir>` always finds
             # exactly one exploit_*.json there.
+            #
+            # Each exploit's own `generate`/`validate` output is ALSO
+            # captured into its own `generated/<stem>/generate.log` and
+            # `.../validate.log` (on top of the combined `run.log`, kept for
+            # a human reading the whole step's output in order) -- never
+            # only the shared top-level `generate.log`/`validate.log` a
+            # prior round of this workflow used. `scripts/score_third_party.py`
+            # scores each subdirectory from THESE files alone, so one
+            # exploit's crash can never read as, or corrupt, a sibling's own
+            # recorded result -- the exact contamination a harness review
+            # found (a shared log made a traceback in exploit A's own
+            # generate/validate call force exploit B's score to
+            # PRODUCT_DEFECT too, even though B's own validation_report.json
+            # said KEPT).
             # `compgen -G` (not `ls`) to list matches: under this step's
             # `-eo pipefail`, `ls` on a genuinely clean scan (no
             # exploit_*.json at all -- the expected resist outcome) exits
@@ -719,38 +733,41 @@ jobs:
                 stem="$(basename "$exploit_path" .json)"
                 stem="${stem#exploit_}"
                 finding_out="generated/$stem"
+                mkdir -p "$finding_out"
                 echo "--- exploit $stem ---" >> run.log
                 set +e
                 if [ -z "$TARGET_FILE" ]; then
                   "$MYLONITE" generate "$exploit_path" --out "$finding_out" \
-                    --prove-control 2>&1 | tee -a run.log generate.log
+                    --prove-control 2>&1 | tee -a run.log generate.log "$finding_out/generate.log"
                 else
                   "$MYLONITE" generate "$exploit_path" --out "$finding_out" \
-                    --target-file "verification/third_party/$TARGET_FILE" --prove-control 2>&1 | tee -a run.log generate.log
+                    --target-file "verification/third_party/$TARGET_FILE" --prove-control 2>&1 | tee -a run.log generate.log "$finding_out/generate.log"
                 fi
                 generate_rc=${PIPESTATUS[0]}
                 set -e
                 echo "generate ($stem) exited $generate_rc" >> run.log
+                echo "generate exited $generate_rc" >> "$finding_out/generate.log"
                 if [ "$generate_rc" -eq 0 ]; then
                   set +e
                   if [ -z "$TARGET_FILE" ]; then
                     MYLONITE_MAX_LLM_REQUESTS="$TPV_VALIDATE_CEILING" "$MYLONITE" validate "$finding_out" \
-                      --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log validate.log
+                      --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log validate.log "$finding_out/validate.log"
                   else
                     MYLONITE_MAX_LLM_REQUESTS="$TPV_VALIDATE_CEILING" "$MYLONITE" validate "$finding_out" \
                       --target-file "verification/third_party/$TARGET_FILE" --authorize "$TPV_TARGET" \
-                      --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log validate.log
+                      --model "$TPV_MODEL" --iterations 3 2>&1 | tee -a run.log validate.log "$finding_out/validate.log"
                   fi
                   validate_rc=${PIPESTATUS[0]}
                   set -e
                   echo "validate ($stem) exited $validate_rc" >> run.log
+                  echo "validate exited $validate_rc" >> "$finding_out/validate.log"
                   # validate ALWAYS writes validation_report.json next to the
                   # test (kept or not) -- unlike `gate`'s orchestrator, which
                   # only persists one for a KEPT finding. Score `generated`
                   # (the parent of every per-exploit subdirectory), not the
                   # scan directory, so a not-kept result is still reachable.
                   any_validated=true
-                elif grep -q "found no exploits" generate.log; then
+                elif grep -q "found no exploits" "$finding_out/generate.log"; then
                   echo "::notice::generate ($stem) found no exploits to emit a test from -- a clean no-finding scan; this exploit contributes nothing to the score."
                 else
                   echo "::warning::generate ($stem) exited $generate_rc without the expected 'found no exploits' message -- a real failure, not a clean no-finding result; this exploit's empty subdirectory may read as a product defect given the traceback rule."
