@@ -140,21 +140,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   config (fixed). Both cells are re-run in full: Precision 3 now reads
   `PASS` on both providers; Breadth 1's small tier still reads 0 KEPT,
   with its one fired run rejected at the metamorphic gate instead — a
-  genuine reject, not a harness defect. The new "proof depth (confirm
-  path)" cell measures a narrower question than the original proof-depth
-  bar: whether a KEPT finding's own `validate` effect leg reads
-  `effect-confirmed` under a calibration allowed to confirm, not required
-  to certify (`certified` *or* `confirm_only`), read per (target, provider) rather
-  than flattened to one verdict. It meets that bar on 3 of 4 pairs — both
-  providers on `tpv-mcp-redis`, and OpenAI (not Anthropic) on
-  `tpv-server-memory`, where OpenAI's agent names the planted record
-  exactly and the harness's later multi-exploit validation finally
-  processes the same `delete_entities` finding the original proof-depth
-  round had already flagged as independently effect-confirmed but never
-  validated. `certified` is still reached on no run, in either cell. 23
-  KEPT findings now land in this campaign's counted runs (up from 11; 42
-  across every status, including superseded and one void run), every one
-  hand-adjudicated true positive. Full numbers:
+  genuine reject, not a harness defect. Breadth 1's own bar is a
+  disjunction ("KEPT on 2+/3 ... or the limit is documented with both
+  tiers' numbers"); now that both tiers are measured, it is met through
+  the second limb, never shortened to a bare "met" in the write-up. The
+  new "proof depth (confirm path)" cell measures a narrower question than
+  the original proof-depth bar: whether a KEPT finding's own `validate`
+  effect leg reads `effect-confirmed` under a calibration allowed to
+  confirm, not required to certify (`certified` *or* `confirm_only`), read
+  per (target, provider) rather than flattened to one verdict. It meets
+  that bar on 3 of 4 pairs — both providers on `tpv-mcp-redis`, and
+  OpenAI (not Anthropic) on `tpv-server-memory`, where OpenAI's agent
+  names the planted record exactly and the harness's later multi-exploit
+  validation finally processes the same `delete_entities` finding the
+  original proof-depth round had already flagged as independently
+  effect-confirmed but never validated. `certified` is still reached on
+  no run, in either cell. 23 runs now read KEPT in this campaign's
+  counted runs (up from 11), carrying 35 kept findings — a run and the
+  findings it carries are different counts once a run can keep several
+  findings at once; 42 runs read KEPT across every status (54 findings),
+  including superseded and one void run, every finding hand-adjudicated
+  true positive from its own trace, never a template shared across runs
+  or providers. A corrected ceiling count adds a fifth ceiling-stopped
+  leg this campaign's spend floor had missed (OpenAI +120, not +80), and
+  one run (`tpv-server-memory-anthropic-1`) is now scored from its own
+  artifact after a provenance check found it was scored from a cancelled,
+  uncounted dispatch's files instead. Full numbers:
   `verification/results/0.12.0/e2e/README.md`, with `docs/verification.md`
   and `verification/CAPABILITY_MATRIX.md`.
 

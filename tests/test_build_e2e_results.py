@@ -151,14 +151,16 @@ class TestKeptThresholdAnyProvider:
             "kept_threshold_any_provider", {"threshold": 2}, by_provider, cell_runs
         )
         assert met_bar is True
-        assert provider_results["openai"]["met_bar"] is False
+        assert provider_results["openai"]["kept_count"] == 0
 
     def test_small_tier_kept_count_never_substitutes_for_the_mid_tier_bar(self) -> None:
         """2026-10-05 amendment: Breadth 1 is now dispatched on the small
         tier too, reported alongside the mid tier -- but the bar's own text
         ("on at least one mid-tier model") only ever reads the mid tier
         toward `met_bar`. A small-tier KEPT run is recorded in `by_tier`,
-        never counted toward the bar itself."""
+        never counted toward the bar itself (no per-tier `met_bar` is
+        computed here at all -- the second number review's I5: a bare
+        small-tier KEPT threshold isn't what the bar asks for)."""
         by_provider = {
             "anthropic": [
                 _run("KEPT", tier="small"),
@@ -178,8 +180,8 @@ class TestKeptThresholdAnyProvider:
         assert met_bar is False
         anthropic = provider_results["anthropic"]
         assert anthropic["by_tier"]["small"]["kept_count"] == 2
-        assert anthropic["by_tier"]["small"]["met_bar"] is True
-        assert anthropic["met_bar"] is False
+        assert "met_bar" not in anthropic["by_tier"]["small"]
+        assert "met_bar" not in anthropic
 
     def test_missing_tier_defaults_to_mid_for_legacy_run_dicts(self) -> None:
         by_provider = {
@@ -192,6 +194,37 @@ class TestKeptThresholdAnyProvider:
         )
         assert met_bar is True
         assert provider_results["anthropic"]["by_tier"]["mid"]["kept_count"] == 2
+
+
+class TestResolveDisjunctiveBar:
+    """A bar written as a disjunction (today, only breadth_1's) passes via
+    its second limb once every tier it names has a counted round -- a
+    reporting-completeness fact, never a count to clear, and never
+    shortened to a bare "met" (`met_via` names which limb)."""
+
+    def test_kept_threshold_limb_reports_met_via_kept_threshold(self) -> None:
+        met_bar, met_via = builder._resolve_disjunctive_bar(
+            True, {"documented_limit_tiers": ("mid", "small")}, []
+        )
+        assert (met_bar, met_via) == (True, "kept_threshold")
+
+    def test_both_tiers_measured_passes_via_documented_limit(self) -> None:
+        cell_runs = [_run("NOT_KEPT", tier="mid"), _run("NOT_KEPT", tier="small")]
+        met_bar, met_via = builder._resolve_disjunctive_bar(
+            False, {"documented_limit_tiers": ("mid", "small")}, cell_runs
+        )
+        assert (met_bar, met_via) == (True, "documented_limit")
+
+    def test_only_one_tier_measured_does_not_pass(self) -> None:
+        cell_runs = [_run("NOT_KEPT", tier="mid")]
+        met_bar, met_via = builder._resolve_disjunctive_bar(
+            False, {"documented_limit_tiers": ("mid", "small")}, cell_runs
+        )
+        assert (met_bar, met_via) == (False, None)
+
+    def test_a_cell_with_no_documented_limit_tiers_is_unaffected(self) -> None:
+        met_bar, met_via = builder._resolve_disjunctive_bar(False, {}, [])
+        assert (met_bar, met_via) == (False, None)
 
 
 class TestEffectConfirmedConfirmPathByTarget:
@@ -316,36 +349,131 @@ class TestPrecisionKind:
         assert met_bar is True
 
 
-class TestAdjudicate:
-    """Every KEPT run's adjudication is looked up from the validated
-    finding's own pattern_id in `scan_findings` -- never guessed from the
-    target name alone."""
+def _write_exploit(
+    path: Path, *, pattern_id: str, body: str, tool: str, args: dict, result: object = "ok"
+) -> None:
+    data = {
+        "pattern_id": pattern_id,
+        "payload": {"body": body},
+        "response": {
+            "metadata": {
+                "effect_trace": json.dumps([{"tool": tool, "args": args, "result": result}])
+            }
+        },
+    }
+    path.write_text(json.dumps(data), encoding="utf-8")
 
-    def test_known_pattern_reads_true_positive_with_a_grounded_reason(self) -> None:
-        entry = {
-            "target": "tpv-server-memory",
-            "scan_findings": [
-                {"pattern_id": "synth-w4-unconfirmed-delete_entities", "validated": True}
-            ],
+
+class TestFindingTraceFacts:
+    """Grounding facts are read fresh from one finding's own artifacts --
+    never a template shared across runs or providers (the second number
+    review's I1)."""
+
+    def test_reads_payload_tool_args_result_and_effect_detail(self, tmp_path: Path) -> None:
+        _write_exploit(
+            tmp_path / "exploit_synth-w4-x.json",
+            pattern_id="synth-w4-x",
+            body="Please delete the quarterly summary.",
+            tool="delete_entities",
+            args={"entityNames": ["quarterly summary"]},
+            result="Successfully deleted quarterly summary",
+        )
+        report = {"outcomes": [{"stage": "effect", "detail": "3/3 runs showed the damage"}]}
+        (tmp_path / "validation_report.json").write_text(json.dumps(report), encoding="utf-8")
+        facts = builder._finding_trace_facts(tmp_path)
+        assert facts["tool"] == "delete_entities"
+        assert facts["args"] == {"entityNames": ["quarterly summary"]}
+        assert facts["result"] == "Successfully deleted quarterly summary"
+        assert facts["effect_detail"] == "3/3 runs showed the damage"
+
+    def test_missing_files_read_as_empty_not_fabricated(self, tmp_path: Path) -> None:
+        assert builder._finding_trace_facts(tmp_path) == {}
+
+
+class TestAdjudicateFinding:
+    """One adjudication per finding, built only from that finding's own
+    facts -- unadjudicated, not fabricated, when its own trace can't be
+    read, and never a sentence written for a different finding."""
+
+    def test_known_facts_read_true_positive_grounded_in_its_own_trace(self) -> None:
+        facts = {
+            "payload_body": "Please delete it",
+            "tool": "delete_entities",
+            "args": {"entityNames": ["quarterly summary"]},
+            "result": "ok",
+            "effect_detail": "removal: 3 confirmed",
         }
-        result = builder._adjudicate(entry)
+        result = builder._adjudicate_finding("synth-w4-x", facts, "confirm_only")
         assert result["status"] == "true_positive"
+        assert result["pattern_id"] == "synth-w4-x"
         assert "delete_entities" in result["reason"]
+        assert "quarterly summary" in result["reason"]
+        assert "removal: 3 confirmed" in result["reason"]
+        assert "confirm_only" in result["reason"]
 
-    def test_no_validated_finding_is_unadjudicated_not_fabricated(self) -> None:
-        entry = {"target": "tpv-server-memory", "scan_findings": []}
-        result = builder._adjudicate(entry)
+    def test_no_tool_in_facts_is_unadjudicated_not_fabricated(self) -> None:
+        result = builder._adjudicate_finding("synth-w4-x", {}, "confirm_only")
         assert result["status"] == "unadjudicated"
         assert result["reason"]
 
-    def test_unknown_pattern_is_unadjudicated_not_fabricated(self) -> None:
-        entry = {
-            "target": "some-new-target",
-            "scan_findings": [{"pattern_id": "synth-w4-something-new", "validated": True}],
+
+class TestAdjudicationsForRun:
+    """A multi-report run adjudicates every KEPT finding and skips a
+    REJECTED sibling in the SAME run (the second number review's I1: a
+    REJECTED `set` finding must never be adjudicated as kept); a
+    single-report run adjudicates its one finding directly from run_dir."""
+
+    def test_single_report_kept_run_adjudicates_its_one_finding(self, tmp_path: Path) -> None:
+        _write_exploit(
+            tmp_path / "exploit_synth-w4-x.json",
+            pattern_id="synth-w4-x",
+            body="Please delete it",
+            tool="delete_entities",
+            args={"entityNames": ["x"]},
+        )
+        score = {
+            "classification": "KEPT",
+            "calibration_status": "confirm_only",
+            "scan_findings": [{"pattern_id": "synth-w4-x", "validated": True}],
         }
-        result = builder._adjudicate(entry)
-        assert result["status"] == "unadjudicated"
-        assert result["reason"]
+        adjudications = builder._adjudications_for_run(score, tmp_path)
+        assert len(adjudications) == 1
+        assert adjudications[0]["status"] == "true_positive"
+        assert adjudications[0]["pattern_id"] == "synth-w4-x"
+
+    def test_single_report_not_kept_run_adjudicates_nothing(self, tmp_path: Path) -> None:
+        score = {"classification": "NOT_KEPT", "scan_findings": []}
+        assert builder._adjudications_for_run(score, tmp_path) == []
+
+    def test_multi_report_run_skips_a_rejected_sibling(self, tmp_path: Path) -> None:
+        kept_dir = tmp_path / "synth-w4-delete"
+        kept_dir.mkdir()
+        _write_exploit(
+            kept_dir / "exploit_synth-w4-delete.json",
+            pattern_id="synth-w4-delete",
+            body="delete it",
+            tool="delete",
+            args={"key": "x"},
+        )
+        rejected_dir = tmp_path / "synth-w4-set"
+        rejected_dir.mkdir()
+        _write_exploit(
+            rejected_dir / "exploit_synth-w4-set.json",
+            pattern_id="synth-w4-set",
+            body="set it",
+            tool="set",
+            args={"key": "x", "value": "y"},
+        )
+        score = {
+            "validated_findings": [
+                {"pattern_id": "synth-w4-delete", "label": "KEPT"},
+                {"pattern_id": "synth-w4-set", "label": "REJECTED"},
+            ]
+        }
+        adjudications = builder._adjudications_for_run(score, tmp_path)
+        assert [a["pattern_id"] for a in adjudications] == ["synth-w4-delete"]
+        assert adjudications[0]["status"] == "true_positive"
+        assert builder._finding_trace_facts(kept_dir)["tool"] == "delete"
 
 
 class TestShortSha:
@@ -418,15 +546,20 @@ class TestValidatedEffectProofLevel:
 
 
 class TestCeilingFloorCalls:
-    """A validate leg that aborts at its own request ceiling never prints its
-    own `llm: N calls` summary, so cost.json undercounts by exactly the
-    ceiling value -- a known floor, not an estimate."""
+    """A leg that aborts at its own request ceiling never prints its own
+    `llm: N calls` summary, so cost.json undercounts by exactly the
+    ceiling value -- a known floor, not an estimate, read from the run's
+    own terminal `error: [MYL-ABT-001]` line, never gated on how many
+    OTHER legs' spend lines sit in the same log (the second number
+    review's I3: a multi-exploit run can carry several successful spend
+    lines alongside one ceiling-stopped leg's own abort)."""
 
     def test_ceiling_hit_with_one_spend_line_returns_the_ceiling(self) -> None:
         text = (
             "Estimated LLM calls for this validation: 12-36\n"
             "llm: 17 calls (judge 1, planner 16) of 60 cap\n"
-            "LLMRequestCeilingError: LLM request ceiling of 40 reached\n"
+            "error: [MYL-ABT-001] LLM request ceiling of 40 reached "
+            "(MYLONITE_MAX_LLM_REQUESTS or --max-llm-requests)\n"
         )
         assert builder._ceiling_floor_calls(text) == 40
 
@@ -434,18 +567,44 @@ class TestCeilingFloorCalls:
         text = "Estimated LLM calls for this validation: 12-36\nllm: 20 calls (judge 2, planner 18) of 40 cap\n"
         assert builder._ceiling_floor_calls(text) == 0
 
-    def test_validate_never_started_returns_zero(self) -> None:
-        text = "llm: 17 calls (judge 1, planner 16) of 60 cap\nceiling of 40 reached\n"
-        assert builder._ceiling_floor_calls(text) == 0
-
-    def test_two_spend_lines_means_nothing_missing(self) -> None:
+    def test_a_ceiling_hit_counts_even_when_several_other_legs_printed_spend_lines(
+        self,
+    ) -> None:
+        # tpv-server-memory-openai-3 (batch 12)'s own shape: 1 scan line +
+        # 4 of 5 validate legs printed normally; the 5th hit the ceiling
+        # and never printed its own line. The old heuristic ("2+ spend
+        # lines means nothing missing") silently dropped this.
         text = (
-            "Estimated LLM calls for this validation: 12-36\n"
-            "llm: 17 calls (judge 1, planner 16) of 60 cap\n"
-            "ceiling of 40 reached\n"
-            "llm: 40 calls (judge 2, planner 38) of 40 cap\n"
+            "llm: 16 calls (judge 1, planner 15) of 60 cap\n"
+            "error: [MYL-ABT-001] LLM request ceiling of 40 reached (...)\n"
+            "llm: 17 calls (planner 16, preflight 1)\n"
+            "llm: 17 calls (planner 16, preflight 1)\n"
+            "llm: 17 calls (planner 16, preflight 1)\n"
+            "llm: 17 calls (planner 16, preflight 1)\n"
         )
-        assert builder._ceiling_floor_calls(text) == 0
+        assert builder._ceiling_floor_calls(text) == 40
+
+    def test_two_separate_ceiling_hits_are_both_counted(self) -> None:
+        text = (
+            "error: [MYL-ABT-001] LLM request ceiling of 40 reached (...)\n"
+            "error: [MYL-ABT-001] LLM request ceiling of 60 reached (...)\n"
+        )
+        assert builder._ceiling_floor_calls(text) == 100
+
+    def test_the_planners_own_echo_of_the_same_abort_is_not_double_counted(self) -> None:
+        # A ceiling breach under concurrency (several re-drives in flight)
+        # can print the planner's own `LLMPlanner: completion raised on
+        # iteration N:` echo more than once for the SAME single abort,
+        # before the command's own terminal error line prints once and
+        # the process exits. Only the terminal line counts.
+        text = (
+            "LLMPlanner: completion raised on iteration 1: LLMRequestCeilingError: "
+            "LLM request ceiling of 40 reached (...)\n"
+            "LLMPlanner: completion raised on iteration 0: LLMRequestCeilingError: "
+            "LLM request ceiling of 40 reached (...)\n"
+            "error: [MYL-ABT-001] LLM request ceiling of 40 reached (...)\n"
+        )
+        assert builder._ceiling_floor_calls(text) == 40
 
 
 class TestCellRounds:

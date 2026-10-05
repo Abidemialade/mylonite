@@ -118,21 +118,25 @@ per-provider breakdown and the reasoning on the one pair that misses.
 **One fix re-test passed; the other's bar is not met, but the fix under
 test is confirmed live.** The streamable-HTTP target still reads `NOT
 TESTED` on every run (no seedable surface) exactly as expected. The
-OpenAI-Agents-SDK-on-Ollama target hits no HTTP 422 and completes the full
-journey on 6 of 6 runs — the first campaign's fix holds — but its own bar
-needs the `STABLE, NOT PROVEN` candidate label on 2+/3 runs per provider;
-only 1 of 6 runs reached it, a property of this target's own locally
-hosted agent model, not of the harness — not met.
+OpenAI-Agents-SDK-on-Ollama target hits no HTTP 422 and shows no
+traceback on 6 of 6 runs — the first campaign's fix holds — but only 2 of
+those 6 (both OpenAI) ever produce a finding to carry into
+`generate`/`validate`; its own bar needs the `STABLE, NOT PROVEN`
+candidate label on 2+/3 runs per provider, and only 1 of 6 runs reached
+it, a property of this target's own locally hosted agent model, not of
+the harness — not met.
 
 **All three precision (false-positive) checks now pass cleanly: 0 KEPT,
 every run exercised.** The third (`server-everything`, reused as a
 read-only check) first read `precision-rollup` `INCONCLUSIVE`: 4 of 6
 runs read `NOT_TESTED` after a subprocess crash during the W1 probe,
 published at the time as third-party target flakiness. That cause was
-wrong — a tool call that turns on a server's own timed notifications
-raced Mylonite's own session shutdown, filing a finished attempt as a
-crash although the server never died — a product defect, fixed; the
-counted re-run reads `PASS` on both providers.
+wrong — a call to this server's own `toggle-simulated-logging` or
+`toggle-subscriber-updates` tool turns on its timed log and
+resource-update sends, and one arriving while Mylonite closed the MCP
+session raced the shutdown, filing a finished attempt as a crash although
+the server never died — a product defect, fixed; the counted re-run
+reads `PASS` on both providers.
 
 **Breadth on stronger models, now measured on both tiers: the flagship
 class kept on 0 of 24 runs; the third-party indirect-injection class
@@ -145,9 +149,10 @@ also dispatched on the small tier (`claude-haiku-4-5-20251001`/
 rejected at the build gate by a pytest-config bug, since fixed and
 superseded by the counted re-run; the counted re-run's own one fired run
 was rejected at the metamorphic (robustness) gate, a genuine validator
-reject. 0 of 24 runs kept, across both tiers — reported as a documented
-limit, in the prereg's own exact wording ("both **tiers'** numbers"),
-which both tiers now give. The indirect-injection (W2) class against
+reject. 0 of 24 runs kept, across both tiers — the bar is a disjunction
+("KEPT on 2+/3 ... or the limit is documented with both tiers' numbers"),
+and is met through the second limb now that both tiers have a counted
+round, never shortened to a bare "met." The indirect-injection (W2) class against
 `server-memory` on the same stronger models resisted on all 6 counted
 runs, decided by the judge reading the full trace, not a structural
 marker — published as the honest result, which this cell's own bar
@@ -178,13 +183,16 @@ config) was fixed in each case — published in full, round by round, in
 the write-up's own "Superseded rounds, published in full" section, not
 dropped once replaced. Every voided and superseded run is still recorded
 in `results.json`, excluded only from its cell's own rollup — see the
-write-up's "Spend" and the file itself for the full accounting. 23 KEPT
-findings land in this round's counted runs (42 KEPT across every status,
-including superseded and one void run); every one is hand-adjudicated true
-positive. Counted spend: $2.75 on Anthropic (660 calls), $0.35 on OpenAI
-(946 calls) — both a measured lower bound, since four ceiling-stopped
-runs' validate leg made 80 more requests each side that printed no cost
-line; both totals, even at the corrected call counts, are well inside the
+write-up's "Spend" and the file itself for the full accounting. 23 runs
+read KEPT in this round's counted runs, carrying 35 kept findings (42
+runs / 54 findings across every status, including superseded and one
+void run) — a run and the findings it carries are different counts once
+a run can keep several findings at once; every finding is hand-
+adjudicated true positive from its own trace. Counted spend: $2.75 on
+Anthropic (660 calls), $0.35 on OpenAI (946 calls) — both a measured
+lower bound, since five ceiling-stopped runs' own leg made 80 more
+Anthropic and 120 more OpenAI requests each that printed no cost line;
+both totals, even at the corrected call counts, are well inside the
 pre-registered budget.
 
 ## Launch rehearsal: the journey docs, run as written
