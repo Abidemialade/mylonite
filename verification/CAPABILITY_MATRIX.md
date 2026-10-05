@@ -241,11 +241,12 @@ Full write-up, every run and every cell's bar:
   validated and KEPT. `certified` is still reached on no run in either cell.
 - **Fix re-tests — one met its bar, one did not, but its own fix is confirmed
   live.** `simple-streamablehttp` still reads `NOT TESTED` on every run (no
-  seedable surface). The Agents-SDK-on-Ollama target hits no HTTP 422 and
-  completes the full journey on 6 of 6 runs — the first campaign's fix holds — but
-  its own bar needed the `STABLE, NOT PROVEN` candidate label on 2+/3 runs per
-  provider; only 1 of 6 runs reached it, a property of this target's own locally
-  hosted agent model, not the harness.
+  seedable surface). The Agents-SDK-on-Ollama target hits no HTTP 422 and no
+  traceback on 6 of 6 runs — the first campaign's fix holds — but only 2 of those
+  6 (both OpenAI) ever produce a finding to carry into `generate`/`validate`; its
+  own bar needed the `STABLE, NOT PROVEN` candidate label on 2+/3 runs per
+  provider, and only 1 of 6 runs reached it, a property of this target's own
+  locally hosted agent model, not the harness.
 - **Precision — all three checks now pass cleanly.** `e2e-guarded-reference`'s 0
   KEPT/6-exercised result meets the prereg's mechanical bar, but on every run the
   attack fired 3/3 against the raw build and the guarded build leaked 0/3 — the run
@@ -254,8 +255,10 @@ Full write-up, every run and every cell's bar:
   reads 0 KEPT, every run exercised, cleanly. `server-everything`, reused as a
   read-only check, first read `precision-rollup` `INCONCLUSIVE` (4 of 6 runs
   unexercised after a subprocess crash), published at the time as target
-  flakiness — wrong: a session-close race during a server's own timed
-  notifications, since fixed; the counted re-run reads `PASS` on both providers.
+  flakiness — wrong: a call to this server's own `toggle-simulated-logging` or
+  `toggle-subscriber-updates` tool turns on its timed sends, and one arriving
+  while Mylonite closed the session raced the shutdown, since fixed; the counted
+  re-run reads `PASS` on both providers.
 - **Breadth, both tiers now measured — the flagship class kept on 0 of 24 runs; the
   third-party indirect-injection class resisted, judge-only.** W1 fired in `scan`
   on 3 of 12 mid-tier (`claude-sonnet-5`/`gpt-5.1`) reference-app runs; those 3 then
@@ -263,26 +266,30 @@ Full write-up, every run and every cell's bar:
   small tier (`claude-haiku-4-5-20251001`/`gpt-4o-mini`), fired on 2 of 12 — one
   run rejected at the build gate (a pytest-config bug, fixed, superseded) and one
   rejected at the metamorphic gate (a genuine validator reject, counted). 0 of 24
-  kept across both tiers — a documented limit, in the prereg's own exact wording
-  ("both tiers' numbers"), which both tiers now give. W2 against `server-memory`
-  resisted on all 6 counted runs (an earlier, superseded round never engaged the
-  planner), decided by the judge reading the full trace (`evidence_tier:
-  judge-only`), published as the honest result either way, which this cell's own
-  bar accepts. `go-sdk` memory produced a real W4 finding on every run, both
-  providers, that stays unvalidated because this cell is scan-only —
-  `generate`/`validate` never run, so no calibration check is ever consulted —
-  never a kept verdict.
-- **23 KEPT findings in this round's counted runs, every one hand-adjudicated true
-  positive** against its own trace (the tool actually called, the attacker's own
-  argument text, the effect, and validate's own effect proof level) — see the
-  write-up's "The kept findings in counted runs." 42 runs read KEPT across every
-  status (18 on superseded rounds a fix replaced, 1 on a run voided for a provider
-  rate limit); none, at any status, is false positive.
+  kept across both tiers — the bar is a disjunction ("KEPT on 2+/3 ... or the
+  limit is documented with both tiers' numbers"), met through the second limb now
+  that both tiers have a counted round, never shortened to a bare "met." W2
+  against `server-memory` resisted on all 6 counted runs (an earlier, superseded
+  round never engaged the planner), decided by the judge reading the full trace
+  (`evidence_tier: judge-only`), published as the honest result either way, which
+  this cell's own bar accepts. `go-sdk` memory produced a real W4 finding on
+  every run, both providers, that stays unvalidated because this cell is
+  scan-only — `generate`/`validate` never run, so no calibration check is ever
+  consulted — never a kept verdict.
+- **23 runs read KEPT in this round's counted runs, carrying 35 kept findings,
+  every one hand-adjudicated true positive** against its own trace (the tool
+  actually called, the attacker's own argument text, the effect, and validate's
+  own effect proof level) — see the write-up's "The kept findings." A run and the
+  findings it carries are different counts once a run can keep several findings
+  at once. 42 runs / 54 findings read KEPT across every status (18 runs / 18
+  findings on superseded rounds a fix replaced, 1 run / 1 finding on a run voided
+  for a provider rate limit); none, at any status, is false positive.
 - **Spend:** $2.75 on Anthropic (660 calls, 740 including a known ceiling floor),
-  $0.35 on OpenAI (946 calls, 1,026 including the floor) — a measured lower bound
-  (four ceiling-stopped runs' validate legs made 80 more requests per provider side
-  that printed no cost line), both well inside the campaign's remaining budget
-  even at the corrected call counts.
+  $0.35 on OpenAI (946 calls, 1,066 including the floor) — a measured lower bound
+  (five ceiling-stopped runs' own leg made 80 more Anthropic and 120 more OpenAI
+  requests that printed no cost line), both well inside the campaign's remaining
+  budget even at the corrected call counts. Across every run, every status: 936
+  calls / $4.53 Anthropic, 1,407 calls / $0.61 OpenAI.
 
 ## Headline numbers (fill as runs complete)
 
