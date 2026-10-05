@@ -279,7 +279,7 @@ Full write-up, every run and every cell's bar:
 - **23 runs read KEPT in this round's counted runs, carrying 35 kept findings,
   every one adjudicated from its own trace in a committed data file** (the tool
   actually called, the attacker's own argument text, the effect, and validate's
-  own effect proof level) **and then checked by an independent reviewer** — see
+  own effect proof level) **and then checked by a separate AI reviewer** (a person's review is still pending) — see
   the write-up's "The kept findings." `scripts/build_e2e_results.py` never
   assigns the label itself. A run and the findings it carries are different
   counts once a run can keep several findings at once. 42 runs / 54 findings

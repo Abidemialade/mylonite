@@ -42,7 +42,7 @@ pilot/smoke/diagnostic dispatches and are never read here), this script:
 4. Groups the active runs into the prereg's own cells, applies each cell's
    own pass bar, and writes one JSON document with every run (voided and
    superseded runs included, for the audit trail) and every cell's rollup.
-5. Matches every KEPT finding against the committed, human-authored
+5. Matches every KEPT finding against the committed, controller-written
    ``adjudications.json`` (default: next to ``--out``) and FAILS LOUDLY,
    before writing anything, if a KEPT finding has no entry there or an
    entry names a (run id, pattern id) that isn't a real KEPT finding.
@@ -1208,7 +1208,7 @@ def _resolve_disjunctive_bar(
 #: Ruling 9 (third number review, after I1 found a template dict
 #: misapplying one provider's own trace text to a sibling's finding): THIS
 #: SCRIPT NEVER ASSIGNS true_positive/false_positive. That judgment lives
-#: entirely in the committed, human-authored
+#: entirely in the committed, controller-written
 #: ``verification/results/0.12.0/e2e/adjudications.json`` -- one entry per
 #: KEPT finding, keyed by run id + pattern id, each written from that
 #: finding's own trace (tool, arguments and where they came from, the
@@ -1254,7 +1254,7 @@ _VALID_ADJUDICATION_LABELS = frozenset({"true_positive", "false_positive"})
 
 
 def _load_adjudications(path: Path) -> dict[tuple[str, str], dict[str, object]]:
-    """The committed, human-authored verdict for every KEPT finding in
+    """The committed, controller-written verdict for every KEPT finding in
     this campaign, flattened to ``{(run_id, pattern_id): entry}``. Raises
     loudly -- never returns an empty map silently -- when the file is
     missing, isn't valid JSON, or holds an entry with no recognised
@@ -1264,7 +1264,7 @@ def _load_adjudications(path: Path) -> dict[tuple[str, str], dict[str, object]]:
     if not path.is_file():
         raise RuntimeError(
             f"{path} does not exist -- every KEPT finding in this campaign needs a "
-            "committed, human-authored adjudication there; this script never assigns "
+            "committed, controller-written adjudication there; this script never assigns "
             "one itself (ruling 9, second number review)"
         )
     try:
@@ -1527,7 +1527,7 @@ def main(argv: list[str] | None = None) -> int:
         "--adjudications",
         type=Path,
         default=None,
-        help="The committed, human-authored adjudications.json (ruling 9: this script "
+        help="The committed, controller-written adjudications.json (ruling 9: this script "
         "never assigns true_positive/false_positive itself). Defaults to "
         "adjudications.json next to --out.",
     )
