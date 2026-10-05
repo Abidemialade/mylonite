@@ -132,6 +132,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   functions the gate PR body uses — the fix is always a suggestion, and
   neither surface says "your safeguard stopped it".
 
+- **A failed calibration now says which step failed, and what the server
+  replied there.** `verdicts.json`'s `calibration` block carries a new
+  `failed_step` (`step`, `tool`, a redacted excerpt of the server's reply, a
+  reason code), and the scan summary prints one plain line naming it right
+  under the `calibration:` line. `step` is one of a fixed set: `schema_check`,
+  `baseline`, `positive_control`, `plant`, `recall`, `discrimination_read`,
+  `declared_id_exclusion`, or `launch`. A seed control that fails or never
+  runs can set it even when the main probe certifies, so a live target that
+  only confirms through its declared record (a Redis-shaped `GET`/`SET`
+  store, for example) can finally be diagnosed from its artefacts alone,
+  without rerunning it. Every verdict and reason code this reports is
+  unchanged — see [Reading your results](docs/reading-results.md#failed_step-which-control-failed-and-what-the-server-said).
+
 ### Changed
 
 - **A `confirm_only` probe with no marker no longer raises a finding to

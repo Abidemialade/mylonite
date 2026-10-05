@@ -66,6 +66,48 @@ _SYNTH_SEED_RE: Final = re.compile(r"^synth-(w\d)-")
 
 
 @dataclass(frozen=True)
+class FailedStep:
+    """Which calibration step produced a failure, and what the server said.
+
+    Built by the plugin layer and carried on ``CalibrationSummary`` so a
+    failed or not-established calibration can be diagnosed from
+    ``verdicts.json`` alone, without re-running the target. ``step`` is one of
+    a fixed set of identifiers (``mylonite.plugins._mcp.calibration.STEPS``):
+    ``schema_check``, ``baseline``, ``positive_control``, ``plant``,
+    ``recall``, ``discrimination_read``, ``declared_id_exclusion``, or
+    ``launch``. ``reply`` is already redacted and at most 200 characters —
+    never raw target output.
+    """
+
+    step: str
+    #: The tool whose call (or absence) produced the failure; "" when no
+    #: specific tool applies (e.g. no candidate tool existed at all).
+    tool: str
+    #: A short, redacted excerpt of the server's reply; "" when the step
+    #: never reached the server (a local schema check, a missing tool).
+    reply: str
+    reason_code: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "step": self.step,
+            "tool": self.tool,
+            "reply": self.reply,
+            "reason_code": self.reason_code,
+        }
+
+    @classmethod
+    def from_dict(cls, data: object) -> FailedStep | None:
+        """Read :meth:`to_dict`'s shape back; ``None`` for anything malformed."""
+        if not isinstance(data, Mapping):
+            return None
+        values = {k: data.get(k) for k in ("step", "tool", "reply", "reason_code")}
+        if not all(isinstance(v, str) for v in values.values()):
+            return None
+        return cls(**values)  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
 class CalibrationSummary:
     """What calibration proved about a target's effect probe, as plain data.
 
@@ -85,6 +127,11 @@ class CalibrationSummary:
     seed_reason_code: str | None
     #: The tools the probe was shown to see a write through.
     certified_tools: tuple[str, ...] = ()
+    #: Which step produced ``reason_code`` (or ``seed_reason_code``), and what
+    #: the server replied there. ``None`` when nothing ran to diagnose (writes
+    #: were never authorized, or the target declares no probe) or when the
+    #: calibration certified cleanly.
+    failed_step: FailedStep | None = None
 
     @property
     def calibrated(self) -> bool:
@@ -96,6 +143,7 @@ class CalibrationSummary:
             "reason_code": self.reason_code,
             "seed_control": {"status": self.seed_status, "reason_code": self.seed_reason_code},
             "certified_tools": list(self.certified_tools),
+            "failed_step": self.failed_step.to_dict() if self.failed_step else None,
         }
 
     @classmethod
@@ -117,12 +165,14 @@ class CalibrationSummary:
             return None
         if not all(c is None or isinstance(c, str) for c in (reason, seed_reason)):
             return None
+        failed_step = FailedStep.from_dict(data.get("failed_step"))
         return cls(
             status=status,
             reason_code=reason,
             seed_status=seed_status,
             seed_reason_code=seed_reason,
             certified_tools=tuple(tools),
+            failed_step=failed_step,
         )
 
 

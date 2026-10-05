@@ -73,7 +73,7 @@ from mylonite.plugins._mcp._session_adapter import (
 from mylonite.plugins._mcp.never_call import never_call_names
 from mylonite.plugins._mcp.server_shim import MCPSessionAsServerLike
 from mylonite.scan._types import SeedArmUnavailable
-from mylonite.scan.class_verdict import CalibrationSummary
+from mylonite.scan.class_verdict import CalibrationSummary, FailedStep
 from mylonite.scan.control_shim import _DESTRUCTIVE_HINTS, consequential_tool_names
 from mylonite.scan.predicate_primitives import count_deferral_word
 from mylonite.scan.tool_classifier import hint_matches
@@ -105,6 +105,33 @@ EMITTED_CODES: Final = (
     INC_SCHEMA,
     INC_SEED_FAILED,
     INC_SEED_NOT_RUN,
+)
+
+#: The fixed set of step identifiers a :class:`~mylonite.scan.class_verdict.FailedStep`
+#: names (#359). Each marks where in the module's own controls a failure (or
+#: a declared-id downgrade) happened, independent of which reason code it
+#: produced — a read failure during the negative control's two reads is still
+#: ``STEP_BASELINE``, even though its code is ``INC_POSITIVE_FAILED``.
+STEP_SCHEMA_CHECK: Final = "schema_check"
+STEP_BASELINE: Final = "baseline"
+STEP_POSITIVE_CONTROL: Final = "positive_control"
+STEP_PLANT: Final = "plant"
+STEP_RECALL: Final = "recall"
+STEP_DISCRIMINATION_READ: Final = "discrimination_read"
+STEP_DECLARED_ID_EXCLUSION: Final = "declared_id_exclusion"
+#: The target could not be launched at all, so no step ever ran.
+STEP_LAUNCH: Final = "launch"
+
+#: Every step identifier this module can put on a :class:`FailedStep`.
+STEPS: Final = (
+    STEP_SCHEMA_CHECK,
+    STEP_BASELINE,
+    STEP_POSITIVE_CONTROL,
+    STEP_PLANT,
+    STEP_RECALL,
+    STEP_DISCRIMINATION_READ,
+    STEP_DECLARED_ID_EXCLUSION,
+    STEP_LAUNCH,
 )
 
 #: The probe passed both controls through at least one tool.
@@ -158,6 +185,12 @@ class ToolControl:
     #: comparison against ``_read_failed()``'s wording, so a later rewording
     #: of that message cannot silently stop matching and change behaviour.
     is_read_failure: bool = False
+    #: Which of :data:`STEPS` this control's outcome belongs to; "" when the
+    #: control passed outright (no step to diagnose). See #359.
+    step: str = ""
+    #: A short, redacted excerpt of the server's reply behind ``detail``; ""
+    #: when nothing was called (a schema check) or nothing came back.
+    reply: str = ""
 
 
 @dataclass(frozen=True)
@@ -168,6 +201,13 @@ class SeedControl:
     reason_code: str | None
     detail: str
     recall_tool: str = ""
+    #: Which of :data:`STEPS` (``plant`` or ``recall``) this outcome belongs
+    #: to; "" when nothing failed, or there was nothing to run (#359).
+    step: str = ""
+    #: The tool the step above ran against; "" when none applies.
+    tool: str = ""
+    #: A short, redacted excerpt of the server's reply behind ``detail``.
+    reply: str = ""
 
 
 @dataclass(frozen=True)
@@ -180,6 +220,9 @@ class CalibrationResult:
     detail: str
     tools: tuple[ToolControl, ...]
     seed_control: SeedControl
+    #: Which step (and reason code) explains why this run is not calibrated;
+    #: ``None`` when it certified, or when nothing ran to diagnose (#359).
+    failed_step: FailedStep | None = None
 
     @property
     def calibrated(self) -> bool:
@@ -291,6 +334,7 @@ def summarise(result: CalibrationResult) -> CalibrationSummary:
         seed_status=result.seed_control.status,
         seed_reason_code=result.seed_control.reason_code,
         certified_tools=result.certified_tools,
+        failed_step=result.failed_step,
     )
 
 
@@ -377,7 +421,9 @@ async def calibrate(adapter: MCPSessionAdapterBase, allow_writes: bool) -> Calib
             session, page_timeout_s=adapter._mcp_read_timeout.total_seconds()
         )
         specs = _serialise_tools(await adapter._bounded(shim.list_tools()))
-        status, code, detail, tools, eligible = await _probe_controls(adapter, session, specs)
+        status, code, detail, tools, eligible, failed_step = await _probe_controls(
+            adapter, session, specs
+        )
         readback: _Readback | None = None
         if (
             eligible
@@ -399,6 +445,27 @@ async def calibrate(adapter: MCPSessionAdapterBase, allow_writes: bool) -> Calib
                     f"that changed nothing (the record planted through {control.tool!r} "
                     f"showed up, but {detail})"
                 )
+            elif control.status == TOOL_FAILED and control.reason_code:
+                # The readback is the LAST control this run completes, so its
+                # own step and reply are the most specific diagnosis available
+                # -- this is exactly where a live declared-id store (Redis's
+                # GET/SET) actually fails (#359), and it replaces whatever
+                # step _probe_controls returned (a real consequential tool may
+                # have already failed too; both are true, and the readback's
+                # failure is the one the next control -- discrimination --
+                # never got to run past, so it is reported).
+                failed_step = FailedStep(
+                    step=control.step or STEP_PLANT,
+                    tool=control.tool,
+                    reply=control.reply,
+                    reason_code=control.reason_code,
+                )
+        if failed_step is None and seed.step and seed.reason_code:
+            # Nothing about the main probe failed, but the seed control (plant
+            # or recall) did not establish either -- still worth diagnosing.
+            failed_step = FailedStep(
+                step=seed.step, tool=seed.tool, reply=seed.reply, reason_code=seed.reason_code
+            )
 
     result = CalibrationResult(
         spec_key=key,
@@ -407,6 +474,7 @@ async def calibrate(adapter: MCPSessionAdapterBase, allow_writes: bool) -> Calib
         detail=detail,
         tools=tools,
         seed_control=seed,
+        failed_step=failed_step,
     )
     record(result)
     return result
@@ -478,6 +546,12 @@ async def calibrate_custom_target(
             ),
             tools=(),
             seed_control=seed,
+            failed_step=FailedStep(
+                step=STEP_LAUNCH,
+                tool=str(getattr(adapter, "_launch_command", None) or spec.command or ""),
+                reply="",
+                reason_code=INC_NOT_CALIBRATED,
+            ),
         )
         record(result)
     return result
@@ -639,18 +713,27 @@ def _candidate_tools(
 
 async def _probe_controls(
     adapter: MCPSessionAdapterBase, session: ClientSession, specs: list[ToolSpec]
-) -> tuple[str, str | None, str, tuple[ToolControl, ...], bool]:
+) -> tuple[str, str | None, str, tuple[ToolControl, ...], bool, FailedStep | None]:
     """The schema check and the negative and positive controls for the effect probe.
 
-    The last item says whether the readback control may still be tried: only
-    when the probe's own read is valid and stable, and no consequential tool
-    passed (none existed, or each one's write failed or did not show).
+    The second-to-last item says whether the readback control may still be
+    tried: only when the probe's own read is valid and stable, and no
+    consequential tool passed (none existed, or each one's write failed or
+    did not show). The last item is the step (#359) behind the returned
+    reason code, or ``None`` for a certified or untried probe.
     """
     spec = adapter._spec
     scope = adapter._scope
     probe = spec.effect_probe
     if probe is None or not probe.verify_tool:
-        return STATUS_NO_PROBE, None, "the target declares no effect_probe verify_tool", (), False
+        return (
+            STATUS_NO_PROBE,
+            None,
+            "the target declares no effect_probe verify_tool",
+            (),
+            False,
+            None,
+        )
     by_name = {t.name: t for t in specs}
     verify = by_name.get(probe.verify_tool)
     if verify is None:
@@ -660,6 +743,7 @@ async def _probe_controls(
             f"verify_tool {probe.verify_tool!r} is not among the server's tools",
             (),
             False,
+            FailedStep(STEP_BASELINE, probe.verify_tool, "", INC_POSITIVE_FAILED),
         )
 
     if _mentions_payload(probe.verify_args_template):
@@ -674,6 +758,7 @@ async def _probe_controls(
             "the record by a fixed value instead",
             (),
             False,
+            FailedStep(STEP_BASELINE, probe.verify_tool, "", INC_POSITIVE_FAILED),
         )
 
     token = _new_token()
@@ -686,6 +771,7 @@ async def _probe_controls(
             f"verify_args_template fails {probe.verify_tool!r}'s inputSchema: {errors[0]}",
             (),
             False,
+            FailedStep(STEP_SCHEMA_CHECK, probe.verify_tool, "", INC_SCHEMA),
         )
 
     candidates = _candidate_tools(specs, spec, probe.verify_tool)
@@ -696,6 +782,7 @@ async def _probe_controls(
             "no consequential tool with a content argument to write a control record through",
             (),
             True,
+            FailedStep(STEP_POSITIVE_CONTROL, "", "", INC_POSITIVE_FAILED),
         )
 
     # A candidate whose only required id-shaped argument can be filled only
@@ -726,6 +813,7 @@ async def _probe_controls(
             "only path to confirm_only here",
             (),
             True,
+            FailedStep(STEP_DECLARED_ID_EXCLUSION, record_only_names[0], "", INC_POSITIVE_FAILED),
         )
 
     controls: list[ToolControl] = []
@@ -742,7 +830,14 @@ async def _probe_controls(
         c.reason_code == INC_NEGATIVE_FAILED for c in controls
     ):
         certified = ", ".join(c.tool for c in controls if c.status == TOOL_CERTIFIED)
-        return STATUS_CERTIFIED, None, f"certified through {certified}", tuple(controls), False
+        return (
+            STATUS_CERTIFIED,
+            None,
+            f"certified through {certified}",
+            tuple(controls),
+            False,
+            None,
+        )
     eligible = not any(c.reason_code == INC_NEGATIVE_FAILED or c.is_read_failure for c in controls)
     record_only = [c for c in controls if c.status == TOOL_READBACK]
     if record_only and eligible:
@@ -759,6 +854,12 @@ async def _probe_controls(
             f"{first.tool}: {first.detail}",
             tuple(controls),
             True,
+            FailedStep(
+                first.step or STEP_DECLARED_ID_EXCLUSION,
+                first.tool,
+                first.reply,
+                INC_POSITIVE_FAILED,
+            ),
         )
     first = next(
         (c for c in controls if c.reason_code == INC_NEGATIVE_FAILED),
@@ -770,6 +871,12 @@ async def _probe_controls(
         f"{first.tool}: {first.detail}",
         tuple(controls),
         eligible,
+        FailedStep(
+            first.step or STEP_POSITIVE_CONTROL,
+            first.tool,
+            first.reply,
+            first.reason_code or INC_POSITIVE_FAILED,
+        ),
     )
 
 
@@ -840,6 +947,7 @@ async def _control_one_tool(
             TOOL_FAILED,
             INC_SCHEMA,
             f"{tool.name!r} has a required argument with no schema-valid value to fill",
+            step=STEP_POSITIVE_CONTROL,
         )
     errors = validate_args(tool.json_schema, write_args)
     if errors:
@@ -848,10 +956,21 @@ async def _control_one_tool(
             TOOL_FAILED,
             INC_SCHEMA,
             f"the control write fails {tool.name!r}'s inputSchema: {errors[0]}",
+            step=STEP_POSITIVE_CONTROL,
         )
 
-    def failed(code: str, detail: str, *, is_read_failure: bool = False) -> ToolControl:
-        return ToolControl(tool.name, TOOL_FAILED, code, detail, is_read_failure=is_read_failure)
+    def failed(
+        code: str, detail: str, *, is_read_failure: bool = False, step: str, reply: str = ""
+    ) -> ToolControl:
+        return ToolControl(
+            tool.name,
+            TOOL_FAILED,
+            code,
+            detail,
+            is_read_failure=is_read_failure,
+            step=step,
+            reply=reply,
+        )
 
     read_failed = _read_failed(probe)
 
@@ -859,33 +978,51 @@ async def _control_one_tool(
     before = await adapter._probe_verify_content(session, probe, token)
     after = await adapter._probe_verify_content(session, probe, token)
     if before is None or after is None:
-        return failed(INC_POSITIVE_FAILED, read_failed, is_read_failure=True)
+        return failed(INC_POSITIVE_FAILED, read_failed, is_read_failure=True, step=STEP_BASELINE)
     if _changed(before, after, marker):
         return failed(
             INC_NEGATIVE_FAILED,
             "the verify output changed between two reads with nothing written",
+            step=STEP_BASELINE,
+            reply=_quote(after),
         )
 
     # Positive control: one write carrying the token.
     try:
         result = await adapter._bounded(session.call_tool(tool.name, write_args))
     except Exception as exc:
-        return failed(INC_POSITIVE_FAILED, f"the control write raised {type(exc).__name__}")
-    if getattr(result, "isError", False):
         return failed(
             INC_POSITIVE_FAILED,
-            f"the control write returned an error: {_quote(getattr(result, 'content', ''))}",
+            f"the control write raised {type(exc).__name__}",
+            step=STEP_POSITIVE_CONTROL,
+        )
+    if getattr(result, "isError", False):
+        reply = _quote(getattr(result, "content", ""))
+        return failed(
+            INC_POSITIVE_FAILED,
+            f"the control write returned an error: {reply}",
+            step=STEP_POSITIVE_CONTROL,
+            reply=reply,
         )
     written = await adapter._probe_verify_content(session, probe, token)
     if written is None:
-        return failed(INC_POSITIVE_FAILED, read_failed, is_read_failure=True)
+        return failed(
+            INC_POSITIVE_FAILED, read_failed, is_read_failure=True, step=STEP_POSITIVE_CONTROL
+        )
     for deferral in probe.deferred_markers:
         if count_deferral_word(written, deferral) > count_deferral_word(after, deferral):
-            return failed(INC_POSITIVE_FAILED, f"the control write was deferred ({deferral!r})")
+            return failed(
+                INC_POSITIVE_FAILED,
+                f"the control write was deferred ({deferral!r})",
+                step=STEP_POSITIVE_CONTROL,
+                reply=_quote(written),
+            )
     if not (_changed(after, written, marker) and written.count(token) > after.count(token)):
         return failed(
             INC_POSITIVE_FAILED,
             f"{probe.verify_tool!r} did not show the control record written through {tool.name!r}",
+            step=STEP_POSITIVE_CONTROL,
+            reply=_quote(written),
         )
     if used_declared:
         # The write only validated because a required id-shaped argument was
@@ -901,6 +1038,8 @@ async def _control_one_tool(
             f"the control write passed only because a required id-shaped argument was "
             f"filled from the target file's own declared value, so this proves the probe "
             f"sees a write to that one record, not through {tool.name!r} in general",
+            step=STEP_DECLARED_ID_EXCLUSION,
+            reply=_quote(written),
         )
     return ToolControl(tool.name, TOOL_CERTIFIED, None, "negative and positive controls passed")
 
@@ -960,13 +1099,18 @@ async def _seed_control(
     recalls = _recall_candidates(specs, spec, arm)
     if not recalls:
         return SeedControl(
-            SEED_NOT_RUN, INC_SEED_NOT_RUN, "no tool could be inferred to recall planted content"
+            SEED_NOT_RUN,
+            INC_SEED_NOT_RUN,
+            "no tool could be inferred to recall planted content",
+            step=STEP_RECALL,
         )
     shared = readback if readback is not None and readback.failure is None else None
     try:
         return await _plant_and_recall(adapter, session, arm, specs, recalls, shared=shared)
     except SeedArmUnavailable as exc:
-        return SeedControl(SEED_FAILED, INC_SEED_FAILED, exc.reason)
+        return SeedControl(
+            SEED_FAILED, INC_SEED_FAILED, exc.reason, step=STEP_RECALL, tool=arm.tool
+        )
 
 
 async def _plant_and_recall(
@@ -978,7 +1122,9 @@ async def _plant_and_recall(
     *,
     shared: _Readback | None = None,
 ) -> SeedControl:
-    """Raises ``SeedArmUnavailable`` when the plant fails or no recall returns it.
+    """Raises ``SeedArmUnavailable`` only when the final recall attempt finds
+    nothing; a plant failure is returned directly (:data:`STEP_PLANT`), so its
+    own step is never confused with a recall failure (:data:`STEP_RECALL`).
 
     ``shared`` (a readback control waiting on this plant) supplies the token
     and body, and is told whether the plant call went through.
@@ -987,7 +1133,13 @@ async def _plant_and_recall(
     by_name = {t.name: t for t in specs}
     plant_tool = by_name.get(arm.tool)
     if plant_tool is None:
-        raise SeedArmUnavailable(f"seed_arm tool {arm.tool!r} is not among the server's tools")
+        return SeedControl(
+            SEED_FAILED,
+            INC_SEED_FAILED,
+            f"seed_arm tool {arm.tool!r} is not among the server's tools",
+            step=STEP_PLANT,
+            tool=arm.tool,
+        )
 
     token = shared.token if shared is not None else _new_token()
     body = shared.body if shared is not None else _plant_body(token, "")
@@ -999,6 +1151,8 @@ async def _plant_and_recall(
             SEED_FAILED,
             INC_SCHEMA,
             f"seed_arm args_template fails {arm.tool!r}'s inputSchema: {errors[0]}",
+            step=STEP_PLANT,
+            tool=arm.tool,
         )
     declared = _declared_literals(arm.args_template, scope)
     calls: list[tuple[ToolSpec, dict[str, Any]]] = []
@@ -1018,7 +1172,13 @@ async def _plant_and_recall(
         else:
             calls.append((recall, args))
     if not calls:
-        return SeedControl(SEED_FAILED, INC_SCHEMA, schema_errors[0])
+        return SeedControl(
+            SEED_FAILED,
+            INC_SCHEMA,
+            schema_errors[0],
+            step=STEP_RECALL,
+            tool=", ".join(r.name for r in recalls),
+        )
 
     # Baseline: read each recall candidate with the SAME args BEFORE anything
     # is planted. Every required argument was just filled with the token
@@ -1058,11 +1218,19 @@ async def _plant_and_recall(
     except SeedArmUnavailable as exc:
         if shared is not None:
             shared.plant_error = exc.reason
-        raise
+        return SeedControl(
+            SEED_FAILED,
+            INC_SEED_FAILED,
+            exc.reason,
+            step=STEP_PLANT,
+            tool=arm.tool,
+            reply=_quote(exc.reason),
+        )
     except Exception as exc:
+        detail = f"seed_arm plant call raised {type(exc).__name__}"
         if shared is not None:
-            shared.plant_error = f"seed_arm plant call raised {type(exc).__name__}"
-        raise SeedArmUnavailable(f"seed_arm plant call raised {type(exc).__name__}") from exc
+            shared.plant_error = detail
+        return SeedControl(SEED_FAILED, INC_SEED_FAILED, detail, step=STEP_PLANT, tool=arm.tool)
     if shared is not None:
         shared.planted = True
 
@@ -1083,8 +1251,14 @@ async def _plant_and_recall(
         if content.count(token) > before.count(token):
             return SeedControl(SEED_PASSED, None, "planted and recalled", recall.name)
         problems.append(f"{recall.name!r} did not return it")
-    raise SeedArmUnavailable(
-        f"the record planted through {arm.tool!r} was not recalled: " + "; ".join(problems)
+    detail = f"the record planted through {arm.tool!r} was not recalled: " + "; ".join(problems)
+    return SeedControl(
+        SEED_FAILED,
+        INC_SEED_FAILED,
+        detail,
+        step=STEP_RECALL,
+        tool=", ".join(r.name for r, _ in calls),
+        reply=_quote("; ".join(problems)),
     )
 
 
@@ -1131,9 +1305,23 @@ def _readback_usable(specs: list[ToolSpec], spec: target_registry.TargetSpec) ->
 
 
 def _readback_failed(
-    rb: _Readback, code: str, detail: str, *, is_read_failure: bool = False
+    rb: _Readback,
+    code: str,
+    detail: str,
+    *,
+    is_read_failure: bool = False,
+    step: str,
+    reply: str = "",
 ) -> ToolControl:
-    return ToolControl(rb.arm.tool, TOOL_FAILED, code, detail, is_read_failure=is_read_failure)
+    return ToolControl(
+        rb.arm.tool,
+        TOOL_FAILED,
+        code,
+        detail,
+        is_read_failure=is_read_failure,
+        step=step,
+        reply=reply,
+    )
 
 
 async def _readback_baseline(
@@ -1150,13 +1338,15 @@ async def _readback_baseline(
     after = await adapter._probe_verify_content(session, probe, token)
     if before is None or after is None:
         rb.failure = _readback_failed(
-            rb, INC_POSITIVE_FAILED, _read_failed(probe), is_read_failure=True
+            rb, INC_POSITIVE_FAILED, _read_failed(probe), is_read_failure=True, step=STEP_BASELINE
         )
     elif _changed(before, after, marker):
         rb.failure = _readback_failed(
             rb,
             INC_NEGATIVE_FAILED,
             "the verify output changed between two reads with nothing written",
+            step=STEP_BASELINE,
+            reply=_quote(after),
         )
     else:
         rb.after = after
@@ -1175,7 +1365,11 @@ async def _readback_finish(
     read_failed = _read_failed(probe)
     if rb.plant_attempted and not rb.planted:
         return _readback_failed(
-            rb, INC_POSITIVE_FAILED, f"the plant did not go through: {rb.plant_error}"
+            rb,
+            INC_POSITIVE_FAILED,
+            f"the plant did not go through: {rb.plant_error}",
+            step=STEP_PLANT,
+            reply=_quote(rb.plant_error),
         )
     if not rb.planted:
         # The seed control never reached its plant (no recall tool, or no valid
@@ -1188,25 +1382,39 @@ async def _readback_finish(
                 rb,
                 INC_SCHEMA,
                 f"seed_arm args_template fails {rb.arm.tool!r}'s inputSchema: {errors[0]}",
+                step=STEP_PLANT,
             )
         try:
             await adapter._run_seed_arm(session, rb.arm, rb.body, [])
         except SeedArmUnavailable as exc:
             return _readback_failed(
-                rb, INC_POSITIVE_FAILED, f"the plant did not go through: {exc.reason}"
+                rb,
+                INC_POSITIVE_FAILED,
+                f"the plant did not go through: {exc.reason}",
+                step=STEP_PLANT,
+                reply=_quote(exc.reason),
             )
         except Exception as exc:
             return _readback_failed(
-                rb, INC_POSITIVE_FAILED, f"the plant call raised {type(exc).__name__}"
+                rb,
+                INC_POSITIVE_FAILED,
+                f"the plant call raised {type(exc).__name__}",
+                step=STEP_PLANT,
             )
 
     written = await adapter._probe_verify_content(session, probe, rb.token)
     if written is None:
-        return _readback_failed(rb, INC_POSITIVE_FAILED, read_failed, is_read_failure=True)
+        return _readback_failed(
+            rb, INC_POSITIVE_FAILED, read_failed, is_read_failure=True, step=STEP_PLANT
+        )
     for deferral in probe.deferred_markers:
         if count_deferral_word(written, deferral) > count_deferral_word(rb.after, deferral):
             return _readback_failed(
-                rb, INC_POSITIVE_FAILED, f"the plant was deferred ({deferral!r})"
+                rb,
+                INC_POSITIVE_FAILED,
+                f"the plant was deferred ({deferral!r})",
+                step=STEP_PLANT,
+                reply=_quote(written),
             )
     if not (
         _changed(rb.after, written, rb.marker)
@@ -1216,6 +1424,8 @@ async def _readback_finish(
             rb,
             INC_POSITIVE_FAILED,
             f"{probe.verify_tool!r} did not show the record planted through {rb.arm.tool!r}",
+            step=STEP_PLANT,
+            reply=_quote(written),
         )
 
     # Stability after the plant: nothing is written, the output does not grow,
@@ -1224,18 +1434,24 @@ async def _readback_finish(
     # fails here rather than reading as "no change".
     still = await adapter._probe_verify_content(session, probe, rb.token)
     if still is None:
-        return _readback_failed(rb, INC_POSITIVE_FAILED, read_failed, is_read_failure=True)
+        return _readback_failed(
+            rb, INC_POSITIVE_FAILED, read_failed, is_read_failure=True, step=STEP_PLANT
+        )
     if _changed(written, still, rb.marker):
         return _readback_failed(
             rb,
             INC_NEGATIVE_FAILED,
             "the verify output changed after the plant with nothing written",
+            step=STEP_BASELINE,
+            reply=_quote(still),
         )
     if still.count(rb.token) < written.count(rb.token):
         return _readback_failed(
             rb,
             INC_POSITIVE_FAILED,
             f"{probe.verify_tool!r} no longer showed the planted record on a second read",
+            step=STEP_PLANT,
+            reply=_quote(still),
         )
     return await _discrimination_read(adapter, session, rb)
 
@@ -1280,6 +1496,7 @@ async def _discrimination_read(
             INC_POSITIVE_FAILED,
             f"{probe.verify_tool!r}'s verify_args_template has no argument to send a "
             "never-planted token through, so the read was not shown to discriminate",
+            step=STEP_DISCRIMINATION_READ,
         )
     verify = probe.verify_tool or ""
     not_shown = "so the read was not shown to discriminate"
@@ -1291,6 +1508,7 @@ async def _discrimination_read(
             INC_POSITIVE_FAILED,
             f"the read with a never-planted token raised {type(exc).__name__}, {not_shown}",
             is_read_failure=True,
+            step=STEP_DISCRIMINATION_READ,
         )
     text = _result_readback_text(result)
     if getattr(result, "isError", False):
@@ -1298,12 +1516,15 @@ async def _discrimination_read(
             rb,
             INC_POSITIVE_FAILED,
             f"the read with a never-planted token returned an error, {not_shown}",
+            step=STEP_DISCRIMINATION_READ,
+            reply=_quote(text),
         )
     if not text.strip():
         return _readback_failed(
             rb,
             INC_POSITIVE_FAILED,
             f"the read with a never-planted token returned nothing, {not_shown}",
+            step=STEP_DISCRIMINATION_READ,
         )
     if unplanted in text:
         return _readback_failed(
@@ -1311,6 +1532,8 @@ async def _discrimination_read(
             INC_NEGATIVE_FAILED,
             "the read with a never-planted token echoed that token back, so it cannot "
             "tell a planted record from its own query",
+            step=STEP_DISCRIMINATION_READ,
+            reply=_quote(text),
         )
     return ToolControl(
         rb.arm.tool,

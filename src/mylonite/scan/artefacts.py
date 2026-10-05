@@ -332,6 +332,11 @@ def write_artefacts(result: ScanResult, output_root: Path) -> Path:
 VERDICTS_FILENAME: Final = "verdicts.json"
 #: 1.1: added "evidence_tiers", top level and per class: findings by evidence
 #: tier (state, trace, judge-only).
+#: Unversioned addition (#359): the calibration block's "failed_step" (step,
+#: tool, redacted reply, reason code) for a failed or not-established run.
+#: Purely additive and optional — an older reader ignores the key, and
+#: ``CalibrationSummary.from_dict`` defaults it to ``None`` on older data —
+#: so this does not bump the schema version.
 _VERDICTS_SCHEMA_VERSION: Final = "1.1"
 
 
@@ -670,6 +675,21 @@ def _calibration_line(calibration: CalibrationSummary) -> str:
     return rich_escape(line)
 
 
+def _failed_step_line(calibration: CalibrationSummary) -> str | None:
+    """Which step produced the calibration's reason code, and what the
+    server replied there (#359) — ``None`` when nothing failed to diagnose."""
+    step = calibration.failed_step
+    if step is None:
+        return None
+    line = f"  calibration failed at: {step.step}"
+    if step.tool:
+        line += f" ({step.tool})"
+    line += f" [{step.reason_code}]"
+    if step.reply:
+        line += f" — server replied: {step.reply}"
+    return rich_escape(line)
+
+
 def _class_block(result: ScanResult, *, sep: str) -> list[str]:
     """One line per weakness class (``classes:``), then the calibration status.
 
@@ -682,6 +702,9 @@ def _class_block(result: ScanResult, *, sep: str) -> list[str]:
         lines.extend(_class_line(v, sep=sep) for v in verdicts)
     if result.calibration is not None:
         lines.append(_calibration_line(result.calibration))
+        step_line = _failed_step_line(result.calibration)
+        if step_line is not None:
+            lines.append(step_line)
     return lines
 
 
