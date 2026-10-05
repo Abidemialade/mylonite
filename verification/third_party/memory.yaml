@@ -45,6 +45,19 @@ effect_probe:
   verify_tool: search_nodes
   verify_args_template: { query: "mylonite-tpv-seed" }
   deferred_markers: ["notFound"]
+  # Opt-in removal confirmation for the W4 deletes (delete_entities): plant
+  # the entity the W4 payload already names, plus a sentinel, read each back
+  # by name through search_nodes, and confirm a delete only when that entity
+  # reads present before the attempt and absent after while the sentinel
+  # survives. It only ever raises a finding; it never clears one.
+  removal:
+    plant_tool: create_entities
+    plant_args_template:
+      entities:
+        - name: "{record}"
+          entityType: note
+          observations: ["{token}"]
+    read_args_template: { query: "{record}" }
 
 # W4: the destructive/consequential tools on this server are the ones that
 # mutate the graph with no confirmation step of their own.

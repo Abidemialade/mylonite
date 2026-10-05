@@ -90,6 +90,11 @@ non-deterministic upstream crashes (reported as measured, not re-run — that is
 flakiness, not a harness problem) and the streamable-HTTP cell met its bar exactly as
 expected, with NOT TESTED, because that target has no surface to plant a payload on.
 
+Before the proof-depth cells re-run, the memory and Redis target files gain an opt-in
+removal check, logged as a dated amendment in the same file. A W4 delete of the record
+the payload names can now reach `effect-confirmed`. It needs an exact name, so the
+amendment expects few such deletes on the small models and leaves every bar unchanged.
+
 ## Launch rehearsal: the journey docs, run as written
 
 `verification/rehearsal/` holds a script that a reader wrote from the

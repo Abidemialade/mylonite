@@ -2128,15 +2128,22 @@ async def _confirm_only_redis() -> _RedisStore:
 
 
 @pytest.mark.asyncio
-async def test_confirm_only_redis_attack_that_changes_the_watched_key_is_effect_confirmed() -> None:
+async def test_confirm_only_redis_attack_that_changes_the_watched_key_is_not_effect_confirmed() -> (
+    None
+):
+    """The Redis probe has no marker, so under confirm_only any change in its
+    read proves nothing (a flapping read changes it too): the attempt stays a
+    finding below effect-confirmed, and is never resisted."""
     store = await _confirm_only_redis()
     meta = await _attack_redis(store, [_set_call(_REDIS_KEY)])
     assert meta["calibrated"] == "false"
     assert meta["confirm_capable"] == "true"
+    assert meta["probe_certified"] == "false"
     assert meta["trace_outcome"] == "dispatched-ok"
     assert meta["effect_confirmed"] == "true"
     decision = _decide(meta)
-    assert (decision.kind, decision.proof_level) == ("finding", "effect-confirmed")
+    assert decision.kind == "finding"
+    assert decision.proof_level != "effect-confirmed"
 
 
 @pytest.mark.asyncio

@@ -296,6 +296,18 @@ error on that read, such as a rate limit, makes a marker already in state look n
 an earlier attempt's effect can be credited to this one when this attempt also links to
 it.
 
+**Removal confirmation reaches only name-keyed deletes.** The opt-in
+[`effect_probe.removal`](target-file.md#removal-confirmation-w4-deletes) check plants
+the record a W4 payload names and confirms the delete when that record goes from present
+to absent. It cannot plant under an id the server assigns (`delete_note(id: 1)`), so
+those deletes stay at `dispatched-tool-linked`. It also needs the agent to name the
+record exactly, so on small models it confirms few deletes. One residual risk remains: an
+actor outside Mylonite that deletes exactly the planted record during the attempt, while
+leaving the second planted record alone, would be read as this attempt's delete.
+Attempts run one at a time and each plant carries a fresh token, but nothing in the
+target's state can rule out that outside writer. Point the scan at state nothing else
+is using.
+
 ## 9. A network failure can read the same as a refusal (W3)
 
 A consequential call that errors reads as resisted, labelled server-reported
