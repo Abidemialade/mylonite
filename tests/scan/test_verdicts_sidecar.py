@@ -26,7 +26,7 @@ from mylonite.scan.artefacts import (
     render_summary,
     write_artefacts,
 )
-from mylonite.scan.class_verdict import CalibrationSummary
+from mylonite.scan.class_verdict import CalibrationSummary, FailedStep
 from mylonite.scan.engine import ScanConfig, ScanEngine, ScanResult
 
 _W2 = "indirect-injection-note-body-direct"
@@ -168,6 +168,85 @@ def test_the_summary_prints_the_calibration_status() -> None:
     assert "failed" in line
     assert "MYL-INC-005" in line
     assert "MYL-INC-006" in line
+
+
+def test_the_summary_names_the_failed_step_and_the_servers_reply() -> None:
+    """#359: a failed calibration's step, tool and redacted server reply are
+    printed as their own line, right after the calibration status."""
+    result = _result(
+        _attempt(_W4, "finding", trace_outcome="dispatched-ok", proof_level="dispatched"),
+        calibration=CalibrationSummary(
+            status="failed",
+            reason_code="MYL-INC-003",
+            seed_status="not_declared",
+            seed_reason_code=None,
+            failed_step=FailedStep(
+                step="positive_control",
+                tool="send_email",
+                reply="outbox empty",
+                reason_code="MYL-INC-003",
+            ),
+        ),
+    )
+    summary = render_summary(result, ascii_safe=True)
+    lines = summary.splitlines()
+    cal_line = next(i for i, x in enumerate(lines) if x.startswith("calibration:"))
+    step_line = lines[cal_line + 1]
+    assert "positive_control" in step_line
+    assert "send_email" in step_line
+    assert "MYL-INC-003" in step_line
+    assert "outbox empty" in step_line
+
+
+def test_the_summary_has_no_failed_step_line_when_calibration_certified() -> None:
+    result = _result(
+        _attempt(_W4, "no_finding", trace_outcome="not-called", negative_basis="trace"),
+        calibration=CalibrationSummary(
+            status="certified",
+            reason_code=None,
+            seed_status="not_declared",
+            seed_reason_code=None,
+            certified_tools=("send_email",),
+        ),
+    )
+    summary = render_summary(result, ascii_safe=True)
+    assert "calibration failed at:" not in summary
+
+
+def test_verdicts_json_records_the_failed_step(tmp_path: Path) -> None:
+    result = _result(
+        _attempt(
+            _W2,
+            "undecided",
+            trace_outcome="dispatched-ok",
+            calibrated="false",
+            fallback_cause="MYL-INC-001",
+        ),
+        calibration=CalibrationSummary(
+            status="failed",
+            reason_code="MYL-INC-005",
+            seed_status="failed",
+            seed_reason_code="MYL-INC-006",
+            failed_step=FailedStep(
+                step="schema_check",
+                tool="read_file",
+                reply="",
+                reason_code="MYL-INC-005",
+            ),
+        ),
+    )
+    scan_dir = write_artefacts(result, tmp_path)
+    data = json.loads((scan_dir / "verdicts.json").read_text(encoding="utf-8"))
+    assert data["calibration"]["failed_step"] == {
+        "step": "schema_check",
+        "tool": "read_file",
+        "reply": "",
+        "reason_code": "MYL-INC-005",
+    }
+    reloaded = read_verdicts_calibration(scan_dir)
+    assert reloaded is not None
+    assert reloaded.failed_step is not None
+    assert reloaded.failed_step.step == "schema_check"
 
 
 def test_a_certified_calibration_names_its_tools() -> None:

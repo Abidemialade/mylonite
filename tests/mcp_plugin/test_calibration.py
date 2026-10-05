@@ -101,6 +101,10 @@ class _Store:
         #: post-plant read) echoes its own ``query`` argument back instead.
         self.recall_baseline_raises_once = False
         self.recall_calls = 0
+        #: #359: when set, ``send_email`` answers with this text as an error
+        #: instead of sending -- used to prove a secret-shaped server reply
+        #: never reaches ``failed_step.reply`` unredacted.
+        self.send_error_reply = ""
 
 
 def _text(text: str, *, is_error: bool = False) -> CallToolResult:
@@ -143,6 +147,8 @@ class _Session:
                 return _text(f"outbox as of read {store.reads}: " + "\n".join(store.outbox))
             return _text("\n".join(store.outbox) or "outbox empty")
         if name == "send_email":
+            if store.send_error_reply:
+                return _text(store.send_error_reply, is_error=True)
             if store.defer_sends:
                 return _text("queued for approval")
             if not store.drop_sends:
@@ -2159,3 +2165,209 @@ async def test_confirm_only_redis_attack_that_writes_a_different_key_is_never_re
     decision = _decide(meta)
     assert decision.kind != "resisted"
     assert decision.negative_basis != "certified-observer"
+
+
+# --- failed_step (#359): which step failed, and what the server replied ----------
+#
+# A failed or not-established calibration used to carry only its reason code.
+# Every path recorded below also names the step (a fixed set of identifiers:
+# schema_check, baseline, positive_control, plant, recall, discrimination_read,
+# declared_id_exclusion, launch), the tool, and a redacted excerpt of the
+# server's reply -- enough to diagnose a live target without rerunning it.
+
+
+@pytest.mark.asyncio
+async def test_failed_step_names_the_schema_check() -> None:
+    tools = dict(_DEFAULT_TOOLS)
+    tools["read_file"] = _schema(path="string")
+    _register(EffectProbeSpec(verify_tool="read_file", verify_args_template={}))
+    result = await _calibrate(_Launcher(_Store(), tools))
+    assert result.reason_code == "MYL-INC-005"
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_SCHEMA_CHECK
+    assert result.failed_step.tool == "read_file"
+    assert result.failed_step.reason_code == "MYL-INC-005"
+    # A schema check never reaches the server.
+    assert result.failed_step.reply == ""
+
+
+@pytest.mark.asyncio
+async def test_failed_step_names_the_baseline_for_a_noisy_verify_read() -> None:
+    _register(EffectProbeSpec(verify_tool="list_outbox"))
+    store = _Store()
+    store.noisy_verify = True
+    result = await _calibrate(_Launcher(store))
+    assert result.reason_code == "MYL-INC-004"
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_BASELINE
+    assert result.failed_step.tool == "send_email"
+    assert result.failed_step.reason_code == "MYL-INC-004"
+    # The reply is a real (redacted) excerpt of what the server sent back.
+    assert "outbox" in result.failed_step.reply
+
+
+@pytest.mark.asyncio
+async def test_failed_step_names_the_positive_control_for_a_blind_probe() -> None:
+    """No ``seed_arm`` here, so the readback control never runs -- the
+    consequential tool's own positive-control failure is the whole story."""
+    _register(seed_arm=None)
+    store = _Store()
+    store.drop_sends = True
+    result = await _calibrate(_Launcher(store))
+    assert result.reason_code == "MYL-INC-003"
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_POSITIVE_CONTROL
+    assert result.failed_step.tool == "send_email"
+    assert result.failed_step.reason_code == "MYL-INC-003"
+
+
+@pytest.mark.asyncio
+async def test_failed_step_prefers_the_readback_when_both_controls_run_and_fail() -> None:
+    """With a seed_arm declared, the readback also runs here (``remember``
+    plants to notes, which ``list_outbox`` never reads back) and fails after
+    the main candidate already has -- its failure is the one reported, being
+    the most specific diagnosis this run actually completed."""
+    _register()
+    store = _Store()
+    store.drop_sends = True
+    result = await _calibrate(_Launcher(store))
+    assert result.reason_code == "MYL-INC-003"
+    assert any(
+        t.tool == "send_email" and t.step == calibration.STEP_POSITIVE_CONTROL for t in result.tools
+    )
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_PLANT
+    assert result.failed_step.tool == "remember"
+
+
+@pytest.mark.asyncio
+async def test_failed_step_names_the_plant_for_a_seed_arm_error() -> None:
+    """The main probe still certifies; the seed control's own plant failure
+    is still worth diagnosing (#359)."""
+    _register()
+    store = _Store()
+    store.plant_errors = True
+    result = await _calibrate(_Launcher(store))
+    assert result.calibrated is True
+    assert result.seed_control.reason_code == "MYL-INC-006"
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_PLANT
+    assert result.failed_step.tool == "remember"
+    assert result.failed_step.reason_code == "MYL-INC-006"
+    assert "store full" in result.failed_step.reply
+
+
+@pytest.mark.asyncio
+async def test_failed_step_names_recall_when_no_recall_tool_exists() -> None:
+    tools = {
+        "remember": _schema(content="string"),
+        "send_email": _schema(to="string", body="string"),
+    }
+    _register(probe=None)
+    result = await _calibrate(_Launcher(_Store(), tools))
+    assert result.seed_control.reason_code == "MYL-INC-007"
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_RECALL
+    assert result.failed_step.reason_code == "MYL-INC-007"
+
+
+@pytest.mark.asyncio
+async def test_failed_step_names_recall_when_the_plant_is_never_found() -> None:
+    _register()
+    store = _Store()
+    store.blind_recall = True
+    result = await _calibrate(_Launcher(store))
+    assert result.seed_control.reason_code == "MYL-INC-006"
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_RECALL
+    assert "recall" in result.failed_step.tool
+    assert result.failed_step.reason_code == "MYL-INC-006"
+    assert "did not return it" in result.failed_step.reply
+
+
+@pytest.mark.asyncio
+async def test_failed_step_names_the_declared_id_exclusion_on_a_redis_like_store() -> None:
+    """The motivating case (#359): a Redis-shaped GET/SET target that never
+    certifies a general tool, only a confirm_only reading of its declared key."""
+    _register_redis()
+    result = await _calibrate(_RedisLauncher(_RedisStore()))
+    assert result.status == calibration.STATUS_CONFIRM_ONLY
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_DECLARED_ID_EXCLUSION
+    assert result.failed_step.tool == "set"
+    assert result.failed_step.reason_code == "MYL-INC-003"
+
+
+@pytest.mark.asyncio
+async def test_failed_step_names_the_discrimination_read() -> None:
+    result, _launcher = await _memory_run(search_error_when_no_match=True)
+    assert result.status == calibration.STATUS_FAILED
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_DISCRIMINATION_READ
+    assert result.failed_step.tool == "create_entities"
+    assert result.failed_step.reason_code == "MYL-INC-003"
+    assert "nothing found" in result.failed_step.reply
+
+
+@pytest.mark.asyncio
+async def test_failed_step_names_the_launch(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FailingLauncher:
+        def __call__(self, *args: Any, **kwargs: Any) -> Any:
+            @asynccontextmanager
+            async def _ctx() -> Any:
+                raise RuntimeError("could not launch")
+                yield  # pragma: no cover — never reached
+
+            return _ctx()
+
+    _register(seed_arm=None)
+    monkeypatch.setattr(stdio_adapter, "_open_mcp_session", _FailingLauncher())
+    result = await calibration.calibrate_custom_target(
+        MCPStdioAdapter(family=FAMILY, scope=None), authorized=True
+    )
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_LAUNCH
+    assert result.failed_step.tool == "python"
+    assert result.failed_step.reason_code == calibration.INC_NOT_CALIBRATED
+    assert result.failed_step.reply == ""
+
+
+@pytest.mark.asyncio
+async def test_failed_step_reply_never_carries_a_secret_shaped_value() -> None:
+    """A server reply shaped like a live credential (an AWS access key here)
+    must never reach ``failed_step.reply`` unredacted."""
+    secret = "AKIAABCDEFGHIJKLMNOP"  # pragma: allowlist secret
+    _register(seed_arm=None)
+    store = _Store()
+    store.send_error_reply = f"rejected: using key {secret}"
+    result = await _calibrate(_Launcher(store))
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_POSITIVE_CONTROL
+    assert secret not in result.failed_step.reply
+    assert "REDACTED" in result.failed_step.reply
+
+
+@pytest.mark.asyncio
+async def test_failed_step_is_none_when_nothing_ran() -> None:
+    """Writes not authorized, or no probe at all: nothing to diagnose."""
+    _register()
+    not_authorized = await _calibrate(_Launcher(_Store()), allow_writes=False)
+    assert not_authorized.failed_step is None
+
+    _register(None, seed_arm=None)
+    no_probe = await _calibrate(_Launcher(_Store()))
+    assert no_probe.status == calibration.STATUS_NO_PROBE
+    assert no_probe.failed_step is None
+
+
+def test_every_step_identifier_is_in_the_fixed_set() -> None:
+    assert set(calibration.STEPS) == {
+        calibration.STEP_SCHEMA_CHECK,
+        calibration.STEP_BASELINE,
+        calibration.STEP_POSITIVE_CONTROL,
+        calibration.STEP_PLANT,
+        calibration.STEP_RECALL,
+        calibration.STEP_DISCRIMINATION_READ,
+        calibration.STEP_DECLARED_ID_EXCLUSION,
+        calibration.STEP_LAUNCH,
+    }

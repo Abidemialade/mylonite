@@ -257,6 +257,43 @@ def test_calibration_summary_from_a_malformed_dict_is_none() -> None:
     assert cv.CalibrationSummary.from_dict("nope") is None
 
 
+# --- failed_step (#359): which step failed, and what the server replied ------------
+
+
+def test_calibration_summary_round_trips_a_failed_step_through_json() -> None:
+    step = cv.FailedStep(
+        step="baseline", tool="list_outbox", reply="no change", reason_code="MYL-INC-004"
+    )
+    summary = _calibration(failed_step=step)
+    assert cv.CalibrationSummary.from_dict(json.loads(json.dumps(summary.to_dict()))) == summary
+    assert summary.to_dict()["failed_step"] == {
+        "step": "baseline",
+        "tool": "list_outbox",
+        "reply": "no change",
+        "reason_code": "MYL-INC-004",
+    }
+
+
+def test_a_calibration_with_no_failed_step_round_trips_to_none() -> None:
+    summary = _calibration()
+    assert summary.failed_step is None
+    assert summary.to_dict()["failed_step"] is None
+    assert cv.CalibrationSummary.from_dict(summary.to_dict()).failed_step is None
+
+
+def test_a_malformed_failed_step_is_dropped_not_fatal() -> None:
+    """A partial or garbled ``failed_step`` never breaks reading the rest of
+    the summary back -- it is just read as absent."""
+    data = _calibration().to_dict()
+    data["failed_step"] = {"step": "baseline"}  # missing tool/reply/reason_code
+    summary = cv.CalibrationSummary.from_dict(data)
+    assert summary is not None
+    assert summary.failed_step is None
+
+    data["failed_step"] = "not a mapping"
+    assert cv.CalibrationSummary.from_dict(data).failed_step is None  # type: ignore[union-attr]
+
+
 def test_every_emitted_code_is_registered() -> None:
     from mylonite.reason_codes import REGISTRY
 

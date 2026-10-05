@@ -471,6 +471,36 @@ it back and prints the same block. Scans with no trace outcome (reference and RE
 targets, and scans saved by earlier versions) print no block and write no
 `verdicts.json`. Exit codes do not change.
 
+#### `failed_step`: which control failed, and what the server said
+
+When calibration ends `failed`, `confirm_only`, or `not_authorized` with something still
+worth diagnosing, a second line names the exact step and shows a short excerpt of the
+server's own reply there:
+
+```
+calibration: failed [MYL-INC-003]; seed control: not_declared
+  calibration failed at: positive_control (send_email) [MYL-INC-003] — server replied: outbox empty
+```
+
+`step` is one of a fixed set: `schema_check`, `baseline` (the negative control's two reads
+with nothing written between them), `positive_control`, `plant`, `recall`,
+`discrimination_read`, or `declared_id_exclusion` (the control only validated because a
+required identifier was filled from the target file's own declared key or id — see
+[Calibration](target-file.md#calibration)); `launch` means the target never started, so no
+control ran at all. The tool in parentheses is whichever call (or absence of one) produced
+the failure; it is omitted when no specific tool applies. The reply is truncated to 200
+characters and passes through the same secret-shaped-token redaction as everything else
+Mylonite logs (see [Security](security.md)), so a live credential a server echoes back
+never reaches this line unmasked.
+
+A seed control that ends `failed` or `not_run` can also set `failed_step` even when the
+main probe certified — the plant or recall is still worth diagnosing on its own. Nothing
+is recorded when there is nothing to diagnose: writes were never authorized, the target
+declares no probe, or calibration certified cleanly. The same object is written to
+`verdicts.json`'s `calibration.failed_step` (`step`, `tool`, `reply`, `reason_code`), so a
+saved run — including one from a live target you cannot easily reproduce — can be
+diagnosed from its artefacts alone.
+
 ### What a run spent
 
 `scan` prints an `llm:` line under its counts — calls by role, the `--max-llm-calls` budget
