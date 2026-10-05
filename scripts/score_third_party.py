@@ -162,8 +162,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -741,12 +743,23 @@ def _exploit_tool(exploit_path: Path) -> str | None:
 
 
 #: Precedence for picking which per-finding subdirectory's result speaks for
-#: the whole multi-finding run -- lower wins. Mirrors the module docstring's
-#: own classification order: a product defect or an infra/invalid signal
-#: (read off the SAME shared logs for every subdirectory, so never actually
-#: disagrees between them) still overrides everything; among ordinary
-#: results, KEPT beats every not-kept classification -- "KEPT over
-#: not-kept" from the harness's own fix requirement.
+#: the whole multi-finding run's own ``classification``/``proof_level`` --
+#: lower wins. Mirrors the module docstring's own classification order. A
+#: product defect (or an infra/invalid signal) in ANY one subdirectory --
+#: each now scored from its OWN generate.log/validate.log only, never a
+#: shared log another exploit could have written into (see
+#: ``_score_multi_report_run``'s docstring) -- still overrides a sibling's
+#: real KEPT finding here, by deliberate choice: a crash is a product issue
+#: that must never be auto-re-run or silently dropped (the module
+#: docstring's rule #1), so this run's own top-level classification must
+#: keep surfacing it even when another exploit in the same run validated
+#: cleanly. The KEPT sibling's own true label/proof_level is NOT lost by
+#: this choice -- it is still recorded accurately in ``validated_findings``,
+#: which is what Critical finding 1 of the harness review was actually
+#: about (the crash used to corrupt the KEPT sibling's OWN recorded data,
+#: not merely outrank it). Among ordinary results, KEPT beats every
+#: not-kept classification -- "KEPT over not-kept" from the harness's own
+#: fix requirement.
 _CLASSIFICATION_RANK: dict[str, int] = {
     PRODUCT_DEFECT: 0,
     INFRA: 1,
@@ -782,13 +795,59 @@ def _pick_strongest(sub_results: list[dict[str, object]]) -> dict[str, object]:
     return min(sub_results, key=_key)
 
 
+def _local_log_text(sub: Path) -> str:
+    """This subdirectory's OWN ``generate.log`` + ``validate.log`` text, in
+    that order -- never the shared, whole-of-run ``run.log``/``generate.log``/
+    ``validate.log`` the workflow's outer ``tee -a`` also writes into, which
+    every OTHER exploit's own generate/validate call appends to as well (see
+    ``_score_multi_report_run``'s docstring for why that contamination was a
+    real bug). A missing file contributes nothing; both missing gives
+    ``""``, never ``None`` -- read as "no traceback, no infra signature",
+    exactly like a clean run with no log at all."""
+    parts = [
+        text
+        for name in ("generate.log", "validate.log")
+        if (text := _read_log(sub / name)) is not None
+    ]
+    return "\n".join(parts)
+
+
+def _score_subdir(sub: Path, *, pattern: str | None, scan_dir: Path | None) -> dict[str, object]:
+    """Score one per-finding subdirectory using ONLY its own logs -- never
+    the shared ``run.log``/``scan.log`` another exploit's crash could have
+    written into. Writes :func:`_local_log_text` to a throwaway temp file
+    and passes THAT as ``run_log`` (the only way to feed :func:`score_run`
+    log text without a path, since its traceback/infra-signature checks are
+    path-based); ``scan_log`` is omitted entirely -- a scan-level crash
+    happens before any subdirectory exists at all (``generate`` only runs
+    after a successful scan), so there is nothing scan-level left to detect
+    per subdirectory, and omitting it keeps the shared scan log's own
+    behaviour exactly where it already lived: the ordinary, non-multi
+    :func:`score_run` path this function never touches. ``validate_log`` is
+    this subdirectory's own ``validate.log`` when ``generate`` got that
+    far."""
+    own_validate_log = sub / "validate.log"
+    fd, tmp_name = tempfile.mkstemp(suffix=".log", prefix="score_subdir_")
+    os.close(fd)
+    local_run_log = Path(tmp_name)
+    try:
+        local_run_log.write_text(_local_log_text(sub), encoding="utf-8")
+        return score_run(
+            sub,
+            run_log=local_run_log,
+            scan_log=None,
+            validate_log=own_validate_log if own_validate_log.is_file() else None,
+            pattern=pattern,
+            scan_dir=scan_dir,
+        )
+    finally:
+        local_run_log.unlink(missing_ok=True)
+
+
 def _score_multi_report_run(
     run_dir: Path,
     subdirs: list[Path],
     *,
-    run_log: Path | None,
-    scan_log: Path | None,
-    validate_log: Path | None,
     pattern: str | None,
     scan_dir: Path | None,
 ) -> dict[str, object]:
@@ -796,24 +855,39 @@ def _score_multi_report_run(
     exploit the harness generated+validated -- see
     :func:`_multi_report_subdirs`) and combine them into one cell verdict.
 
+    Each subdirectory is scored by :func:`_score_subdir` from its OWN
+    ``generate.log``/``validate.log`` only -- never the shared, whole-of-run
+    ``run_log``/``scan_log``/``validate_log`` :func:`score_run` was given at
+    the top level (deliberately not forwarded here at all: passing them down
+    used to let one exploit's crash corrupt a sibling's own recorded
+    label/proof_level; see the harness review this fixes).
+
     Every validated finding is recorded in ``validated_findings`` (pattern,
-    tool, verdict label, proof level), but the cell's own ``classification``
-    and ``proof_level`` are the STRONGEST one's (see :func:`_pick_strongest`)
-    -- never the alphabetically-first subdirectory, which is exactly the bug
-    the single-exploit harness had (see the module docstring's batch-4
-    finding). ``scan_findings``/``max_scan_proof_level`` mark EVERY
-    validated pattern_id, not only one."""
-    sub_results = [
-        score_run(
-            sub,
-            run_log=run_log,
-            scan_log=scan_log,
-            validate_log=validate_log,
-            pattern=pattern,
-            scan_dir=scan_dir,
-        )
-        for sub in subdirs
-    ]
+    tool, verdict label, proof level, AND that subdirectory's own
+    ``classification`` -- ``label`` is ``None`` and ``classification`` names
+    the failure, e.g. ``PRODUCT_DEFECT``, when that exploit's own
+    generate/validate crashed; the crash is recorded, never silently
+    dropped). The cell's own top-level ``classification`` and
+    ``proof_level`` are the STRONGEST sub-result's (see
+    :func:`_pick_strongest`) -- never the alphabetically-first subdirectory,
+    which is exactly the bug the single-exploit harness had (see the module
+    docstring's batch-4 finding).
+
+    Deliberate choice on a mixed run (one exploit crashed, a sibling KEPT):
+    the top-level ``classification`` reads the CRASH (``PRODUCT_DEFECT``
+    outranks ``KEPT`` in :data:`_CLASSIFICATION_RANK`), because a product
+    defect must never be silently outranked by an unrelated sibling's good
+    result -- the module docstring's rule #1 ("PRODUCT_DEFECT is NEVER
+    counted toward the N=3 bar and is NEVER auto-re-run"). The KEPT
+    sibling's own finding is never hidden by this choice: it is still
+    present, with its real label and proof_level, in ``validated_findings``
+    and in ``scan_findings`` (``validated: true``) -- a reader of this run's
+    score sees BOTH the crash that needs investigating and the real finding
+    that was proven anyway.
+
+    ``scan_findings``/``max_scan_proof_level`` mark EVERY validated
+    pattern_id, not only one."""
+    sub_results = [_score_subdir(sub, pattern=pattern, scan_dir=scan_dir) for sub in subdirs]
 
     validated_findings: list[dict[str, object]] = []
     kept_pattern_ids: set[str] = set()
@@ -830,6 +904,7 @@ def _score_multi_report_run(
                 "tool": tool,
                 "label": label,
                 "proof_level": sub_result.get("proof_level"),
+                "classification": sub_result.get("classification"),
             }
         )
         if label == "KEPT":
@@ -899,9 +974,6 @@ def score_run(
         return _score_multi_report_run(
             run_dir,
             subdirs,
-            run_log=run_log,
-            scan_log=scan_log,
-            validate_log=validate_log,
             pattern=pattern,
             scan_dir=scan_dir,
         )

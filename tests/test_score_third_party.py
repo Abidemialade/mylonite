@@ -1415,12 +1415,14 @@ def test_multi_report_run_records_every_validated_finding(tmp_path: Path) -> Non
         "tool": "create_relations",
         "label": "KEPT",
         "proof_level": "dispatched-tool-linked",
+        "classification": scorer.KEPT,
     }
     assert by_pattern["synth-w4-unconfirmed-delete_entities"] == {
         "pattern_id": "synth-w4-unconfirmed-delete_entities",
         "tool": "delete_entities",
         "label": "KEPT",
         "proof_level": "effect-confirmed",
+        "classification": scorer.KEPT,
     }
 
 
@@ -1459,3 +1461,110 @@ def test_single_report_layout_is_unaffected_by_multi_report_detection(
     result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
     assert result["classification"] == scorer.KEPT
     assert "validated_findings" not in result
+
+
+# --- a mixed run: one exploit crashed, a sibling KEPT ----------------------
+# A harness review of the multi-report change above found that every
+# subdirectory's `score_run` call was given the SAME shared `run.log`/
+# `generate.log`/`validate.log` the workflow's `tee -a` appends every
+# exploit's output into -- so a mylonite traceback in ONE exploit's own
+# generate/validate call made EVERY sibling's score read PRODUCT_DEFECT too,
+# even a sibling whose own validation_report.json said KEPT, and silently
+# wiped that sibling's own recorded label/proof_level in the process. The
+# fix scores each subdirectory from its OWN `generate.log`/`validate.log`
+# only (`_score_subdir`), so a crash can never corrupt or outrank a
+# sibling's own recorded data -- only the RUN's own top-level
+# `classification` (a deliberate choice, documented on
+# `_score_multi_report_run`) still reads the crash, so it is never hidden.
+
+
+def _materialise_mixed_crash_run(tmp_path: Path) -> tuple[Path, Path]:
+    """``create_relations`` is cleanly KEPT (the same fixture files as
+    ``multi_two_findings``); ``delete_entities``'s own `generate` call wrote
+    its exploit file, but its `validate` call crashed with a mylonite
+    traceback in ITS OWN `validate.log` only -- never the shared run.log."""
+    fixture_dir = _FIXTURES / "multi_two_findings"
+    generated_dir = tmp_path / "generated"
+    out_dir = tmp_path / "out"
+    out_dir.mkdir(parents=True)
+
+    (out_dir / "scan_report.json").write_text(
+        (fixture_dir / "out_scan_report.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (out_dir / "verdicts.json").write_text(
+        (fixture_dir / "out_verdicts.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    stub_text = (fixture_dir / "sub_scan_report_stub.json").read_text(encoding="utf-8")
+
+    kept_dir = generated_dir / "create_relations"
+    kept_dir.mkdir(parents=True)
+    (kept_dir / "scan_report.json").write_text(stub_text, encoding="utf-8")
+    (kept_dir / "validation_report.json").write_text(
+        (fixture_dir / "validation_report_create_relations.json").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    kept_exploit_text = (fixture_dir / "exploit_create_relations.json").read_text(encoding="utf-8")
+    (kept_dir / "exploit_create_relations.json").write_text(kept_exploit_text, encoding="utf-8")
+    (out_dir / "exploit_create_relations.json").write_text(kept_exploit_text, encoding="utf-8")
+
+    crashed_dir = generated_dir / "delete_entities"
+    crashed_dir.mkdir(parents=True)
+    (crashed_dir / "scan_report.json").write_text(stub_text, encoding="utf-8")
+    crashed_exploit_text = (fixture_dir / "exploit_delete_entities.json").read_text(
+        encoding="utf-8"
+    )
+    (crashed_dir / "exploit_delete_entities.json").write_text(
+        crashed_exploit_text, encoding="utf-8"
+    )
+    (out_dir / "exploit_delete_entities.json").write_text(crashed_exploit_text, encoding="utf-8")
+    # No validation_report.json for this one -- validate crashed. The
+    # traceback carries a real `mylonite` stack-frame shape (a quoted
+    # `File "...mylonite/....py"` reference) so rule #1 fires exactly as it
+    # would on a real crash.
+    (crashed_dir / "validate.log").write_text(
+        "validating...\n"
+        "Traceback (most recent call last):\n"
+        '  File "/x/mylonite/validate/cli.py", line 10, in run\n'
+        '    raise RuntimeError("boom")\n'
+        "RuntimeError: boom\n",
+        encoding="utf-8",
+    )
+
+    return generated_dir, out_dir
+
+
+def test_mixed_run_crash_never_corrupts_the_kept_siblings_own_entry(
+    tmp_path: Path,
+) -> None:
+    """The exact Critical finding: before the fix, the crashed exploit's
+    traceback (read from a SHARED log) forced the KEPT sibling's entry to
+    lose its real label/proof_level too. Now each is scored from its own
+    logs, so the KEPT sibling's entry is untouched by the crash."""
+    generated_dir, out_dir = _materialise_mixed_crash_run(tmp_path)
+    result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
+
+    by_pattern = {f["pattern_id"]: f for f in result["validated_findings"]}
+    kept = by_pattern["synth-w4-unconfirmed-create_relations"]
+    assert kept["label"] == "KEPT"
+    assert kept["proof_level"] == "dispatched-tool-linked"
+    assert kept["classification"] == scorer.KEPT
+
+    crashed = by_pattern["synth-w4-unconfirmed-delete_entities"]
+    assert crashed["label"] is None
+    assert crashed["classification"] == scorer.PRODUCT_DEFECT
+
+
+def test_mixed_run_top_level_classification_surfaces_the_crash(tmp_path: Path) -> None:
+    """Documented, deliberate choice: the run's own top-level
+    `classification` reads the crash (PRODUCT_DEFECT), never the sibling's
+    KEPT result -- a product defect must never be silently outranked and
+    auto-passed. The KEPT finding is not hidden by this: it is still fully
+    present in `validated_findings` (the test above) and in
+    `scan_findings`."""
+    generated_dir, out_dir = _materialise_mixed_crash_run(tmp_path)
+    result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
+    assert result["classification"] == scorer.PRODUCT_DEFECT
+
+    validated_scan_ids = {f["pattern_id"] for f in result["scan_findings"] if f["validated"]}
+    assert "synth-w4-unconfirmed-create_relations" in validated_scan_ids
+    assert "synth-w4-unconfirmed-delete_entities" in validated_scan_ids
