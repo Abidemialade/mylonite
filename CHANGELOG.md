@@ -36,6 +36,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passes only when attacks were actually exercised, and every kept finding is
   checked against its trace before results are published.
 
+- **The second (end-to-end) verification campaign's results are committed.**
+  118 run directories, scored from their own artifacts by the new
+  `scripts/build_e2e_results.py`, which also reports each cell's own
+  round-by-round history (a superseded round is published, never dropped,
+  labelled with the fix that replaced it) and a `kept_findings_summary`/
+  `spend_summary`. The stronger proof-depth bar (KEPT at `effect-confirmed`
+  under a `certified` calibration) was not met on either `server-memory` or
+  `mcp-redis`: neither target's calibration reaches `certified` on any run,
+  although both kept the same W4 finding as the first campaign on nearly
+  every counted re-drive; the flagship tool-description class fired in
+  `scan` on 3 of 12 runs against the reference app on stronger models and
+  kept on none (those same 3 runs read `NOT TESTED` on a validate ceiling,
+  the other 9 a clean resist). `mcp-redis`'s proof-depth cell was re-run after a general
+  calibration fix corrected a false `failed` reading (a store whose
+  not-found reply echoes the requested key, as Redis's does, always failed
+  calibration before the fix); on the counted round calibration reads
+  `confirm_only` on every run, a structural ceiling of this target, not a
+  residual defect — and validate's own effect leg independently reads
+  `effect-confirmed` there, reported alongside the `confirm_only`
+  calibration, not instead of it. Three of its OpenAI runs from the first
+  post-fix dispatch hit a shared provider rate limit and are reported void,
+  with the cause named, not folded into a not-kept count; the sequential
+  re-dispatch kept 2 of 3, with the third reading `NOT TESTED` (its own
+  validate ceiling). One of two live fix re-tests passed; the precision
+  (false-positive) cells read one mechanical pass with a caveat (the
+  guarded reference target's 0-KEPT result rests on a failed effect probe,
+  not a demonstrated resist — the attack fired 3/3 on the raw build and the
+  guarded build leaked 0/3 on every run), one clean pass, and one
+  inconclusive on non-deterministic upstream crashes. The third-party
+  indirect-injection class resisted on stronger models, decided by the judge
+  reading the full trace, published as the honest result either way. 11
+  KEPT findings land in this round's own counted runs, every one hand-
+  adjudicated true positive against its own trace and its own validate-
+  measured effect proof level; 30 runs read KEPT across every status
+  (18 on superseded rounds, 1 on a voided run), none false positive. Spend
+  is reported as a measured lower bound: four ceiling-stopped runs' own
+  validate leg made 80 more requests per provider side that printed no
+  cost line. Full numbers, every run, every cell's bar and round:
+  `verification/results/0.12.0/e2e/README.md`, with `docs/verification.md`
+  and `verification/CAPABILITY_MATRIX.md`.
+
 - **A CI rehearsal now runs the launch journey exactly as the docs write
   it.** `rehearsal.yml` (manual dispatch) runs
   `verification/rehearsal/journey.sh` on clean Linux and Windows runners,

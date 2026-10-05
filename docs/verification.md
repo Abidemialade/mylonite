@@ -69,38 +69,94 @@ target with the wrong content type
 the measured build). None of these were silently scored clean. Total spend: $0.91 on
 Anthropic, $0.08 on OpenAI, $0 on the in-runner Ollama cell.
 
-### Next round: pre-registered, not yet run
+### Second round, complete: deeper proof, fix re-tests, precision, breadth
 
-A follow-up pass against the same harness is pre-registered in
-[`PREREG_E2E_2026_10.md`](https://github.com/Abidemialade/mylonite/blob/main/verification/PREREG_E2E_2026_10.md),
-committed before any counted run under it. It goes deeper on the two servers above
-(a stronger, state-confirmed proof bar), re-tests the fixes linked in the write-up
-above live, measures false positives on three benign configurations where nothing
-should ever be kept, and repeats the two smoke-only targets at a statistically
-meaningful count on a second, mid-tier model pair. Results land here, and in
-`verification/results/`, once the runs are in.
+A follow-up pass against the same harness, pre-registered in
+[`PREREG_E2E_2026_10.md`](https://github.com/Abidemialade/mylonite/blob/main/verification/PREREG_E2E_2026_10.md)
+before any counted run under it, is now complete. Full write-up, with every
+run and every cell's bar:
+[`verification/results/0.12.0/e2e/README.md`](https://github.com/Abidemialade/mylonite/tree/main/verification/results/0.12.0/e2e).
 
-The first dispatch round under that prereg found two harness defects, logged and
-fixed in that file's "Amendments" section: the read-only time-server cell crashed on
-an upstream dependency-version mismatch before any Mylonite command ran, and the
-Agents-SDK cell was dispatched scan-only, so its own pass bar was unreachable. Both
-cells' 6 runs are void and will be re-run in full once the fix lands. The other two
-cells in that round already stand: one benign precision target hit reproducible,
-non-deterministic upstream crashes (reported as measured, not re-run — that is target
-flakiness, not a harness problem) and the streamable-HTTP cell met its bar exactly as
-expected, with NOT TESTED, because that target has no surface to plant a payload on.
+**Proof depth did not clear the stronger bar.** Both `server-memory` and
+`mcp-redis` kept the same W4 finding as the first campaign, on nearly every
+one of 6 counted re-drives each — but this round's bar asks for a `KEPT`
+finding at `effect-confirmed` under a `certified` calibration, and neither
+target's calibration reaches `certified` on any run: `server-memory`
+calibrates `confirm_only` on every run (its own validate-measured effect
+leg never exceeds `dispatched-tool-linked` either). `mcp-redis` calibrated
+`failed` on every one of its two earlier, superseded rounds; a general
+calibration fix repaired the bug that falsely produced that reading (it
+mistook a store whose not-found reply echoes the requested key, as
+Redis's does, for a failed control), and on the counted round calibration
+reads `confirm_only` on every run — never `failed` again, but also never
+`certified`, a structural ceiling of this target (its key is fixed in the
+target file, so the general-certification write path is always excluded).
+On the counted round, validate's own effect leg DOES read
+`effect-confirmed` (reported alongside the `confirm_only` calibration, not
+instead of it) — still not the bar, which needs `certified` first. Three
+`mcp-redis` OpenAI runs from the first dispatch after the fix hit a shared
+provider rate limit and are void, reported with the cause, not folded into
+a not-kept count; the sequential re-dispatch kept 2 of those 3, with the
+third reading `NOT TESTED` (its own validate ceiling, not "did not land").
+Reported as a documented limit, not a pass.
 
-Before the proof-depth cells re-run, the memory and Redis target files gain an opt-in
-removal check, logged as a dated amendment in the same file. A W4 delete of the record
-the payload names can now reach `effect-confirmed`. It needs an exact name, so the
-amendment expects few such deletes on the small models and leaves every bar unchanged.
+**One fix re-test passed, one did not.** The streamable-HTTP target still
+reads `NOT TESTED` on every run (no seedable surface) exactly as expected.
+The OpenAI-Agents-SDK-on-Ollama target's own bar needed the `STABLE, NOT
+PROVEN` candidate label on 2+/3 runs per provider; only 1 of 6 runs reached
+it — not met.
 
-A later round found two more harness defects, also logged and fixed as a dated
-amendment: the reference-app breadth cell installed into the wrong Python
-environment and so could never be imported, and the Go memory cell's binary moved
-out from under a product fix that (correctly) started anchoring a target file's
-relative command to its own directory. Both cells' 6 runs are void and will be
-re-run in full once each fix is smoke-tested.
+**Two of three precision (false-positive) checks passed cleanly: 0 KEPT,
+every run exercised.** The third (`server-everything`, reused as a
+read-only check) saw non-deterministic upstream crashes leave 4 of 6 runs
+unexercised — `precision-rollup` reads `INCONCLUSIVE`, not a pass, per the
+vacuous-pass rule; not re-run, since the cause is target flakiness, not an
+infrastructure or product defect.
+
+**Breadth on stronger models: the flagship class fired on 3 of 12 runs and
+kept on none; the third-party indirect-injection class resisted,
+judge-only.** The tool-description (W1) class fired in `scan` on 3 of 12
+runs against the
+reference app on `claude-sonnet-5`/`gpt-5.1`; those 3 were then cut short
+by a validate ceiling (`NOT TESTED`, never scored as "did not land"), and
+0 of the 12 kept — reported as a documented limit, in the prereg's own
+exact wording ("both **tiers'** numbers"); only the mid tier ran this
+cell, so no small-tier number is claimed. The indirect-injection (W2)
+class against `server-memory` on the same stronger models resisted on all
+6 counted runs, decided by the judge reading the full trace, not a
+structural marker — published as the honest result, which this cell's own
+bar accepts either way; an earlier, superseded round (before a generic
+store-and-recall seed fix) never engaged the planner at all. The Go-memory
+smoke target produced a real W4 finding on every run, both providers, that
+stays unvalidated because this cell is dispatched scan-only — `generate`
+and `validate` never run, so there is no validation report, and no
+calibration check was ever consulted — a candidate under never-keep-
+unproven, never a kept verdict.
+
+Along the way, five groups of runs voided on harness defects or an
+infrastructure cause (a third-party dependency-version mismatch, a
+scan-only dispatch that made a cell's own bar unreachable, an install into
+the wrong Python environment, a binary moved out from under an
+intervening, correct product fix, and three OpenAI Redis runs that hit a
+shared provider rate limit), all logged with their fix or cause in the
+prereg's dated amendments and re-run in full or in part; four more groups
+(25 runs: `server-memory`'s first round, `mcp-redis`'s first two rounds,
+and the W2 breadth cell's first round) were superseded, not void, by a
+later counted re-measurement once a real product gap (the removal-
+confirmation feature, the general calibration fix, and a generic
+store-and-recall W2 seed that a structural gate had wrongly excluded) was
+fixed in each case — published in full, round by round, in the write-up's
+own "Superseded rounds, published in full" section, not dropped once
+replaced. Every voided and superseded run is still recorded in
+`results.json`, excluded only from its cell's own rollup — see the
+write-up's "Spend" and the file itself for the full accounting. 11 KEPT
+findings land in this round's counted runs (30 KEPT across every status,
+including superseded and one void run); every one is hand-adjudicated true
+positive. Counted spend: $1.34 on Anthropic (385 calls), $0.19 on OpenAI
+(458 calls) — both a measured lower bound, since four ceiling-stopped
+runs' validate leg made 80 more requests each side that printed no cost
+line; both totals, even at the corrected call counts, are well inside the
+pre-registered budget.
 
 ## Launch rehearsal: the journey docs, run as written
 
