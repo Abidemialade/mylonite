@@ -115,11 +115,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guarded reference target's 0-KEPT result rests on a failed effect probe,
   not a demonstrated resist — the attack fired 3/3 on the raw build and the
   guarded build leaked 0/3 on every run), one clean pass, and one
-  inconclusive on non-deterministic upstream crashes. The third-party
+  inconclusive (first attributed to upstream crashes; the real cause was a
+  Mylonite shutdown race, fixed and re-run in a later round). The third-party
   indirect-injection class resisted on stronger models, decided by the judge
   reading the full trace, published as the honest result either way. 11
-  KEPT findings land in this round's own counted runs, every one hand-
-  adjudicated true positive against its own trace and its own validate-
+  KEPT findings land in this round's own counted runs, every one
+  adjudicated true positive (by the campaign's AI agents; a person's
+  review is pending) against its own trace and its own validate-
   measured effect proof level; 30 runs read KEPT across every status
   (18 on superseded rounds, 1 on a voided run), none false positive. Spend
   is reported as a measured lower bound: four ceiling-stopped runs' own
