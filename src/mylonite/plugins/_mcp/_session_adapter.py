@@ -203,14 +203,22 @@ def _unwrap_sole_exception(exc: BaseException) -> BaseException:
     return exc
 
 
-#: anyio's "the other end of this in-memory stream is closed" errors. The MCP
-#: SDK's transports (stdio, SSE, streamable HTTP) forward each message the
-#: server sends into a stream that ``ClientSession`` reads; once
+#: anyio's "this in-memory stream's other end is closed" errors: the same set
+#: ``MCPSessionAdapterBase._classify_failure`` reports as ``subprocess_crash``.
+#: The MCP SDK's transports (stdio, SSE, streamable HTTP) forward each message
+#: the server sends into a stream that ``ClientSession`` reads; once
 #: ``ClientSession`` has closed its end, forwarding one more message raises
-#: one of these from the transport's reader task.
+#: ``BrokenResourceError`` from the transport's reader task. ``ClosedResourceError``
+#: and ``EndOfStream`` are the same close seen from the other end, so a
+#: transport whose close sequence surfaces either one is treated alike. The
+#: rule that keeps a real crash a crash is WHEN the error is raised (only
+#: after the caller's body returned, see :func:`_open_client_session`), never
+#: which of these types it is: during a call, every one of them still
+#: propagates and is classified ``subprocess_crash``.
 _CLOSED_STREAM_ERRORS: tuple[type[BaseException], ...] = (
     anyio.BrokenResourceError,
     anyio.ClosedResourceError,
+    anyio.EndOfStream,
 )
 
 
@@ -2089,6 +2097,12 @@ class _MCPAttackSession:
         self._adapter = adapter
         self._cm = cm
         self._session = session
+        #: The first exception that escaped ``call_tool``/``drive_planner``.
+        #: ``close()`` forwards it into the session's exit, so a session whose
+        #: own work failed is never closed as if it had finished cleanly (the
+        #: opener only treats a closed-stream error at close as clean when the
+        #: body returned normally).
+        self._failure: BaseException | None = None
         # T14: the raw completion_fn (or None) — LLMPlanner routes every call
         # through _llm.litellm_tool_call_async, which owns budget-counting
         # (caller="planner") + the active LLMPolicy's kwargs itself; no
@@ -2106,6 +2120,28 @@ class _MCPAttackSession:
         self._planted_payloads: list[str] = []
 
     async def call_tool(
+        self, name: str, arguments: dict[str, object], *, payload_body: str | None = None
+    ) -> ToolCallOutcome:
+        try:
+            return await self._call_tool(name, arguments, payload_body=payload_body)
+        except BaseException as exc:
+            self._note_failure(exc)
+            raise
+
+    async def drive_planner(
+        self, user_message: str, *, pattern_id: str = "session-drive"
+    ) -> AdapterResponse:
+        try:
+            return await self._drive_planner(user_message, pattern_id=pattern_id)
+        except BaseException as exc:
+            self._note_failure(exc)
+            raise
+
+    def _note_failure(self, exc: BaseException) -> None:
+        if self._failure is None:
+            self._failure = exc
+
+    async def _call_tool(
         self, name: str, arguments: dict[str, object], *, payload_body: str | None = None
     ) -> ToolCallOutcome:
         """Issue a RAW attacker call, bypassing the boundary control.
@@ -2138,7 +2174,7 @@ class _MCPAttackSession:
         result = await self._adapter._bounded(shim.call_tool(name, args))
         return ToolCallOutcome(tool=name, result=result.content, is_error=result.isError)
 
-    async def drive_planner(
+    async def _drive_planner(
         self, user_message: str, *, pattern_id: str = "session-drive"
     ) -> AdapterResponse:
         planner_calls: list[dict[str, Any]] = []
@@ -2268,7 +2304,13 @@ class _MCPAttackSession:
         )
 
     async def close(self) -> None:
-        await self._cm.__aexit__(None, None, None)
+        failure = self._failure
+        if failure is None:
+            await self._cm.__aexit__(None, None, None)
+        else:
+            # The exit sees the failure, so the session is not closed as if
+            # its work had finished; the caller already received the failure.
+            await self._cm.__aexit__(type(failure), failure, failure.__traceback__)
 
 
 def _declared_deferrals(spec: target_registry.TargetSpec) -> tuple[str, ...]:

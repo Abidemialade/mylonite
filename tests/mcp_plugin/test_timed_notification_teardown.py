@@ -31,7 +31,7 @@ from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import anyio
 import pytest
@@ -40,6 +40,8 @@ from mylonite.contracts import Payload
 from mylonite.plugins._mcp import stdio_adapter, target_registry
 from mylonite.plugins._mcp._session_adapter import (
     MCPSessionAdapterBase,
+    _MCPAttackSession,
+    _only_closed_stream_errors,
     _open_client_session,
     _unwrap_sole_exception,
 )
@@ -364,3 +366,75 @@ async def test_an_error_from_the_body_itself_is_never_swallowed() -> None:
         ):
             raise anyio.BrokenResourceError
     assert isinstance(_unwrap_sole_exception(excinfo.value), anyio.BrokenResourceError)
+
+
+@pytest.mark.asyncio
+async def test_end_of_stream_during_teardown_is_a_clean_close() -> None:
+    fire = anyio.Event()
+    async with _open_client_session(
+        _transport_whose_reader_breaks(fire, anyio.EndOfStream()),
+        lambda r, w: _FakeSession(on_exit=fire),
+    ):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_end_of_stream_while_a_call_is_in_flight_is_still_a_crash() -> None:
+    fire = anyio.Event()
+    with pytest.raises(BaseException) as excinfo:
+        async with _open_client_session(
+            _transport_whose_reader_breaks(fire, anyio.EndOfStream()),
+            lambda r, w: _FakeSession(),
+        ):
+            fire.set()
+            await anyio.sleep(5)
+    leaf = _unwrap_sole_exception(excinfo.value)
+    assert isinstance(leaf, anyio.EndOfStream)
+    assert MCPSessionAdapterBase._classify_failure(leaf) == "subprocess_crash"
+
+
+# --- The stateful attack session (opened, used and closed by hand) ---------
+
+
+class _SessionWhoseCallBreaks(_FakeSession):
+    """A session whose tool call fails as a dead transport does."""
+
+    async def call_tool(self, name: str, arguments: Any) -> Any:
+        raise anyio.BrokenResourceError
+
+
+class _UnboundedAdapter:
+    async def _bounded(self, coro: Any) -> Any:
+        return await coro
+
+    _completion_fn = None
+
+
+async def _attack_session(fire: anyio.Event) -> _MCPAttackSession:
+    cm = _open_client_session(
+        _transport_whose_reader_breaks(fire, anyio.BrokenResourceError()),
+        lambda r, w: _SessionWhoseCallBreaks(on_exit=fire),
+    )
+    session = await cm.__aenter__()
+    return _MCPAttackSession(cast(Any, _UnboundedAdapter()), cm, session)
+
+
+@pytest.mark.asyncio
+async def test_closing_an_attack_session_whose_call_failed_is_not_a_clean_close() -> None:
+    """``close()`` must not tell the opener the body returned normally when a
+    call in this session already failed: the teardown race then surfaces
+    instead of being swallowed."""
+    fire = anyio.Event()
+    attack = await _attack_session(fire)
+    with pytest.raises(anyio.BrokenResourceError):
+        await attack.call_tool("ping", {})
+    with pytest.raises(BaseException) as excinfo:
+        await attack.close()
+    assert _only_closed_stream_errors(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_closing_an_attack_session_whose_work_succeeded_is_a_clean_close() -> None:
+    fire = anyio.Event()
+    attack = await _attack_session(fire)
+    await attack.close()

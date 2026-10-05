@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remote transports and for every session Mylonite opens (scan attempts,
   calibration, effect probes, validation, testkit). A server that drops the
   connection while a call is still waiting for its reply is still reported as
-  a crash. Nothing is retried.
+  a crash. Nothing is retried. `anyio>=4.5,<5` is now a declared dependency,
+  since the opener relies on its stream-error types.
 
 - **A no-verdict run names a provider rate limit instead of pointing at the
   wrong fix.** A run that reaches no verdict because a provider rate limit
