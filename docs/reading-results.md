@@ -418,6 +418,15 @@ neither it nor the remediation lines suggest an `effect_probe`, which a `rest` t
 refuses (see [Plain HTTP agents](http-agent.md)). When the judges disagree there, the
 remediation line suggests a stronger `--judge-model` instead.
 
+On a target that declares [removal confirmation](target-file.md#removal-confirmation-w4-deletes),
+the effect leg's detail also counts each run's removal outcome — `confirmed`, `not
+confirmed`, `unavailable` or `errored` — and the first note of each kind, e.g. "removal: 2
+confirmed, 1 unavailable; removal notes: unavailable (the record may already exist, so it
+was not touched)". An `unavailable` run most often means a prior run's own validate left a
+record behind that this run's own pre-check then found already present; the note names the
+real cause instead of a bare count. This is detail text only — it never changes the verdict,
+gating or proof level.
+
 ### Reading a rug-pull result
 
 The `synth-w1-rug-pull` attempt lists the server's tools before the agent runs, lists

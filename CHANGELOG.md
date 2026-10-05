@@ -65,6 +65,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   default of `2` retries under a ceiling, so setting one can never silently
   turn off the resilience a 429 would otherwise have had.
 
+- **A removal check that reads "unavailable" now says why.** On a target
+  that declares `effect_probe.removal` (the opt-in check that confirms a W4
+  delete actually removed the record it named), the effect leg's detail now
+  reports each run's removal outcome — confirmed, not confirmed, unavailable
+  or errored — alongside its own note, e.g. "removal: 2 confirmed, 1
+  unavailable; removal notes: unavailable (the record may already exist, so
+  it was not touched)". Previously that note was recorded but never shown,
+  so an "unavailable" reading (most often a record a prior run's own
+  validate left behind) had no visible cause. Detail text only: no verdict,
+  gating or proof level changes, and a target with no removal probe declared
+  carries no removal clause at all.
+
 ### Documentation
 
 - **A second third-party campaign is pre-registered.**

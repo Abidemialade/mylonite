@@ -81,7 +81,7 @@ from pathlib import Path
 from typing import Any, ClassVar, Final, Literal, get_args
 
 from mylonite._concurrency import gather_bounded, run_twins
-from mylonite._redaction import redact_exception, redact_value
+from mylonite._redaction import redact, redact_exception, redact_value
 from mylonite._replay import LiteLLMRecorder
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, format_guard_mode, format_marker
 from mylonite._verdict import (
@@ -136,6 +136,18 @@ _KITCHEN_SINK_SEEDS: tuple[tuple[str, str], ...] = tuple(
 #: The proof levels a firing run can count at on the custom-target effect leg,
 #: strongest first. They are the verdict rule's own levels.
 _EFFECT_PROOF_LEVELS: Final[tuple[ProofLevel, ...]] = get_args(ProofLevel)
+
+#: Removal-confirmation outcomes the effect leg's detail counts per run, in
+#: display order, and the plain-word label each reads as. "true"/"false"/
+#: "unavailable"/"errored" match the removal probe's own status strings
+#: (``mylonite.plugins._mcp.removal_probe``), kept as literals here so this
+#: generic validator carries no import on that MCP-specific module.
+_REMOVAL_STATUS_LABELS: Final[tuple[tuple[str, str], ...]] = (
+    ("true", "confirmed"),
+    ("false", "not confirmed"),
+    ("unavailable", "unavailable"),
+    ("errored", "errored"),
+)
 
 #: The clause the effect leg's detail carries when at least one run fired with
 #: no proof level: nothing in the trace or the probe tied the damage to that
@@ -363,6 +375,15 @@ class _CustomRun:
     #: real cause instead of misdirecting the operator to declare an
     #: effect_probe for a run a provider error cut off, not the guard.
     skip_reason: str | None = None
+    #: Removal confirmation outcome for this run ("true" | "false" |
+    #: "unavailable" | "errored"), or None when the target declares no
+    #: ``effect_probe.removal``. Copied verbatim from the judge evidence,
+    #: which the adapter stamps on every run once removal confirmation is
+    #: declared -- finding or not.
+    removal_confirmed: str | None = None
+    #: The removal probe's own note for this run's outcome (already redacted
+    #: metadata), or None alongside an unset ``removal_confirmed``.
+    removal_note: str | None = None
 
 
 def _rate_limited_count(runs: list[_CustomRun]) -> int:
@@ -396,6 +417,42 @@ def _tier_clause(tiers: list[str | None]) -> str:
     counts["unknown"] = tiers.count(None)
     parts = [f"{n} {tier}" for tier, n in counts.items() if n]
     return f"; firing runs by evidence: {', '.join(parts)}" if parts else ""
+
+
+def _removal_clause(runs: list[_CustomRun]) -> str:
+    """The effect leg's removal-confirmation counts, plus the first note of
+    each kind, or empty when the target declares no ``effect_probe.removal``.
+
+    Surfaces the removal outcome every run already carries (see
+    ``_CustomRun.removal_confirmed``) so a run P0 refused because a prior
+    run's own validate left a record behind reads as "unavailable" with its
+    note, instead of silently vanishing into the effect leg's plain count.
+    Detail text only: it changes no verdict, gating or proof level.
+    """
+    statuses = [r.removal_confirmed for r in runs if r.removal_confirmed is not None]
+    if not statuses:
+        return ""
+    counts = {status: statuses.count(status) for status, _label in _REMOVAL_STATUS_LABELS}
+    parts = [
+        f"{counts[status]} {label}" for status, label in _REMOVAL_STATUS_LABELS if counts[status]
+    ]
+    clause = f"; removal: {', '.join(parts)}"
+    first_notes: dict[str, str] = {}
+    for r in runs:
+        if (
+            r.removal_confirmed is not None
+            and r.removal_confirmed not in first_notes
+            and r.removal_note
+        ):
+            first_notes[r.removal_confirmed] = r.removal_note
+    note_parts = [
+        f"{label} ({redact(first_notes[status])})"
+        for status, label in _REMOVAL_STATUS_LABELS
+        if status in first_notes
+    ]
+    if note_parts:
+        clause += "; removal notes: " + "; ".join(note_parts)
+    return clause
 
 
 def _effect_proof_level(run: _CustomRun) -> str | None:
@@ -947,6 +1004,7 @@ class DifferentialValidator(ValidatorBase):
                     f"{EFFECT_UNPROVEN_CLAUSE}, so {'they do' if unproven != 1 else 'it does'} "
                     "not count"
                 )
+            detail += _removal_clause(runs)
             effect = ValidationOutcome(
                 stage="effect",
                 passed=effect_yes >= self._vuln_threshold,
@@ -1281,6 +1339,10 @@ class DifferentialValidator(ValidatorBase):
                 proof_level=evidence.get("proof_level"),
                 evidence_tier=attempt_evidence_tier(attempt) if attempt is not None else None,
                 black_box=black_box,
+                removal_confirmed=evidence.get(
+                    "removal_confirmed", response.metadata.get("removal_confirmed")
+                ),
+                removal_note=evidence.get("removal_note", response.metadata.get("removal_note")),
             )
         attempt = next(iter(attempts), None)
         evidence = dict(attempt.judge_evidence) if attempt is not None else {}
@@ -1293,6 +1355,8 @@ class DifferentialValidator(ValidatorBase):
             trace_outcome=evidence.get("trace_outcome"),
             black_box=black_box,
             skip_reason=attempt.verdict_reason if attempt is not None else None,
+            removal_confirmed=evidence.get("removal_confirmed"),
+            removal_note=evidence.get("removal_note"),
         )
 
     @staticmethod
