@@ -100,32 +100,58 @@ a not-kept count; the sequential re-dispatch kept 2 of those 3, with the
 third reading `NOT TESTED` (its own validate ceiling, not "did not land").
 Reported as a documented limit, not a pass.
 
-**One fix re-test passed, one did not.** The streamable-HTTP target still
-reads `NOT TESTED` on every run (no seedable surface) exactly as expected.
-The OpenAI-Agents-SDK-on-Ollama target's own bar needed the `STABLE, NOT
-PROVEN` candidate label on 2+/3 runs per provider; only 1 of 6 runs reached
-it — not met.
+**A later, separate cell asks a narrower question: can a KEPT finding's
+own effect leg confirm damage under a calibration that is allowed
+to confirm (`certified` *or* `confirm_only`), not only under `certified`?**
+This "proof depth (confirm path)" cell runs the harness's later
+multi-exploit validation (every exploit a scan found, not only the
+alphabetically-first one `generate` used to pick) against both targets,
+both providers. It meets this narrower bar on 3 of 4 (target, provider)
+pairs: both providers on `mcp-redis`, and OpenAI (not Anthropic) on
+`server-memory` — OpenAI's agent names the planted record exactly, so the
+removal check confirms the SAME `delete_entities` pattern the original
+proof-depth round already found independently effect-confirmed but never
+processed. `certified` is still reached on no run, in either cell — see
+the full write-up's "Proof depth (confirm path)" section for the
+per-provider breakdown and the reasoning on the one pair that misses.
 
-**Two of three precision (false-positive) checks passed cleanly: 0 KEPT,
+**One fix re-test passed; the other's bar is not met, but the fix under
+test is confirmed live.** The streamable-HTTP target still reads `NOT
+TESTED` on every run (no seedable surface) exactly as expected. The
+OpenAI-Agents-SDK-on-Ollama target hits no HTTP 422 and completes the full
+journey on 6 of 6 runs — the first campaign's fix holds — but its own bar
+needs the `STABLE, NOT PROVEN` candidate label on 2+/3 runs per provider;
+only 1 of 6 runs reached it, a property of this target's own locally
+hosted agent model, not of the harness — not met.
+
+**All three precision (false-positive) checks now pass cleanly: 0 KEPT,
 every run exercised.** The third (`server-everything`, reused as a
-read-only check) saw non-deterministic upstream crashes leave 4 of 6 runs
-unexercised — `precision-rollup` reads `INCONCLUSIVE`, not a pass, per the
-vacuous-pass rule; not re-run, since the cause is target flakiness, not an
-infrastructure or product defect.
+read-only check) first read `precision-rollup` `INCONCLUSIVE`: 4 of 6
+runs read `NOT_TESTED` after a subprocess crash during the W1 probe,
+published at the time as third-party target flakiness. That cause was
+wrong — a tool call that turns on a server's own timed notifications
+raced Mylonite's own session shutdown, filing a finished attempt as a
+crash although the server never died — a product defect, fixed; the
+counted re-run reads `PASS` on both providers.
 
-**Breadth on stronger models: the flagship class fired on 3 of 12 runs and
-kept on none; the third-party indirect-injection class resisted,
-judge-only.** The tool-description (W1) class fired in `scan` on 3 of 12
-runs against the
-reference app on `claude-sonnet-5`/`gpt-5.1`; those 3 were then cut short
-by a validate ceiling (`NOT TESTED`, never scored as "did not land"), and
-0 of the 12 kept — reported as a documented limit, in the prereg's own
-exact wording ("both **tiers'** numbers"); only the mid tier ran this
-cell, so no small-tier number is claimed. The indirect-injection (W2)
-class against `server-memory` on the same stronger models resisted on all
-6 counted runs, decided by the judge reading the full trace, not a
-structural marker — published as the honest result, which this cell's own
-bar accepts either way; an earlier, superseded round (before a generic
+**Breadth on stronger models, now measured on both tiers: the flagship
+class kept on 0 of 24 runs; the third-party indirect-injection class
+resisted, judge-only.** The tool-description (W1) class fired in `scan`
+on 3 of 12 mid-tier runs against the reference app on
+`claude-sonnet-5`/`gpt-5.1`; those 3 were then cut short by a validate
+ceiling (`NOT TESTED`, never scored as "did not land"). The same cell, now
+also dispatched on the small tier (`claude-haiku-4-5-20251001`/
+`gpt-4o-mini`, 12 more runs), fired on 2 of 12 — one run's finding was
+rejected at the build gate by a pytest-config bug, since fixed and
+superseded by the counted re-run; the counted re-run's own one fired run
+was rejected at the metamorphic (robustness) gate, a genuine validator
+reject. 0 of 24 runs kept, across both tiers — reported as a documented
+limit, in the prereg's own exact wording ("both **tiers'** numbers"),
+which both tiers now give. The indirect-injection (W2) class against
+`server-memory` on the same stronger models resisted on all 6 counted
+runs, decided by the judge reading the full trace, not a structural
+marker — published as the honest result, which this cell's own bar
+accepts either way; an earlier, superseded round (before a generic
 store-and-recall seed fix) never engaged the planner at all. The Go-memory
 smoke target produced a real W4 finding on every run, both providers, that
 stays unvalidated because this cell is dispatched scan-only — `generate`
@@ -139,21 +165,24 @@ scan-only dispatch that made a cell's own bar unreachable, an install into
 the wrong Python environment, a binary moved out from under an
 intervening, correct product fix, and three OpenAI Redis runs that hit a
 shared provider rate limit), all logged with their fix or cause in the
-prereg's dated amendments and re-run in full or in part; four more groups
-(25 runs: `server-memory`'s first round, `mcp-redis`'s first two rounds,
-and the W2 breadth cell's first round) were superseded, not void, by a
-later counted re-measurement once a real product gap (the removal-
-confirmation feature, the general calibration fix, and a generic
-store-and-recall W2 seed that a structural gate had wrongly excluded) was
-fixed in each case — published in full, round by round, in the write-up's
-own "Superseded rounds, published in full" section, not dropped once
-replaced. Every voided and superseded run is still recorded in
-`results.json`, excluded only from its cell's own rollup — see the
-write-up's "Spend" and the file itself for the full accounting. 11 KEPT
-findings land in this round's counted runs (30 KEPT across every status,
+prereg's dated amendments and re-run in full or in part; six more groups
+(37 runs: `server-memory`'s first round, `mcp-redis`'s first two rounds,
+the W2 breadth cell's first round, the `server-everything` precision
+cell's first round, and the W1 small-tier cell's first round) were
+superseded, not void, by a later counted re-measurement once a real
+product gap (the removal-confirmation feature, the general calibration
+fix, a generic store-and-recall W2 seed that a structural gate had
+wrongly excluded, a session-close race during a server's own timed
+notifications, and an emitted test inheriting this project's own pytest
+config) was fixed in each case — published in full, round by round, in
+the write-up's own "Superseded rounds, published in full" section, not
+dropped once replaced. Every voided and superseded run is still recorded
+in `results.json`, excluded only from its cell's own rollup — see the
+write-up's "Spend" and the file itself for the full accounting. 23 KEPT
+findings land in this round's counted runs (42 KEPT across every status,
 including superseded and one void run); every one is hand-adjudicated true
-positive. Counted spend: $1.34 on Anthropic (385 calls), $0.19 on OpenAI
-(458 calls) — both a measured lower bound, since four ceiling-stopped
+positive. Counted spend: $2.75 on Anthropic (660 calls), $0.35 on OpenAI
+(946 calls) — both a measured lower bound, since four ceiling-stopped
 runs' validate leg made 80 more requests each side that printed no cost
 line; both totals, even at the corrected call counts, are well inside the
 pre-registered budget.

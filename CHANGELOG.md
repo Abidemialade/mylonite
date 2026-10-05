@@ -128,6 +128,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `verification/results/0.12.0/e2e/README.md`, with `docs/verification.md`
   and `verification/CAPABILITY_MATRIX.md`.
 
+- **Three follow-up batches close out the second campaign: two re-runs
+  after product fixes, and a new cell asking a narrower proof-depth
+  question.** Precision 3's first round had read `INCONCLUSIVE` on a
+  cause published as third-party target flakiness; that cause was wrong —
+  a tool call that turns on a server's own timed notifications raced
+  Mylonite's session shutdown, filing a finished attempt as a subprocess
+  crash although the server never died (fixed). Breadth 1's small-tier
+  round had one run rejected at the build gate by a pytest internal
+  error, because the emitted test inherited this project's own pytest
+  config (fixed). Both cells are re-run in full: Precision 3 now reads
+  `PASS` on both providers; Breadth 1's small tier still reads 0 KEPT,
+  with its one fired run rejected at the metamorphic gate instead — a
+  genuine reject, not a harness defect. The new "proof depth (confirm
+  path)" cell measures a narrower question than the original proof-depth
+  bar: whether a KEPT finding's own `validate` effect leg reads
+  `effect-confirmed` under a calibration allowed to confirm, not required
+  to certify (`certified` *or* `confirm_only`), read per (target, provider) rather
+  than flattened to one verdict. It meets that bar on 3 of 4 pairs — both
+  providers on `tpv-mcp-redis`, and OpenAI (not Anthropic) on
+  `tpv-server-memory`, where OpenAI's agent names the planted record
+  exactly and the harness's later multi-exploit validation finally
+  processes the same `delete_entities` finding the original proof-depth
+  round had already flagged as independently effect-confirmed but never
+  validated. `certified` is still reached on no run, in either cell. 23
+  KEPT findings now land in this campaign's counted runs (up from 11; 42
+  across every status, including superseded and one void run), every one
+  hand-adjudicated true positive. Full numbers:
+  `verification/results/0.12.0/e2e/README.md`, with `docs/verification.md`
+  and `verification/CAPABILITY_MATRIX.md`.
+
 - **A CI rehearsal now runs the launch journey exactly as the docs write
   it.** `rehearsal.yml` (manual dispatch) runs
   `verification/rehearsal/journey.sh` on clean Linux and Windows runners,
