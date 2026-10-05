@@ -28,7 +28,7 @@ from types import SimpleNamespace
 from typing import Any, get_args
 
 import pytest
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult, EmbeddedResource, TextContent, TextResourceContents
 from mcp.types import Tool as MCPTool
 from tests.mcp_plugin.fakes.neutral_servers import memory_tools
 
@@ -1169,6 +1169,12 @@ class _MemoryStore:
         self.search_error_when_no_match = False
         #: A search that matches nothing returns an empty result.
         self.search_empty_when_no_match = False
+        #: A search for anything but the seed entity that matches nothing
+        #: answers differently from one call to the next.
+        self.no_match_varies = False
+        self.no_match_calls = 0
+        #: Search ignores its query and returns every entity.
+        self.search_ignores_query = False
         #: Once planted, the second read of the seed entity returns ``isError``.
         self.second_seed_read_errors = False
         self.seed_reads_after_plant = 0
@@ -1220,13 +1226,23 @@ class _MemorySession(_Session):
             hits = [
                 name_ + ": " + "; ".join(obs)
                 for name_, obs in mem.entities.items()
-                if not query or query in name_ or any(query in o for o in obs)
+                if not query
+                or mem.search_ignores_query
+                or query in name_
+                or any(query in o for o in obs)
             ]
             if not hits and mem.search_error_when_no_match:
                 return _text("nothing found", is_error=True)
+            varied = ""
+            if not hits and mem.no_match_varies and query != _SEED_ENTITY:
+                mem.no_match_calls += 1
+                varied = f" (lookup {mem.no_match_calls})"
+                if mem.search_empty_when_no_match and mem.no_match_calls % 2 == 0:
+                    # The empty shape alternates with a non-empty reply.
+                    return _text("no matches")
             if not hits and mem.search_empty_when_no_match:
                 return CallToolResult(content=[], isError=False)
-            reply = "\n".join(hits) or "no matches"
+            reply = ("\n".join(hits) or "no matches") + varied
             if mem.search_echoes_query:
                 reply = f"results for {query}:\n{reply}"
             return _text(reply)
@@ -1466,23 +1482,70 @@ async def test_discrimination_read_that_errors_is_not_confirm_only() -> None:
     assert "returned an error" in result.tools[-1].detail
 
 
+# An empty or echoing reply for a never-planted token is evidence only next to
+# an anchor: the planted read shows the content marker, and two never-planted
+# reads answer alike once each token is masked. Without that anchor (here, the
+# two absent replies differ) it proves nothing.
+
+
 @pytest.mark.asyncio
-async def test_discrimination_read_that_is_empty_is_not_confirm_only() -> None:
-    result, launcher = await _memory_run(search_empty_when_no_match=True)
+async def test_discrimination_read_that_is_empty_without_anchor_is_not_confirm_only() -> None:
+    result, launcher = await _memory_run(search_empty_when_no_match=True, no_match_varies=True)
     assert _sent_a_fresh_token(launcher, result)
     assert result.status == calibration.STATUS_FAILED
     assert result.reason_code == "MYL-INC-003"
-    assert "returned nothing" in result.tools[-1].detail
+    assert "answered differently" in result.tools[-1].detail
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_DISCRIMINATION_READ
 
 
 @pytest.mark.asyncio
-async def test_discrimination_read_that_echoes_the_token_is_not_confirm_only() -> None:
-    result, launcher = await _memory_run(search_echoes_query=True)
+async def test_discrimination_read_that_echoes_the_token_without_anchor_is_not_confirm_only() -> (
+    None
+):
+    result, launcher = await _memory_run(search_echoes_query=True, no_match_varies=True)
     assert _sent_a_fresh_token(launcher, result)
     assert result.status == calibration.STATUS_FAILED
     assert result.reason_code == "MYL-INC-003"
     assert result.tools[-1].reason_code == "MYL-INC-004"
-    assert "echoed" in result.tools[-1].detail
+    assert "answered differently" in result.tools[-1].detail
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_DISCRIMINATION_READ
+
+
+@pytest.mark.asyncio
+async def test_discrimination_read_that_is_empty_with_anchor_is_confirm_only() -> None:
+    result, launcher = await _memory_run(search_empty_when_no_match=True)
+    assert _sent_a_fresh_token(launcher, result)
+    assert result.status == calibration.STATUS_CONFIRM_ONLY
+    assert result.calibrated is False
+    assert result.certified_tools == ()
+    assert result.tools[-1].status == calibration.TOOL_READBACK
+
+
+@pytest.mark.asyncio
+async def test_discrimination_read_that_echoes_the_token_with_anchor_is_confirm_only() -> None:
+    result, launcher = await _memory_run(search_echoes_query=True)
+    assert _sent_a_fresh_token(launcher, result)
+    assert result.status == calibration.STATUS_CONFIRM_ONLY
+    assert result.calibrated is False
+    assert result.certified_tools == ()
+    assert result.tools[-1].status == calibration.TOOL_READBACK
+
+
+@pytest.mark.asyncio
+async def test_discrimination_read_that_carries_the_content_marker_is_not_confirm_only() -> None:
+    """Echoing the requested identifier is allowed; carrying the planted
+    record's content marker is not: a read that returns the planted record
+    for any query cannot tell a planted record from an absent one."""
+    result, launcher = await _memory_run(search_ignores_query=True)
+    assert _sent_a_fresh_token(launcher, result)
+    assert result.status == calibration.STATUS_FAILED
+    assert result.reason_code == "MYL-INC-003"
+    assert result.tools[-1].reason_code == "MYL-INC-004"
+    assert "content marker" in result.tools[-1].detail
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_DISCRIMINATION_READ
 
 
 @pytest.mark.asyncio
@@ -2371,3 +2434,274 @@ def test_every_step_identifier_is_in_the_fixed_set() -> None:
         calibration.STEP_DECLARED_ID_EXCLUSION,
         calibration.STEP_LAUNCH,
     }
+
+
+# --- the discrimination read is a known-absent comparison (#363) -----------------
+#
+# A keyed store addressed by a declared id. The planted record reads back with
+# its content marker; what differs is how the store answers for an id that was
+# never planted. The identifier that addresses a record and the content marker
+# the record carries are separate: repeating the identifier is fine, carrying
+# the marker is not.
+
+_KEYED_ID = "mylonite-tpv-seed"
+
+
+class _KeyedStore:
+    """``put(id, value)`` / ``get(id)`` with a configurable not-found reply."""
+
+    def __init__(self, shape: str) -> None:
+        self.shape = shape
+        self.values: dict[str, str] = {}
+        self.missing_reads = 0
+
+
+class _KeyedSession(_Session):
+    def __init__(self, keyed: _KeyedStore, tools: dict[str, dict[str, Any]]) -> None:
+        super().__init__(_Store(), tools)
+        self.keyed = keyed
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        self.calls.append((name, dict(arguments)))
+        store = self.keyed
+        if name == "put":
+            store.values[str(arguments.get("id", ""))] = str(arguments.get("value", ""))
+            return _text("stored")
+        if name != "get":
+            return _text(f"{name} ok")
+        key = str(arguments.get("id", ""))
+        if store.shape == "always_empty":
+            return CallToolResult(content=[], isError=False)
+        if store.shape == "whole_store_resource":
+            body = "\n".join(f"{k}={v}" for k, v in store.values.items()) or "(empty)"
+            resource = TextResourceContents(uri="memory://store", text=body)
+            return CallToolResult(
+                content=[EmbeddedResource(type="resource", resource=resource)], isError=False
+            )
+        if store.shape == "whole_store":
+            return _text("\n".join(f"{k}={v}" for k, v in store.values.items()) or "(empty)")
+        if key in store.values:
+            return _text(store.values[key])
+        store.missing_reads += 1
+        if store.shape == "echo_key":
+            return _text(f"Key {key} does not exist")
+        if store.shape == "empty":
+            return CallToolResult(content=[], isError=False)
+        if store.shape == "varies" and key != _KEYED_ID:
+            return _text(f"not found (lookup {store.missing_reads})")
+        if store.shape == "error":
+            return _text(f"no record {key}", is_error=True)
+        return _text("not found")
+
+
+class _KeyedLauncher(_Launcher):
+    def __init__(self, keyed: _KeyedStore) -> None:
+        super().__init__(
+            _Store(),
+            {"put": _schema(id="string", value="string"), "get": _schema(id="string")},
+        )
+        self.keyed = keyed
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        session = _KeyedSession(self.keyed, self.tools)
+        self.sessions.append(session)
+
+        @asynccontextmanager
+        async def _ctx() -> Any:
+            yield session
+
+        return _ctx()
+
+
+async def _keyed_run(shape: str) -> tuple[calibration.CalibrationResult, _KeyedLauncher]:
+    _register(
+        EffectProbeSpec(verify_tool="get", verify_args_template={"id": _KEYED_ID}),
+        seed_arm=SeedArmSpec(tool="put", args_template={"id": _KEYED_ID, "value": "{payload}"}),
+        control_config=ControlConfig(consequential_tools=("put",), read_tool_names=("get",)),
+    )
+    launcher = _KeyedLauncher(_KeyedStore(shape))
+    return await _calibrate(launcher), launcher
+
+
+def _two_absent_ids_sent(launcher: _KeyedLauncher) -> bool:
+    """The discrimination read sent two different never-planted ids."""
+    planted = "".join(str(a) for a in launcher.called("put"))
+    ids = {
+        g["id"]
+        for g in launcher.called("get")
+        if g["id"].startswith(calibration.TOKEN_PREFIX) and g["id"] not in planted
+    }
+    return len(ids) >= 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shape", ["echo_key", "empty"])
+async def test_known_absent_reply_establishes_discrimination(shape: str) -> None:
+    """A not-found reply that repeats the requested key, or an empty reply
+    for a missing id, establishes discrimination next to the planted read.
+    The declared id still yields ``confirm_only``, never ``certified``."""
+    result, launcher = await _keyed_run(shape)
+    assert _two_absent_ids_sent(launcher)
+    assert result.status == calibration.STATUS_CONFIRM_ONLY
+    assert result.calibrated is False
+    assert result.certified_tools == ()
+    assert result.tools[-1].status == calibration.TOOL_READBACK
+
+
+@pytest.mark.asyncio
+async def test_known_absent_reader_that_returns_the_whole_store_fails() -> None:
+    result, _launcher = await _keyed_run("whole_store")
+    assert result.status == calibration.STATUS_FAILED
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_DISCRIMINATION_READ
+    assert result.tools[-1].reason_code == "MYL-INC-004"
+    assert "content marker" in result.tools[-1].detail
+
+
+@pytest.mark.asyncio
+async def test_known_absent_reader_that_is_always_empty_fails() -> None:
+    """The planted read lacks the marker, so the read is never established."""
+    result, _launcher = await _keyed_run("always_empty")
+    assert result.status == calibration.STATUS_FAILED
+    assert result.calibrated is False
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_PLANT
+    assert result.tools[-1].status == calibration.TOOL_FAILED
+
+
+@pytest.mark.asyncio
+async def test_known_absent_reader_whose_absent_reply_varies_fails() -> None:
+    result, launcher = await _keyed_run("varies")
+    assert _two_absent_ids_sent(launcher)
+    assert result.status == calibration.STATUS_FAILED
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_DISCRIMINATION_READ
+    assert "answered differently" in result.tools[-1].detail
+
+
+@pytest.mark.asyncio
+async def test_known_absent_reader_that_errors_on_absent_ids_fails() -> None:
+    result, _launcher = await _keyed_run("error")
+    assert result.status == calibration.STATUS_FAILED
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_DISCRIMINATION_READ
+    assert result.failed_step.reason_code == "MYL-INC-003"
+    assert "returned an error" in result.tools[-1].detail
+
+
+@pytest.mark.asyncio
+async def test_known_absent_reader_that_returns_the_whole_store_in_a_non_text_block_fails() -> None:
+    """The planted read and the never-planted reads go through one reader, so
+    a reader that ignores its argument and replies in a non-text block shows
+    the planted content on both sides and is never established."""
+    result, _launcher = await _keyed_run("whole_store_resource")
+    assert result.status == calibration.STATUS_FAILED
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_DISCRIMINATION_READ
+    assert result.tools[-1].reason_code == "MYL-INC-004"
+    assert "content marker" in result.tools[-1].detail
+
+
+class _CollectionStore:
+    """``put(collection, id, value)`` / ``get(collection, id)`` where ``get``
+    filters by ``collection`` and ignores ``id``."""
+
+    def __init__(self) -> None:
+        self.values: dict[str, dict[str, str]] = {}
+
+
+class _CollectionSession(_Session):
+    def __init__(self, store: _CollectionStore, tools: dict[str, dict[str, Any]]) -> None:
+        super().__init__(_Store(), tools)
+        self.store = store
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        self.calls.append((name, dict(arguments)))
+        collection = str(arguments.get("collection", ""))
+        if name == "put":
+            self.store.values.setdefault(collection, {})[str(arguments.get("id", ""))] = str(
+                arguments.get("value", "")
+            )
+            return _text("stored")
+        if name == "get":
+            if collection not in self.store.values:
+                return _text(f"unknown collection {collection}")
+            return _text("\n".join(self.store.values[collection].values()))
+        return _text(f"{name} ok")
+
+
+class _CollectionLauncher(_Launcher):
+    def __init__(self, store: _CollectionStore, tools: dict[str, dict[str, Any]]) -> None:
+        super().__init__(_Store(), tools)
+        self.collection_store = store
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        session = _CollectionSession(self.collection_store, self.tools)
+        self.sessions.append(session)
+
+        @asynccontextmanager
+        async def _ctx() -> Any:
+            yield session
+
+        return _ctx()
+
+
+@pytest.mark.asyncio
+async def test_known_absent_read_replaces_only_the_record_naming_leaf() -> None:
+    """A multi-leaf template: only the id leaf gets the never-planted id, the
+    collection leaf stays. A reader that filters by collection and ignores
+    the id then shows the planted record for the absent ids, so it is never
+    established."""
+    _register(
+        EffectProbeSpec(
+            verify_tool="get", verify_args_template={"collection": "notes", "id": _KEYED_ID}
+        ),
+        seed_arm=SeedArmSpec(
+            tool="put",
+            args_template={"collection": "notes", "id": _KEYED_ID, "value": "{payload}"},
+        ),
+        control_config=ControlConfig(consequential_tools=("put",), read_tool_names=("get",)),
+    )
+    launcher = _CollectionLauncher(
+        _CollectionStore(),
+        {
+            "put": _schema(collection="string", id="string", value="string"),
+            "get": _schema(collection="string", id="string"),
+        },
+    )
+    result = await _calibrate(launcher)
+    assert result.status == calibration.STATUS_FAILED
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_DISCRIMINATION_READ
+    assert "content marker" in result.tools[-1].detail
+    absent = [g for g in launcher.called("get") if g["id"] != _KEYED_ID]
+    assert absent and all(g["collection"] == "notes" for g in absent)
+
+
+@pytest.mark.asyncio
+async def test_known_absent_read_with_no_single_record_leaf_is_not_established() -> None:
+    """Two string leaves and neither is an id-shaped name the plant used: no
+    single leaf names the record, so the read is not established."""
+    _register(
+        EffectProbeSpec(
+            verify_tool="get", verify_args_template={"collection": "notes", "name": "seed"}
+        ),
+        seed_arm=SeedArmSpec(
+            tool="put",
+            args_template={"collection": "notes", "name": "seed", "value": "{payload}"},
+        ),
+        control_config=ControlConfig(consequential_tools=("put",), read_tool_names=("get",)),
+    )
+    launcher = _CollectionLauncher(
+        _CollectionStore(),
+        {
+            "put": _schema(collection="string", name="string", value="string"),
+            "get": _schema(collection="string", name="string"),
+        },
+    )
+    result = await _calibrate(launcher)
+    assert result.status == calibration.STATUS_FAILED
+    assert result.reason_code == "MYL-INC-003"
+    assert result.failed_step is not None
+    assert result.failed_step.step == calibration.STEP_DISCRIMINATION_READ
+    assert "no single argument that names" in result.tools[-1].detail

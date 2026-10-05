@@ -501,6 +501,12 @@ declares no probe, or calibration certified cleanly. The same object is written 
 saved run — including one from a live target you cannot easily reproduce — can be
 diagnosed from its artefacts alone.
 
+A `discrimination_read` failure means the probe could not tell its planted record from
+one that was never planted. Calibration reads two never-planted tokens and compares the
+replies with each token masked. A reply that repeats the requested key, or an empty
+reply, is fine. The step fails when either read errors or raises, when the two replies
+differ, or when a reply carries the planted record's content.
+
 ### What a run spent
 
 `scan` prints an `llm:` line under its counts — calls by role, the `--max-llm-calls` budget
