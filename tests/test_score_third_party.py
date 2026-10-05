@@ -1238,6 +1238,89 @@ def test_e2e_pilot_not_kept_run_reads_real_proof_level_and_calibration(tmp_path:
     assert result["w4"]["fired"] == 1
 
 
+#: Redacted excerpt of a real batch-4 third-party-campaign run
+#: (2026-10-02-l2-master-plan, `tpv-server-memory`, openai, small tier,
+#: 2026-10-05): finding (a) in that batch's investigation report. The scan
+#: recorded FOUR findings; the harness's single-exploit pick (alphabetically
+#: first) validated and KEPT `create_relations` (proof_level
+#: "dispatched-tool-linked"), while the SAME scan's `delete_entities`
+#: attempt reached "effect-confirmed" with `removal_confirmed: true` and was
+#: never validated at all.
+
+
+def test_scan_findings_lists_every_found_attempt_marking_only_the_validated_one(
+    tmp_path: Path,
+) -> None:
+    generated_dir, out_dir = _materialise_pilot_run(tmp_path, "batch4_openai_memory_small")
+    result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
+    assert result["classification"] == scorer.KEPT
+
+    findings = {f["pattern_id"]: f for f in result["scan_findings"]}
+    assert set(findings) == {
+        "synth-w4-unconfirmed-delete_entities",
+        "synth-w4-unconfirmed-delete_observations",
+        "synth-w4-unconfirmed-delete_relations",
+        "synth-w4-unconfirmed-create_relations",
+    }
+
+    # The validated finding: dispatched-tool-linked, never removal-confirmed.
+    validated = findings["synth-w4-unconfirmed-create_relations"]
+    assert validated["weakness"] == "W4"
+    assert validated["proof_level"] == "dispatched-tool-linked"
+    assert validated["removal_confirmed"] == "unavailable"
+    assert validated["validated"] is True
+
+    # The stronger, unvalidated finding in the SAME scan: higher proof level
+    # AND a confirmed removal -- found, never described as kept.
+    unvalidated = findings["synth-w4-unconfirmed-delete_entities"]
+    assert unvalidated["proof_level"] == "effect-confirmed"
+    assert unvalidated["removal_confirmed"] == "true"
+    assert unvalidated["validated"] is False
+
+    # Every other finding is also found, not validated.
+    for pattern_id, entry in findings.items():
+        if pattern_id != "synth-w4-unconfirmed-create_relations":
+            assert entry["validated"] is False
+
+    # max_scan_proof_level is the strongest proof level found anywhere in
+    # the scan -- "effect-confirmed" -- not the validated finding's own
+    # weaker "dispatched-tool-linked".
+    assert result["max_scan_proof_level"] == "effect-confirmed"
+    assert result["proof_level"] == "dispatched-tool-linked"
+
+
+def test_max_scan_proof_level_is_none_with_no_findings(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run1"
+    _write_scan_report(run_dir)
+    result = scorer.score_run(run_dir)
+    assert result["scan_findings"] == []
+    assert result["max_scan_proof_level"] is None
+
+
+def test_scan_findings_omits_removal_confirmed_when_absent_from_judge_evidence(
+    tmp_path: Path,
+) -> None:
+    """A target with no declared removal-confirmation probe at all never
+    carries the key -- the field is omitted, not a fabricated null."""
+    run_dir = tmp_path / "run1"
+    _write_scan_report(
+        run_dir,
+        weakness_classes=["W1"],
+        attempts=[
+            {
+                "seed_id": "a",
+                "pattern_id": "synth-w1-rug-pull",
+                "outcome": "finding",
+                "judge_evidence": {"proof_level": "dispatched"},
+            }
+        ],
+        findings_count=1,
+    )
+    result = scorer.score_run(run_dir)
+    assert len(result["scan_findings"]) == 1
+    assert "removal_confirmed" not in result["scan_findings"][0]
+
+
 def test_e2e_pilot_not_tested_abort_reads_calibration_from_the_real_scan_dir(
     tmp_path: Path,
 ) -> None:

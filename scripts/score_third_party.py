@@ -113,6 +113,30 @@ alone, never by the trimmed ``{model, provider}`` ``scan_report.json`` that
 abort codes. Otherwise it is INVALID with an infrastructure signature, or
 PRODUCT_DEFECT.
 
+``scan_findings`` and ``max_scan_proof_level``
+-----------------------------------------------
+"Run the real journey" passes ``generate``/``validate`` exactly ONE exploit
+file -- the alphabetically-first ``outcome=="finding"`` ``pattern_id``, a
+documented scope limit, never "the one with the strongest proof". A real
+scan can therefore record several findings while only one of them is ever
+validated, and a finding that reached a HIGHER proof level (or a confirmed
+removal) can go unreported if nothing says otherwise -- confirmed live
+against a real campaign run (2026-10-04, ``tpv-server-memory``, openai,
+small tier): ``create_relations`` sorted before ``delete_entities`` and was
+the one validated and KEPT, even though the SAME scan's ``delete_entities``
+attempt reached ``effect-confirmed`` with ``removal_confirmed: true`` and
+was never validated at all.
+
+Every scored run (whatever its own classification) therefore also carries
+``scan_findings`` -- one entry per ``outcome=="finding"`` attempt in the
+REAL scan report, each with its own ``pattern_id``, ``weakness`` class,
+``proof_level``, ``removal_confirmed`` (omitted when the attempt's own
+``judge_evidence`` never carries that key) and ``validated`` (``True`` only
+for the one finding ``generate``/``validate`` actually processed) -- and
+``max_scan_proof_level``, the strongest ``proof_level`` among all of them
+(``None`` when none carries one). Only the entry with ``validated: true``
+may ever be described as kept; every other entry is found, not validated.
+
 Usage
 -----
 
@@ -383,6 +407,71 @@ def _finding_proof_level(raw_report: dict, validated_pattern_id: str | None = No
                 return str(evidence["proof_level"])
             return None
     return None
+
+
+def _scan_findings(raw_report: dict, validated_pattern_id: str | None) -> list[dict[str, object]]:
+    """One entry per FOUND (``outcome=="finding"``) attempt in the REAL scan
+    report, in attempts order: its ``pattern_id``, the ``weakness`` class
+    (see :func:`_weakness_for_pattern`), the attempt's own ``proof_level``,
+    ``removal_confirmed`` (omitted entirely when the attempt's own
+    ``judge_evidence`` never carries that key -- e.g. a target with no
+    declared removal-confirmation probe at all), and ``validated`` -- True
+    only for the ONE finding ``generate``/``validate`` actually processed
+    (see :func:`_validated_pattern_id`), never inferred from proof level or
+    list order. Every other entry is found, not validated -- it is never
+    described as kept.
+
+    This exists because a scan can record several findings while only the
+    alphabetically-first ``exploit_*.json`` ever reaches ``generate``/
+    ``validate`` (the harness's own documented scope limit -- see the module
+    docstring and the real campaign run this was built from, batch 4's
+    ``tpv-server-memory`` finding (a)): a stronger, removal-confirmed
+    finding can sit in the SAME scan as the one that was actually validated
+    and kept, and without this list that finding is invisible to anyone
+    reading only the cell's score."""
+    findings: list[dict[str, object]] = []
+    for attempt in raw_report.get("attempts", []) if isinstance(raw_report, dict) else []:
+        if not isinstance(attempt, dict) or attempt.get("outcome") != "finding":
+            continue
+        pattern_id = str(attempt.get("pattern_id", ""))
+        evidence = attempt.get("judge_evidence")
+        evidence = evidence if isinstance(evidence, dict) else {}
+        entry: dict[str, object] = {
+            "pattern_id": pattern_id,
+            "weakness": _weakness_for_pattern(pattern_id),
+            "proof_level": evidence.get("proof_level"),
+            "validated": validated_pattern_id is not None and pattern_id == validated_pattern_id,
+        }
+        if "removal_confirmed" in evidence:
+            entry["removal_confirmed"] = evidence["removal_confirmed"]
+        findings.append(entry)
+    return findings
+
+
+def _max_scan_proof_level(scan_findings: list[dict[str, object]]) -> str | None:
+    """The strongest ``proof_level`` among every FOUND attempt in the real
+    scan report, in ``mylonite.scan.class_verdict.PROOF_LEVEL_ORDER``'s own
+    strongest-first order (lazily imported, so this script's pure
+    aggregation keeps working without ``mylonite`` installed whenever no
+    finding carries a proof level at all). ``None`` when ``scan_findings``
+    is empty or no entry has one.
+
+    This is the field batch 4's finding (a) needs: the VALIDATED finding's
+    own ``proof_level`` (see :func:`_finding_proof_level`) can be weaker than
+    another, unvalidated finding's in the same scan -- the alphabetical
+    single-exploit pick, not proof strength, decides which one ``generate``/
+    ``validate`` ever sees -- and this field says so plainly instead of
+    leaving a reader to assume the validated finding was the strongest one
+    the scan actually found."""
+    levels = {f["proof_level"] for f in scan_findings if f.get("proof_level")}
+    if not levels:
+        return None
+    from mylonite.scan.class_verdict import PROOF_LEVEL_ORDER
+
+    for level in PROOF_LEVEL_ORDER:
+        if level in levels:
+            return level
+    return sorted(levels)[0]
 
 
 def _weakness_counts(raw_report: dict, weakness: str) -> dict[str, int]:
@@ -676,12 +765,21 @@ def score_run(
     real_scan_dir_for_defaults = _resolve_scan_dir(run_dir, scan_dir)
     raw_report_for_defaults = _read_raw_report_safe(real_scan_dir_for_defaults)
     defaults = _calibration_info(real_scan_dir_for_defaults)
+    validated_pattern_id_for_defaults = _validated_pattern_id(run_dir)
     result.setdefault("calibration_status", defaults["calibration_status"])
     result.setdefault("calibration_reason_code", defaults["calibration_reason_code"])
     result.setdefault(
         "proof_level",
-        _finding_proof_level(raw_report_for_defaults, _validated_pattern_id(run_dir)),
+        _finding_proof_level(raw_report_for_defaults, validated_pattern_id_for_defaults),
     )
+    # scan_findings/max_scan_proof_level travel with EVERY scored run, same
+    # as calibration_status/proof_level above (integrity rule 7) -- a scan
+    # can record more FOUND attempts than the one that was ever validated
+    # (see _scan_findings's docstring), and that must stay visible whatever
+    # this run's own classification turned out to be.
+    scan_findings = _scan_findings(raw_report_for_defaults, validated_pattern_id_for_defaults)
+    result.setdefault("scan_findings", scan_findings)
+    result.setdefault("max_scan_proof_level", _max_scan_proof_level(scan_findings))
     return result
 
 
