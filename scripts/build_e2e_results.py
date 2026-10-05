@@ -42,6 +42,12 @@ pilot/smoke/diagnostic dispatches and are never read here), this script:
 4. Groups the active runs into the prereg's own cells, applies each cell's
    own pass bar, and writes one JSON document with every run (voided and
    superseded runs included, for the audit trail) and every cell's rollup.
+5. Matches every KEPT finding against the committed, human-authored
+   ``adjudications.json`` (default: next to ``--out``) and FAILS LOUDLY,
+   before writing anything, if a KEPT finding has no entry there or an
+   entry names a (run id, pattern id) that isn't a real KEPT finding.
+   This script never assigns ``true_positive``/``false_positive`` itself
+   -- see :func:`_load_adjudications`'s own docstring for why.
 
 Usage
 -----
@@ -50,12 +56,14 @@ Usage
 
     <venv python> scripts/build_e2e_results.py \\
         --artifacts-root <path to the local campaign scratch directory> \\
-        --out verification/results/0.12.0/e2e/results.json
+        --out verification/results/0.12.0/e2e/results.json \\
+        [--adjudications verification/results/0.12.0/e2e/adjudications.json]
 
 There is no default for ``--artifacts-root``: it names a local, gitignored
 scratch directory whose exact path is specific to the machine that ran the
 campaign, and that path never belongs in committed source. The caller
-always passes it explicitly.
+always passes it explicitly. ``--adjudications`` defaults to
+``adjudications.json`` next to ``--out`` and rarely needs to be passed.
 
 Re-running this script is idempotent: given the same artifact tree it
 reproduces byte-identical output (module-level ``json.dumps(..., indent=2,
@@ -972,10 +980,6 @@ def _score_one(
         run_log_path.read_text(encoding="utf-8", errors="replace") if run_log_path.is_file() else ""
     )
     score["uncounted_ceiling_calls"] = _ceiling_floor_calls(run_log_text)
-    # One adjudication per validated finding THIS run's own validate
-    # labelled KEPT, read fresh from that finding's own artifacts under
-    # run_dir -- see _adjudications_for_run's own docstring.
-    score["adjudications"] = _adjudications_for_run(score, run_dir)
     return score
 
 
@@ -1201,150 +1205,38 @@ def _resolve_disjunctive_bar(
     return False, None
 
 
-#: Adjudication is grounded per FINDING, read fresh from that finding's own
-#: artifacts every time a run is scored -- never a template shared across
-#: runs or providers (the second number review's I1: a template keyed only
-#: by (target, pattern_id) silently misapplied one provider's own trace
-#: text to a sibling provider's finding, and a run with several validated
-#: findings only ever got one, picked by scan order rather than by which
-#: findings were actually KEPT). :func:`_adjudications_for_run` returns one
-#: adjudication per validated finding this run's own ``validate`` labelled
-#: KEPT (a REJECTED finding, e.g. Redis's `set` on a provider where it did
-#: not keep, is never adjudicated as kept); each one is built by
-#: :func:`_adjudicate_finding` from :func:`_finding_trace_facts`, which
-#: reads that finding's own ``exploit_*.json`` (the payload text and the
-#: real tool call -- name, attacker-sourced arguments, result) and its own
-#: ``validation_report.json`` effect-leg detail (which already states the
-#: removal outcome in words) directly off disk.
+#: Ruling 9 (third number review, after I1 found a template dict
+#: misapplying one provider's own trace text to a sibling's finding): THIS
+#: SCRIPT NEVER ASSIGNS true_positive/false_positive. That judgment lives
+#: entirely in the committed, human-authored
+#: ``verification/results/0.12.0/e2e/adjudications.json`` -- one entry per
+#: KEPT finding, keyed by run id + pattern id, each written from that
+#: finding's own trace (tool, arguments and where they came from, the
+#: observed effect) with a label and a one-line reason. This script's only
+#: job is to (1) compute which (run id, pattern id) pairs this campaign's
+#: own ``validate`` actually labelled KEPT (a scoring question) and (2)
+#: fail loudly, before writing anything, if that set and the committed
+#: file's own keys ever disagree -- a KEPT finding with no entry, or an
+#: entry for a finding that isn't (or is no longer) KEPT. Never silently
+#: adjudicate, never silently drop a stale entry.
 
 
-def _read_json_or_none(path: Path) -> dict[str, object] | None:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _subdir_for_pattern(run_dir: Path, pattern_id: str) -> Path | None:
-    """The immediate child of ``run_dir`` whose own ``exploit_*.json`` names
-    ``pattern_id`` -- never assumed from the subdirectory's own name, which
-    is a reasonable guess but not the contract :func:`_validated_pattern_id`
-    (the scorer's own lookup) relies on. ``None`` when ``run_dir`` is not a
-    multi-report layout (no matching child) -- the caller falls back to
-    treating ``run_dir`` itself as the one finding's own directory."""
-    if not run_dir.is_dir():
-        return None
-    for child in sorted(run_dir.iterdir(), key=lambda p: p.name):
-        if not child.is_dir():
-            continue
-        for exploit_path in sorted(child.glob("exploit_*.json")):
-            data = _read_json_or_none(exploit_path)
-            if isinstance(data, dict) and str(data.get("pattern_id")) == pattern_id:
-                return child
-    return None
-
-
-def _finding_trace_facts(finding_dir: Path) -> dict[str, object]:
-    """Grounding facts for one validated finding, read directly from
-    ``finding_dir``'s own ``exploit_*.json`` (the attacker's payload text,
-    and the real tool call -- name, arguments, result -- from
-    ``response.metadata.effect_trace``, the FIRST call, which is the one
-    the seed tool itself names) and its own ``validation_report.json``
-    effect-leg detail (already human-readable: proof-level counts and the
-    removal outcome in words). ``{}`` when neither file parses -- the
-    caller reports that plainly rather than fabricating a trace."""
-    facts: dict[str, object] = {}
-    matches = sorted(finding_dir.glob("exploit_*.json"))
-    exploit = _read_json_or_none(matches[0]) if matches else None
-    if isinstance(exploit, dict):
-        payload = exploit.get("payload")
-        if isinstance(payload, dict):
-            facts["payload_body"] = payload.get("body")
-        response = exploit.get("response")
-        metadata = response.get("metadata") if isinstance(response, dict) else None
-        trace_raw = metadata.get("effect_trace") if isinstance(metadata, dict) else None
-        calls = None
-        if isinstance(trace_raw, str):
-            try:
-                calls = json.loads(trace_raw)
-            except json.JSONDecodeError:
-                calls = None
-        if isinstance(calls, list) and calls and isinstance(calls[0], dict):
-            facts["tool"] = calls[0].get("tool")
-            facts["args"] = calls[0].get("args")
-            facts["result"] = calls[0].get("result")
-    vr = _read_json_or_none(finding_dir / "validation_report.json")
-    if isinstance(vr, dict):
-        outcomes = vr.get("outcomes")
-        if isinstance(outcomes, list):
-            for outcome in outcomes:
-                if isinstance(outcome, dict) and outcome.get("stage") == "effect":
-                    facts["effect_detail"] = outcome.get("detail")
-                    break
-    return facts
-
-
-def _adjudicate_finding(
-    pattern_id: str, facts: dict[str, object], calibration_status: object
-) -> dict[str, object]:
-    """One adjudication, built only from ``facts`` -- this finding's own
-    trace, never a sibling's. ``unadjudicated`` (not fabricated) when the
-    finding's own tool call could not be read from its artifacts."""
-    tool = facts.get("tool")
-    if tool is None:
-        return {
-            "pattern_id": pattern_id,
-            "status": "unadjudicated",
-            "reason": (
-                f"could not read {pattern_id}'s own exploit/trace artifacts -- needs manual review"
-            ),
-        }
-    body = facts.get("payload_body")
-    args = facts.get("args")
-    result = facts.get("result")
-    reason = (
-        f"True positive, read from this finding's own trace. The payload "
-        f"({body!r}) drove a real, dispatched call to `{tool}` with the "
-        f"attacker-sourced arguments {args!r}"
-        + (f", returning {result!r}" if result is not None else "")
-        + ", with no approval step."
-    )
-    detail = facts.get("effect_detail")
-    if detail:
-        detail_text = str(detail)
-        if not detail_text.endswith((".", ";")):
-            detail_text += "."
-        reason += f" This finding's own validate effect leg: {detail_text}"
-    reason += f" Calibration on this run: {calibration_status!r}."
-    return {"pattern_id": pattern_id, "status": "true_positive", "reason": reason}
-
-
-def _adjudications_for_run(score: dict[str, object], run_dir: Path) -> list[dict[str, object]]:
-    """One adjudication per validated finding THIS run's own ``validate``
-    labelled KEPT -- every one read from that finding's own artifacts, none
-    copied across runs, providers or sibling findings in the same run.
-
-    A multi-report run (``score["validated_findings"]`` present -- the
-    harness validates every exploit a scan found, not only the
-    alphabetically-first) can hold several KEPT findings; a REJECTED
-    sibling in the same run (e.g. Redis's `set` on a provider where it did
-    not keep) is skipped, never adjudicated as kept. A single-report run
-    (the older harness shape) has at most one validated finding, found
-    directly in ``run_dir`` itself."""
+def _kept_pattern_ids(score: dict[str, object]) -> list[str]:
+    """Every pattern_id THIS run's own ``validate`` labelled KEPT -- a
+    scoring question, answered the same way for both the multi-report
+    layout (``score["validated_findings"]``, present once the harness
+    validates every exploit a scan found) and the older single-report
+    layout (at most one validated finding, read from ``scan_findings``).
+    Never a judgment of whether the finding is a true or false positive --
+    that question is answered only by the committed adjudications file,
+    never here."""
     validated_findings = score.get("validated_findings")
     if isinstance(validated_findings, list) and validated_findings:
-        adjudications: list[dict[str, object]] = []
-        for vf in validated_findings:
-            if not isinstance(vf, dict) or vf.get("label") != "KEPT":
-                continue
-            pattern_id = str(vf.get("pattern_id"))
-            subdir = _subdir_for_pattern(run_dir, pattern_id)
-            facts = _finding_trace_facts(subdir) if subdir is not None else {}
-            adjudications.append(
-                _adjudicate_finding(pattern_id, facts, score.get("calibration_status"))
-            )
-        return adjudications
+        return [
+            str(vf.get("pattern_id"))
+            for vf in validated_findings
+            if isinstance(vf, dict) and vf.get("label") == "KEPT"
+        ]
     if score.get("classification") != "KEPT":
         return []
     validated = next(
@@ -1355,17 +1247,76 @@ def _adjudications_for_run(score: dict[str, object], run_dir: Path) -> list[dict
         ),
         None,
     )
-    if validated is None:
-        return [
-            {
-                "pattern_id": None,
-                "status": "unadjudicated",
-                "reason": "no validated finding found in scan_findings for a KEPT run -- needs manual review",
-            }
-        ]
-    pattern_id = str(validated["pattern_id"])
-    facts = _finding_trace_facts(run_dir)
-    return [_adjudicate_finding(pattern_id, facts, score.get("calibration_status"))]
+    return [str(validated["pattern_id"])] if validated is not None else []
+
+
+_VALID_ADJUDICATION_LABELS = frozenset({"true_positive", "false_positive"})
+
+
+def _load_adjudications(path: Path) -> dict[tuple[str, str], dict[str, object]]:
+    """The committed, human-authored verdict for every KEPT finding in
+    this campaign, flattened to ``{(run_id, pattern_id): entry}``. Raises
+    loudly -- never returns an empty map silently -- when the file is
+    missing, isn't valid JSON, or holds an entry with no recognised
+    ``label``: a run with a real KEPT finding and no usable adjudication
+    is a data problem to fix before publishing, never a run to score as
+    if nothing needed judging."""
+    if not path.is_file():
+        raise RuntimeError(
+            f"{path} does not exist -- every KEPT finding in this campaign needs a "
+            "committed, human-authored adjudication there; this script never assigns "
+            "one itself (ruling 9, second number review)"
+        )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{path} is not valid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError(f"{path}: expected a top-level object keyed by run id")
+    flat: dict[tuple[str, str], dict[str, object]] = {}
+    for run_id, findings in data.items():
+        if not isinstance(findings, dict):
+            raise RuntimeError(f"{path}: {run_id!r}'s own entry must be an object")
+        for pattern_id, entry in findings.items():
+            if not isinstance(entry, dict) or entry.get("label") not in (
+                _VALID_ADJUDICATION_LABELS
+            ):
+                raise RuntimeError(
+                    f"{path}: {run_id!r}/{pattern_id!r} has no valid 'label' "
+                    f"(true_positive or false_positive)"
+                )
+            flat[(str(run_id), str(pattern_id))] = entry
+    return flat
+
+
+def _check_adjudications_sync(
+    missing: list[str],
+    orphan_keys: set[tuple[str, str]],
+    adjudications_path: Path,
+) -> None:
+    """Raises ``RuntimeError`` -- never returns a falsy "all fine" value a
+    caller could accidentally ignore -- when ``missing`` (every ``"run_id |
+    pattern_id"`` string for a KEPT finding with no committed adjudication)
+    or ``orphan_keys`` (every ``(run_id, pattern_id)`` the committed file
+    carries that no longer matches a real KEPT finding) is non-empty.
+    Ruling 9 (third number review): neither direction is silently
+    tolerated -- a KEPT finding with no entry is exactly the gap integrity
+    rule 1 exists to catch, and a stale entry for a finding that isn't (or
+    is no longer) KEPT would otherwise publish a verdict for nothing."""
+    orphan = sorted(f"{run_id} | {pattern_id}" for run_id, pattern_id in orphan_keys)
+    if not missing and not orphan:
+        return
+    lines = [f"{adjudications_path} is out of sync with this campaign's own KEPT findings."]
+    if missing:
+        lines.append(f"Missing ({len(missing)} KEPT finding(s) with no committed adjudication):")
+        lines.extend(f"  - {item}" for item in sorted(missing))
+    if orphan:
+        lines.append(
+            f"Orphaned ({len(orphan)} adjudication(s) for a run/pattern that is not a "
+            "KEPT finding):"
+        )
+        lines.extend(f"  - {item}" for item in orphan)
+    raise RuntimeError("\n".join(lines))
 
 
 def _short_sha(ref: object) -> object:
@@ -1383,14 +1334,33 @@ def _short_sha(ref: object) -> object:
     return ref
 
 
-def build(artifacts_root: Path) -> dict[str, object]:
+def build(artifacts_root: Path, adjudications_path: Path) -> dict[str, object]:
+    adjudications = _load_adjudications(adjudications_path)
+    used_adjudication_keys: set[tuple[str, str]] = set()
+    missing_adjudications: list[str] = []
     runs: list[dict[str, object]] = []
     by_cell: dict[str, list[dict[str, object]]] = {}
     by_cell_all: dict[str, list[dict[str, object]]] = {}
     for batch, folder, cell, target, provider, tier, pattern, status, reason in RUN_GROUPS:
         score = _score_one(artifacts_root, batch, folder, target, pattern)
+        run_id = f"{batch}/{folder}"
+        # Ruling 9: this script never assigns true_positive/false_positive
+        # itself. For every pattern_id THIS run's own validate labelled
+        # KEPT, the verdict comes only from the committed adjudications
+        # file; a KEPT finding with no entry there is collected, not
+        # silently skipped, and fails the whole build once every run has
+        # been checked (see the raise after this loop).
+        run_adjudications: list[dict[str, object]] = []
+        for pattern_id in _kept_pattern_ids(score):
+            key = (run_id, pattern_id)
+            found = adjudications.get(key)
+            if found is None:
+                missing_adjudications.append(f"{run_id} | {pattern_id}")
+                continue
+            used_adjudication_keys.add(key)
+            run_adjudications.append({"pattern_id": pattern_id, **found})
         entry = {
-            "run_id": f"{batch}/{folder}",
+            "run_id": run_id,
             "cell": cell,
             "target": target,
             "provider": provider,
@@ -1426,13 +1396,22 @@ def build(artifacts_root: Path) -> dict[str, object]:
             # One adjudication per validated finding this run's own
             # validate labelled KEPT -- [] for a run with none. Never one
             # adjudication per RUN: a multi-exploit run can keep several
-            # findings at once (see _adjudications_for_run's docstring).
-            "adjudications": score.get("adjudications") or [],
+            # findings at once. Every entry here is the committed file's
+            # own, matched by (run_id, pattern_id) above -- never computed
+            # in this script (ruling 9).
+            "adjudications": run_adjudications,
         }
         runs.append(entry)
         by_cell_all.setdefault(cell, []).append(entry)
         if status == "active":
             by_cell.setdefault(cell, []).append(entry)
+
+    # Ruling 9: fail loudly, before writing anything, if the committed
+    # adjudications file and this campaign's own KEPT findings ever
+    # disagree. See _check_adjudications_sync's own docstring.
+    _check_adjudications_sync(
+        missing_adjudications, set(adjudications) - used_adjudication_keys, adjudications_path
+    )
 
     cells: dict[str, object] = {}
     for cell_name, cell_meta in CELL_BARS.items():
@@ -1544,6 +1523,14 @@ def main(argv: list[str] | None = None) -> int:
         "in committed source).",
     )
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--adjudications",
+        type=Path,
+        default=None,
+        help="The committed, human-authored adjudications.json (ruling 9: this script "
+        "never assigns true_positive/false_positive itself). Defaults to "
+        "adjudications.json next to --out.",
+    )
     args = parser.parse_args(argv)
 
     if not args.artifacts_root.is_dir():
@@ -1553,7 +1540,8 @@ def main(argv: list[str] | None = None) -> int:
             "repository; pass --artifacts-root to point at them"
         )
 
-    result = build(_long_path(args.artifacts_root))
+    adjudications_path = args.adjudications or (args.out.parent / "adjudications.json")
+    result = build(_long_path(args.artifacts_root), adjudications_path)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {args.out} ({len(result['runs'])} runs, {len(result['cells'])} cells)")

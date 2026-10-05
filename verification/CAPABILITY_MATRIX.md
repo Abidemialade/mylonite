@@ -277,13 +277,15 @@ Full write-up, every run and every cell's bar:
   scan-only — `generate`/`validate` never run, so no calibration check is ever
   consulted — never a kept verdict.
 - **23 runs read KEPT in this round's counted runs, carrying 35 kept findings,
-  every one hand-adjudicated true positive** against its own trace (the tool
+  every one adjudicated from its own trace in a committed data file** (the tool
   actually called, the attacker's own argument text, the effect, and validate's
-  own effect proof level) — see the write-up's "The kept findings." A run and the
-  findings it carries are different counts once a run can keep several findings
-  at once. 42 runs / 54 findings read KEPT across every status (18 runs / 18
-  findings on superseded rounds a fix replaced, 1 run / 1 finding on a run voided
-  for a provider rate limit); none, at any status, is false positive.
+  own effect proof level) **and then checked by an independent reviewer** — see
+  the write-up's "The kept findings." `scripts/build_e2e_results.py` never
+  assigns the label itself. A run and the findings it carries are different
+  counts once a run can keep several findings at once. 42 runs / 54 findings
+  read KEPT across every status (18 runs / 18 findings on superseded rounds a
+  fix replaced, 1 run / 1 finding on a run voided for a provider rate limit);
+  none, at any status, is false positive.
 - **Spend:** $2.75 on Anthropic (660 calls, 740 including a known ceiling floor),
   $0.35 on OpenAI (946 calls, 1,066 including the floor) — a measured lower bound
   (five ceiling-stopped runs' own leg made 80 more Anthropic and 120 more OpenAI

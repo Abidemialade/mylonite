@@ -159,9 +159,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counted runs (up from 11), carrying 35 kept findings — a run and the
   findings it carries are different counts once a run can keep several
   findings at once; 42 runs read KEPT across every status (54 findings),
-  including superseded and one void run, every finding hand-adjudicated
-  true positive from its own trace, never a template shared across runs
-  or providers. A corrected ceiling count adds a fifth ceiling-stopped
+  including superseded and one void run. Every finding's true-positive
+  label is adjudicated from its own trace in a committed data file,
+  `verification/results/0.12.0/e2e/adjudications.json`, then checked by
+  an independent reviewer — `scripts/build_e2e_results.py` never assigns
+  that label itself, and fails loudly if a KEPT finding has no entry
+  there or an entry no longer matches a real KEPT finding. A corrected
+  ceiling count adds a fifth ceiling-stopped
   leg this campaign's spend floor had missed (OpenAI +120, not +80), and
   one run (`tpv-server-memory-anthropic-1`) is now scored from its own
   artifact after a provenance check found it was scored from a cancelled,

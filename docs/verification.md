@@ -187,11 +187,12 @@ write-up's "Spend" and the file itself for the full accounting. 23 runs
 read KEPT in this round's counted runs, carrying 35 kept findings (42
 runs / 54 findings across every status, including superseded and one
 void run) — a run and the findings it carries are different counts once
-a run can keep several findings at once; every finding is hand-
-adjudicated true positive from its own trace. Counted spend: $2.75 on
+a run can keep several findings at once; every finding's true-positive
+label is adjudicated from its own trace in a committed data file, then
+checked by an independent reviewer. Counted spend: $2.75 on
 Anthropic (660 calls), $0.35 on OpenAI (946 calls) — both a measured
-lower bound, since five ceiling-stopped runs' own leg made 80 more
-Anthropic and 120 more OpenAI requests each that printed no cost line;
+lower bound, since five ceiling-stopped legs made 80 more Anthropic
+requests and 120 more OpenAI requests in total that printed no cost line;
 both totals, even at the corrected call counts, are well inside the
 pre-registered budget.
 
