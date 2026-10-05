@@ -577,3 +577,21 @@ changes.**
   new ceiling. Both batches are published. The first batch's 3
   ceiling-stopped runs are reported as NOT TESTED (ceiling), never as "W1
   did not land", and never as kept.
+
+### 2026-10-05 -- Proof depth 2 (Redis), OpenAI runs void for provider rate limiting
+
+Recorded before these runs are dispatched again. **No bar changes.**
+
+- **What happened.** The Proof depth 2 cell was re-run after the general
+  calibration fix (#364), which measured calibration as `confirm_only` on
+  all six runs. Three OpenAI runs were dispatched within seconds of each
+  other and shared one organisation per-minute token limit. Their logs show
+  repeated provider rate-limit errors (HTTP 429) that outlasted the retries.
+  Attempts were skipped, so the raw or guarded legs reached no verdict (run
+  ids 37258793714, 37258801183, 37258809271).
+- **Classification.** A provider rate limit is an infrastructure cause under
+  this file's re-run rule (provider-side throttling, like an outage). These
+  three runs are void. They are not scored as kept or not kept.
+- **Re-run.** The three OpenAI runs are re-run one at a time, spaced so that
+  no two share a rate-limit window. The three Anthropic runs, which logged no
+  rate-limit errors, stand.
