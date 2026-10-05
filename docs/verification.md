@@ -95,6 +95,13 @@ removal check, logged as a dated amendment in the same file. A W4 delete of the 
 the payload names can now reach `effect-confirmed`. It needs an exact name, so the
 amendment expects few such deletes on the small models and leaves every bar unchanged.
 
+A later round found two more harness defects, also logged and fixed as a dated
+amendment: the reference-app breadth cell installed into the wrong Python
+environment and so could never be imported, and the Go memory cell's binary moved
+out from under a product fix that (correctly) started anchoring a target file's
+relative command to its own directory. Both cells' 6 runs are void and will be
+re-run in full once each fix is smoke-tested.
+
 ## Launch rehearsal: the journey docs, run as written
 
 `verification/rehearsal/` holds a script that a reader wrote from the

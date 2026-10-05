@@ -490,3 +490,69 @@ Recorded before Proof depth 1 (`tpv-server-memory`) or Proof depth 2
   effect-confirmed findings, but they are reported with that calibration
   status, never as the bar met. Every cell's N, models and pass bar stay as
   written.
+
+### 2026-10-04 -- a second voiding and re-run, before Breadth 1 or Breadth 3 is dispatched again
+
+Recorded after the dispatch round that followed the removal-confirmation
+amendment above turned up two more harness defects, both in
+`.github/workflows/third-party-campaign.yml`, and before either affected
+cell is re-dispatched. Per "Integrity rules" item 3, a re-run needs a named
+cause, logged here, never a result nobody liked. **No bar changes.**
+
+- **Breadth 1 (`e2e-reference-w1`) -- all 6 runs void, a harness defect, not
+  a target result.** Every run refused with "the reference app target isn't
+  installed," before any LLM call. This cell's own install step ran
+  `python -m pip install "./reference_targets/mcp_kitchen_sink[mcp]"` --
+  the bare `python` on `PATH` (the runner's `setup-python` install), not the
+  campaign venv `$MYLONITE` actually runs from. This cell's reference-app
+  adapter imports `mcp_kitchen_sink` INSIDE the `$MYLONITE` process itself
+  (it spawns no subprocess for either twin, unlike `e2e-guarded-reference`),
+  so the package has to land in that same venv's site-packages, not
+  whichever interpreter `python` happens to resolve to. The install step now
+  installs with `$RUNNER_TEMP/campaign-venv/bin/python` explicitly, the same
+  interpreter `$MYLONITE` is the console-script entry point for. This cell
+  will be re-run in full (3 runs per model) on the fixed harness, after one
+  uncounted smoke dispatch confirms the install lands where `$MYLONITE` can
+  see it.
+- **Breadth 3 (`tpv-go-memory`) -- all 6 runs void, a harness defect, not a
+  target result.** Every run's "Run the real journey" step failed
+  pre-flight with `[MYL-PRE-003] AdapterDescribeFailed`, although the
+  unrelated Scaffold sanity check step, moments earlier in the same job,
+  introspected the identical binary cleanly. The cause is a product fix
+  that landed in between this cell's first and second dispatch rounds:
+  mylonite#187 (commit `ab26542c`, "resolve a target file's relative paths
+  against its own directory") now anchors a target file's relative
+  `command:` against the loaded YAML's own directory, not the caller's
+  `cwd` -- correct behaviour, and the exact thing #187 set out to fix
+  (`gate` and `scan` used to disagree on where a relative command resolved
+  depending on which directory invoked them). `go_memory.yaml` declares
+  `command: ./tpv-go-memory`, a relative path, and this cell's own
+  workflow step built that binary to `$GITHUB_WORKSPACE/tpv-go-memory` --
+  the checkout root, not `verification/third_party/`, where
+  `go_memory.yaml` lives and #187 now anchors against. The Scaffold sanity
+  check step passed because it launches the binary through an explicit
+  `--command "$GITHUB_WORKSPACE/tpv-go-memory"` flag, which keeps resolving
+  against the caller's own `cwd` (an inline `mcp:custom` target has no YAML
+  to anchor to -- #187's own commit message says so); "Run the real
+  journey" uses `--target-file`, which does anchor, and found no binary at
+  `verification/third_party/tpv-go-memory`. The workflow now builds the
+  binary to `verification/third_party/tpv-go-memory` and points the
+  Scaffold sanity check's own `--command` flag at the same path, so both
+  launch paths agree with `go_memory.yaml`'s relative `command:` instead of
+  one of them relying on a `$GITHUB_WORKSPACE`-rooted special case. This
+  cell will be re-run in full (3 runs per provider) on the fixed harness,
+  after one uncounted smoke dispatch confirms the binary is found from both
+  launch paths.
+- **The cost step, made to tell these two apart from a real crash.**
+  `scripts/compute_run_cost.py` read both voided cells' `run.log` (which
+  exists -- `tee` wrote it before either refusal -- just with no `llm: N
+  calls` line, since neither reached the planner) as `NoSpendLineFoundError`
+  and failed the "Compute this run's $ cost" step outright, which is
+  correct for a log with no spend line and no explanation, but wrong for
+  one that plainly shows Mylonite refusing pre-flight. The script now
+  recognises a `MYL-PRE-*` reason code or the reference app's "isn't
+  installed" refusal in an otherwise-spend-line-free log and writes a
+  zero-cost `cost.json` with a named reason instead of failing the step;
+  any other spend-line-free log (a traceback, an unrecognised abort) still
+  raises exactly as before. `tests/test_compute_run_cost.py` covers both
+  the recognised-refusal and still-raises-on-a-real-crash paths.
