@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A no-verdict run names a provider rate limit instead of pointing at the
+  wrong fix.** A run that reaches no verdict because a provider rate limit
+  (HTTP 429) survived every retry used to tell the operator to "declare an
+  effect_probe" — advice that misnamed a provider outage as a calibration
+  gap. The stability and differential detail now say, for example, "2/3 runs
+  failed on a provider rate limit (429) that survived every retry; lower
+  --max-concurrent or raise your rate limit, then re-run," and no longer
+  suggest an unrelated effect_probe when that is the cause. A rate limit is
+  retried with exponential backoff and jitter, honouring the provider's
+  `Retry-After`; an authentication error (401/403) or a bad request (400) is
+  never retried. `num_retries` (`mylonite.yaml` or `MYLONITE_NUM_RETRIES`,
+  default `2`) governs how many attempts are made, counted against
+  `--max-llm-requests`/`MYLONITE_MAX_LLM_REQUESTS` when a ceiling is set; a
+  call that never names `num_retries` at all now still gets that same
+  default of `2` retries under a ceiling, so setting one can never silently
+  turn off the resilience a 429 would otherwise have had.
+
 ### Documentation
 
 - **A second third-party campaign is pre-registered.**

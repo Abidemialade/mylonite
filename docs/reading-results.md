@@ -766,4 +766,12 @@ global `--max-llm-requests` option) runs out, no further LLM request is sent, so
 after that point is judged or validated. The scan report records
 `aborted: budget_exceeded`, the run exits `3`, and a last
 `[MYL-ABT-001] ... LLM request ceiling of N reached` line names the limit. A run that
-hit the ceiling never exits `0`.
+hit the ceiling never exits `0`. While a ceiling is set, Mylonite retries a rate limit
+(HTTP 429) itself so each retry is counted: `num_retries` from `mylonite.yaml` or
+`MYLONITE_NUM_RETRIES` governs the count, and a call that never sets it at all still
+gets 2 retries — the same default `num_retries` already carries with no ceiling in
+force — so setting a ceiling never silently removes the resilience a 429 would
+otherwise have had. A run that still reaches no verdict after every retry on a 429
+names that cause directly in its stability/differential detail (for example "2/3 runs
+failed on a provider rate limit (429) that survived every retry") rather than
+suggesting an unrelated fix such as declaring an `effect_probe`.

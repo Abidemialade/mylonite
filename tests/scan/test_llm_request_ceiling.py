@@ -62,6 +62,22 @@ class _Recorder:
         return _response()
 
 
+class _AsyncRecorder:
+    """Async sibling of :class:`_Recorder`, for the planner chokepoint
+    (``litellm_tool_call_async``), which awaits ``completion_fn``."""
+
+    def __init__(self, fail_first: int = 0, exc: Any = _rate_limit) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.fail_first = fail_first
+        self.exc = exc
+
+    async def __call__(self, **kwargs: Any) -> Any:
+        self.calls.append(kwargs)
+        if len(self.calls) <= self.fail_first:
+            raise self.exc()
+        return _response()
+
+
 def _json_call(fn: Any, **extra: Any) -> dict[str, Any]:
     return litellm_json_call(
         model="gpt-4o",
@@ -108,6 +124,85 @@ def test_set_ceiling_turns_off_litellm_retries_and_counts_each_attempt(
     assert len(fn.calls) == 3, "two retries after the first attempt"
     assert all(c["num_retries"] == 0 and c["max_retries"] == 0 for c in fn.calls)
     assert requests_sent() == 3
+
+
+def test_num_retries_unset_defaults_to_two_attempts_under_a_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_send_plan`` must not read a ``call_kwargs`` with no ``num_retries``
+    key at all (``None``) as zero retries -- that would silently remove the
+    resilience a 429 gets with no ceiling set, where LiteLLM's own default
+    retries would otherwise apply. ``None`` defaults to
+    ``_DEFAULT_CEILING_RETRIES`` (2); every real chokepoint already supplies
+    ``num_retries`` via ``LLMPolicy``'s own default of the same value, so
+    this exercises the belt-and-braces default directly, independent of the
+    policy."""
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "10")
+    kwargs, attempts = _llm._send_plan({"model": "gpt-4o"})
+    assert attempts == 3
+    assert kwargs["num_retries"] == 0
+    assert kwargs["max_retries"] == 0
+
+
+def test_explicit_zero_retries_still_means_exactly_one_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit ``num_retries=0`` always wins over the default -- it means
+    exactly one attempt, the operator's own choice, not a gap to fill in."""
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "10")
+    _, attempts = _llm._send_plan({"model": "gpt-4o", "num_retries": 0})
+    assert attempts == 1
+
+
+def test_num_retries_unset_retries_a_rate_limit_once_under_a_ceiling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End to end, with no policy scoped at all (the realistic 'the operator
+    never touched num_retries' case): one 429 then success still succeeds,
+    and both attempts are charged to the ceiling."""
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "10")
+    fn = _Recorder(fail_first=1)
+    result = _json_call(fn)
+    assert result == {"success": False, "confidence": 0.0, "reason": "stub"}
+    assert len(fn.calls) == 2
+    assert requests_sent() == 2
+
+
+def test_three_consecutive_rate_limits_exhaust_retries_without_a_silent_skip(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The planner chokepoint (``litellm_tool_call_async``) never swallows a
+    provider failure into a fallback -- once every retry is spent it still
+    raises, so the MCP adapter above it can label the skip "rate_limit"
+    (``MCPSessionAdapterBase._classify_failure``) instead of silently
+    treating it as a decided attempt. Three failures (one attempt plus the
+    two default retries) exhausts retries, not the ceiling."""
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "10")
+    fn = _AsyncRecorder(fail_first=3)
+
+    async def _drive() -> None:
+        await litellm_tool_call_async(
+            model="gpt-4o", messages=[{"role": "user", "content": "p"}], completion_fn=fn
+        )
+
+    with pytest.raises(litellm.RateLimitError):
+        asyncio.run(_drive())
+    assert len(fn.calls) == 3, "one attempt plus two default retries, then give up"
+    assert requests_sent() == 3
+    assert request_ceiling_hit() is None, "retries were exhausted, not the ceiling"
+
+
+def test_401_under_a_ceiling_is_exactly_one_attempt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An auth failure (401/403) is never retried, ceiling or not -- same
+    assertion as ``test_non_recoverable_errors_are_not_retried``, but with no
+    policy scoped (the default ``num_retries``), to pin the no-retry rule
+    against the belt-and-braces default added above, not just an explicit
+    ``num_retries=2``."""
+    monkeypatch.setenv(REQUEST_CEILING_ENV, "10")
+    fn = _Recorder(fail_first=5, exc=_auth)
+    with pytest.raises(_llm.NonRecoverableProviderError):
+        _json_call(fn)
+    assert len(fn.calls) == 1
 
 
 def test_retries_count_against_the_ceiling(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -18,8 +18,19 @@ request N+1 is never sent. The run stops, exits `3`, prints one
 [`MYL-ABT-001`](reason-codes.md#myl-abt-001) line naming the limit, and reads NOT
 TESTED, never clean. The global option wins over the variable; with neither set
 there is no ceiling. While a ceiling is set, Mylonite makes the provider retries itself
-(`num_retries` from `mylonite.yaml` or `MYLONITE_NUM_RETRIES`) so each one is
-counted. `--max-llm-calls` is a softer per-scan budget, described below.
+(`num_retries` from `mylonite.yaml` or `MYLONITE_NUM_RETRIES`, default `2`) so each one is
+counted toward the ceiling; with no ceiling set the same `num_retries` passes straight
+through to LiteLLM's own retry loop. The default of `2` applies even when `num_retries`
+is never configured anywhere, so setting a ceiling never silently removes the retries a
+429 would otherwise have gotten — an explicit `num_retries` (including an explicit `0`)
+always wins over that default. Either way, a rate limit (HTTP 429) is retried with
+exponential backoff and jitter, honouring the provider's `Retry-After` when it sends one
+(capped at 60 s); an authentication error (401/403) or a bad request (400) is never
+retried. If a rate limit still skips an attempt after every retry, the report names the
+cause ("a provider rate limit (429) that survived every retry") instead of advising an
+unrelated fix like declaring an effect_probe — lower `--max-concurrent` or raise your
+provider's rate limit and re-run. `--max-llm-calls` is a softer per-scan budget, described
+below.
 
 **Extra LLM headers.** Some keys need a header on every request beyond the key itself:
 an unscoped Anthropic key needs its workspace id, and some gateways route on a header.
@@ -651,7 +662,7 @@ wins over the command's own built-in default.
 | `max_tokens` | `MYLONITE_MAX_TOKENS` | the per-call `max_tokens` |
 | `temperature` | `MYLONITE_TEMPERATURE` | the per-call temperature |
 | `timeout` | `MYLONITE_TIMEOUT` | the per-call socket timeout, in seconds |
-| `num_retries` | `MYLONITE_NUM_RETRIES` | the per-call LiteLLM retry count |
+| `num_retries` | `MYLONITE_NUM_RETRIES` | the per-call LiteLLM retry count (default `2`) |
 | `root` | `MYLONITE_ROOT` | overrides the artefact root every command's output nests under |
 
 `target_file`, `authorize` and `max_llm_calls` have no flat env var — set them with

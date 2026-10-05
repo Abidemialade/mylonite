@@ -353,6 +353,37 @@ class _CustomRun:
     #: ``http-agent``): it records no tool calls and runs no effect probe, so
     #: the LLM judge is the only evidence it can give.
     black_box: bool = False
+    #: The skipped attempt's ``verdict_reason`` when this run reached no
+    #: verdict (neither fired nor was confirmed resisted) because the planner
+    #: call itself was skipped -- e.g. ``"rate_limit on <pattern>: ..."`` from
+    #: ``MCPSessionAdapterBase._classify_failure`` once every retry under the
+    #: active ``num_retries``/request-ceiling policy was exhausted. ``None``
+    #: for a finding, a confirmed resistance, or any other skip cause. Read by
+    #: :func:`_rate_limited_count` so the stability/effect advice can name the
+    #: real cause instead of misdirecting the operator to declare an
+    #: effect_probe for a run a provider error cut off, not the guard.
+    skip_reason: str | None = None
+
+
+def _rate_limited_count(runs: list[_CustomRun]) -> int:
+    """How many no-verdict runs in ``runs`` were cut off by a provider rate
+    limit (429) that survived every retry, not by the guard/judge.
+
+    Only counts a run that neither fired nor was confirmed resisted (a
+    genuine no-verdict) AND whose recorded ``skip_reason`` starts with the
+    "rate_limit" classification ``MCPSessionAdapterBase._classify_failure``
+    stamps once ``scan._llm``'s retry loop gives up on a 429. A run resisted
+    or firing for an unrelated reason never has this prefix, so the check
+    stays precise even though ``skip_reason`` is set unconditionally.
+    """
+    return sum(
+        1
+        for r in runs
+        if not r.finding
+        and not r.resisted
+        and r.skip_reason is not None
+        and re.match(r"^rate_limit\b", r.skip_reason)
+    )
 
 
 def _tier_clause(tiers: list[str | None]) -> str:
@@ -888,7 +919,14 @@ class DifferentialValidator(ValidatorBase):
             f"(need >= {self._vuln_threshold})" + _tier_clause(fire_tiers)
         )
         if raw_no_verdict:
+            raw_rate_limited = _rate_limited_count(runs)
             stability_detail += f"; {raw_no_verdict}/{n} runs reached no verdict"
+            if raw_rate_limited:
+                stability_detail += (
+                    f" ({raw_rate_limited} on a provider rate limit (429) that survived "
+                    "every retry; lower --max-concurrent or raise your rate limit, then "
+                    "re-run)"
+                )
         if judge_only:
             stability_detail += f"; {JUDGE_ONLY_CLAUSE}"
         stability = ValidationOutcome(
@@ -1043,14 +1081,28 @@ class DifferentialValidator(ValidatorBase):
                     if self._guarded_is_server_layer
                     else "synthetic boundary twin"
                 )
-                detail = (
-                    f"control {control!r} ({where}): {counts}; the guarded side leaked "
-                    f"nothing, but only {guard_resisted_count}/{n} runs could be confirmed "
-                    f"as resisting (need {self._min_guard_resist_rate:.0%}) and "
-                    f"{guard_no_verdict}/{n} reached no verdict, so this run cannot show "
-                    "that the control closes the attack. Declare an effect_probe that "
-                    "calibrates on this target so a stopped attack can be confirmed"
-                )
+                guard_rate_limited = _rate_limited_count(guard_runs)
+                if guard_rate_limited:
+                    # The no-verdict runs were cut off by the provider, not by
+                    # anything the guard or the judge decided -- naming an
+                    # effect_probe here would send the operator to calibrate a
+                    # probe that was never the problem (see
+                    # `_rate_limited_count`'s docstring).
+                    detail = (
+                        f"control {control!r} ({where}): {counts}; "
+                        f"{guard_rate_limited}/{n} runs failed on a provider rate limit "
+                        "(429) that survived every retry, not on the control -- lower "
+                        "--max-concurrent or raise your rate limit, then re-run"
+                    )
+                else:
+                    detail = (
+                        f"control {control!r} ({where}): {counts}; the guarded side leaked "
+                        f"nothing, but only {guard_resisted_count}/{n} runs could be confirmed "
+                        f"as resisting (need {self._min_guard_resist_rate:.0%}) and "
+                        f"{guard_no_verdict}/{n} reached no verdict, so this run cannot show "
+                        "that the control closes the attack. Declare an effect_probe that "
+                        "calibrates on this target so a stopped attack can be confirmed"
+                    )
             elif passed and self._guarded_is_server_layer:
                 detail = (
                     f"control {control!r} (server-layer twin): {counts} "
@@ -1240,6 +1292,7 @@ class DifferentialValidator(ValidatorBase):
             verdict_mechanism=attempt.verdict_mechanism if attempt is not None else None,
             trace_outcome=evidence.get("trace_outcome"),
             black_box=black_box,
+            skip_reason=attempt.verdict_reason if attempt is not None else None,
         )
 
     @staticmethod

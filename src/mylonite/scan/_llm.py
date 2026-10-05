@@ -122,11 +122,28 @@ class BudgetExceededError(RuntimeError):
 # internal retries, so counting there can under-count. Sending
 # ``num_retries=0, max_retries=0`` and looping here, charging the ceiling before
 # every send, cannot. With no ceiling set, call kwargs pass through untouched
-# and LiteLLM retries exactly as before.
+# and LiteLLM retries exactly as before. A caller whose ``call_kwargs`` never
+# names ``num_retries`` at all still gets ``_DEFAULT_CEILING_RETRIES`` (2)
+# attempts under a ceiling -- the same count LLMPolicy's own default already
+# sends on every current chokepoint -- so setting a ceiling never silently
+# trades away the retries a 429 would otherwise have gotten.
 
 #: The env var that sets the ceiling. ``mylonite --max-llm-requests N`` sets the
 #: same ceiling for one invocation and wins over the variable.
 REQUEST_CEILING_ENV: Final = "MYLONITE_MAX_LLM_REQUESTS"
+
+#: Attempts Mylonite grants itself, under a ceiling, when the call it is about
+#: to send carries no ``num_retries`` at all (the key is absent from
+#: ``call_kwargs``, not merely ``0``) -- matches the OpenAI SDK's own default
+#: retry count, the resilience a bare ``num_retries=0, max_retries=0`` would
+#: otherwise remove outright for a caller that never set the policy's
+#: ``num_retries`` explicitly. Every current chokepoint already supplies
+#: ``num_retries`` from ``LLMPolicy``'s own default (also ``2`` --
+#: ``llm_policy.py``), so this is belt-and-braces: the ceiling's retry count
+#: must not depend on every future caller remembering to go through that
+#: policy. An explicit value -- including an explicit ``0`` -- always wins;
+#: see :func:`_send_plan`.
+_DEFAULT_CEILING_RETRIES: Final = 2
 
 #: Upper bound on one wait between retries, in seconds, even when a provider's
 #: ``Retry-After`` asks for longer.
@@ -262,11 +279,20 @@ def _refuse_if_spent() -> None:
 
 
 def _send_plan(call_kwargs: dict[str, Any]) -> tuple[dict[str, Any], int]:
-    """The kwargs to send and how many attempts Mylonite itself may make."""
+    """The kwargs to send and how many attempts Mylonite itself may make.
+
+    Under a ceiling, ``num_retries`` absent from ``call_kwargs`` entirely
+    defaults to :data:`_DEFAULT_CEILING_RETRIES` (``2``) attempts, not ``0``
+    -- a caller that never said how many retries it wants still gets the
+    same resilience the provider SDK would have given it with no ceiling
+    set. An explicit value, including an explicit ``0``, always wins over
+    the default: ``0`` means exactly one attempt, by design.
+    """
     if request_ceiling() is None:
         return call_kwargs, 1
-    retries = call_kwargs.get("num_retries") or 0
-    attempts = 1 + max(0, int(retries))
+    raw_retries = call_kwargs.get("num_retries")
+    retries = _DEFAULT_CEILING_RETRIES if raw_retries is None else max(0, int(raw_retries))
+    attempts = 1 + retries
     return {**call_kwargs, "num_retries": 0, "max_retries": 0}, attempts
 
 

@@ -1814,6 +1814,19 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
 
     @staticmethod
     def _classify_failure(exc: BaseException) -> str:
+        # A provider rate limit (429) that survived every retry inside
+        # `scan._llm._send_async` (num_retries exhausted, or the retry itself
+        # refused by a spent request ceiling) still reaches here as a bare
+        # exception -- the same `classify_provider_error` that drove the retry
+        # decision names it "rate_limit" too, so the operator sees the real
+        # cause instead of a generic "planner_exception" that points at the
+        # planner model rather than the provider's limit. Checked first and
+        # only acted on for this one category: every other exception keeps
+        # falling through to the name-based classification below unchanged.
+        from mylonite.scan.diagnostics import classify_provider_error
+
+        if classify_provider_error(exc).category == "rate_limit":
+            return "rate_limit"
         name = type(exc).__name__
         if "Timeout" in name:
             return "timeout"
