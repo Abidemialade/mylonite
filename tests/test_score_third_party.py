@@ -1339,3 +1339,123 @@ def test_e2e_pilot_not_tested_abort_reads_calibration_from_the_real_scan_dir(
     result = scorer.score_run(out_dir, run_log=log, pattern="")
     assert result["classification"] == scorer.NOT_TESTED
     assert result["calibration_status"] == "confirm_only"
+
+
+# --- the harness now validates EVERY exploit, not only the first -----------
+# `third-party-campaign.yml` used to pass `generate`/`validate` exactly one
+# exploit (alphabetically first). It now loops over every `exploit_*.json`
+# the scan wrote, generating+validating each into its own subdirectory named
+# after the exploit file's stem (e.g. `generated/create_relations/`). These
+# tests cover the scorer's side of that change: a run directory holding
+# several per-finding subdirectories, each with its own trimmed
+# scan_report.json, exploit file and validation_report.json -- mirroring the
+# real batch-4 scan this harness fix was built from (two of its four
+# findings validated here; see `multi_two_findings`'s own fixture files).
+
+
+def _materialise_multi_run(tmp_path: Path) -> tuple[Path, Path]:
+    """Lay out the NEW multi-report harness shape: `generated/<stem>/` per
+    validated exploit, alongside the real scan's own `out/` directory --
+    `create_relations` (alphabetically first, KEPT, dispatched-tool-linked)
+    and `delete_entities` (KEPT, the stronger effect-confirmed proof) are
+    both validated, exactly the batch-4 scenario the harness fix targets."""
+    fixture_dir = _FIXTURES / "multi_two_findings"
+    generated_dir = tmp_path / "generated"
+    out_dir = tmp_path / "out"
+    out_dir.mkdir(parents=True)
+
+    (out_dir / "scan_report.json").write_text(
+        (fixture_dir / "out_scan_report.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+    (out_dir / "verdicts.json").write_text(
+        (fixture_dir / "out_verdicts.json").read_text(encoding="utf-8"), encoding="utf-8"
+    )
+
+    stub_text = (fixture_dir / "sub_scan_report_stub.json").read_text(encoding="utf-8")
+    for stem, validation_name in (
+        ("create_relations", "validation_report_create_relations.json"),
+        ("delete_entities", "validation_report_delete_entities.json"),
+    ):
+        sub_dir = generated_dir / stem
+        sub_dir.mkdir(parents=True)
+        (sub_dir / "scan_report.json").write_text(stub_text, encoding="utf-8")
+        (sub_dir / "validation_report.json").write_text(
+            (fixture_dir / validation_name).read_text(encoding="utf-8"), encoding="utf-8"
+        )
+        exploit_text = (fixture_dir / f"exploit_{stem}.json").read_text(encoding="utf-8")
+        (sub_dir / f"exploit_{stem}.json").write_text(exploit_text, encoding="utf-8")
+        (out_dir / f"exploit_{stem}.json").write_text(exploit_text, encoding="utf-8")
+
+    return generated_dir, out_dir
+
+
+def test_multi_report_run_picks_the_stronger_kept_finding(tmp_path: Path) -> None:
+    """Both subdirectories are KEPT; `delete_entities` reached the stronger
+    `effect-confirmed` proof level, so the cell's own classification and
+    proof_level must come from it, not from `create_relations` (which sorts
+    first alphabetically -- the exact bug the single-exploit harness had)."""
+    generated_dir, out_dir = _materialise_multi_run(tmp_path)
+    result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
+    assert result["classification"] == scorer.KEPT
+    assert result["proof_level"] == "effect-confirmed"
+
+
+def test_multi_report_run_records_every_validated_finding(tmp_path: Path) -> None:
+    """Every validated finding is recorded -- pattern, tool, verdict label,
+    and its own proof level -- not only the strongest one."""
+    generated_dir, out_dir = _materialise_multi_run(tmp_path)
+    result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
+    by_pattern = {f["pattern_id"]: f for f in result["validated_findings"]}
+    assert set(by_pattern) == {
+        "synth-w4-unconfirmed-create_relations",
+        "synth-w4-unconfirmed-delete_entities",
+    }
+    assert by_pattern["synth-w4-unconfirmed-create_relations"] == {
+        "pattern_id": "synth-w4-unconfirmed-create_relations",
+        "tool": "create_relations",
+        "label": "KEPT",
+        "proof_level": "dispatched-tool-linked",
+    }
+    assert by_pattern["synth-w4-unconfirmed-delete_entities"] == {
+        "pattern_id": "synth-w4-unconfirmed-delete_entities",
+        "tool": "delete_entities",
+        "label": "KEPT",
+        "proof_level": "effect-confirmed",
+    }
+
+
+def test_multi_report_run_marks_every_validated_pattern_in_scan_findings(
+    tmp_path: Path,
+) -> None:
+    """`scan_findings` must mark BOTH validated exploits as `validated: True`
+    -- the real scan recorded four findings, and only two of them (not one)
+    were ever generated+validated this run."""
+    generated_dir, out_dir = _materialise_multi_run(tmp_path)
+    result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
+    findings = {f["pattern_id"]: f for f in result["scan_findings"]}
+    assert findings["synth-w4-unconfirmed-create_relations"]["validated"] is True
+    assert findings["synth-w4-unconfirmed-delete_entities"]["validated"] is True
+    assert findings["synth-w4-unconfirmed-delete_observations"]["validated"] is False
+    assert findings["synth-w4-unconfirmed-delete_relations"]["validated"] is False
+    assert result["max_scan_proof_level"] == "effect-confirmed"
+
+
+def test_multi_report_run_marks_the_w4_block_kept(tmp_path: Path) -> None:
+    generated_dir, out_dir = _materialise_multi_run(tmp_path)
+    result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
+    assert "w1" not in result
+    assert result["w4"]["kept"] == 1
+
+
+def test_single_report_layout_is_unaffected_by_multi_report_detection(
+    tmp_path: Path,
+) -> None:
+    """A run_dir carrying its own `scan_report.json`/`validation_report.json`
+    directly (the old, still-live single-report layout) must never be
+    mistaken for the new multi-report shape, even when it happens to sit
+    next to sibling directories -- `_multi_report_subdirs` only looks for
+    subdirectories, and only when run_dir itself carries neither file."""
+    generated_dir, out_dir = _materialise_pilot_run(tmp_path, "e2e_pilot_openai_kept")
+    result = scorer.score_run(generated_dir, scan_dir=out_dir, pattern="")
+    assert result["classification"] == scorer.KEPT
+    assert "validated_findings" not in result
