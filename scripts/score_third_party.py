@@ -428,7 +428,24 @@ def _scan_findings(raw_report: dict, validated_pattern_id: str | None) -> list[d
     ``tpv-server-memory`` finding (a)): a stronger, removal-confirmed
     finding can sit in the SAME scan as the one that was actually validated
     and kept, and without this list that finding is invisible to anyone
-    reading only the cell's score."""
+    reading only the cell's score.
+
+    A thin wrapper over :func:`_scan_findings_for` with a single candidate
+    pattern id -- unchanged for every pre-existing caller -- now that the
+    harness can validate every finding in one scan (see
+    :func:`_scan_findings_for`'s own docstring)."""
+    validated_ids = {validated_pattern_id} if validated_pattern_id else set()
+    return _scan_findings_for(raw_report, validated_ids)
+
+
+def _scan_findings_for(
+    raw_report: dict, validated_pattern_ids: set[str]
+) -> list[dict[str, object]]:
+    """Same shape as :func:`_scan_findings`, but ``validated`` is True for
+    every ``pattern_id`` in ``validated_pattern_ids`` -- plural, because the
+    harness now generates+validates EVERY exploit a scan found (not only the
+    alphabetically-first), so more than one finding in the same scan can be
+    validated at once (see ``_score_multi_report_run``)."""
     findings: list[dict[str, object]] = []
     for attempt in raw_report.get("attempts", []) if isinstance(raw_report, dict) else []:
         if not isinstance(attempt, dict) or attempt.get("outcome") != "finding":
@@ -440,7 +457,7 @@ def _scan_findings(raw_report: dict, validated_pattern_id: str | None) -> list[d
             "pattern_id": pattern_id,
             "weakness": _weakness_for_pattern(pattern_id),
             "proof_level": evidence.get("proof_level"),
-            "validated": validated_pattern_id is not None and pattern_id == validated_pattern_id,
+            "validated": pattern_id in validated_pattern_ids,
         }
         if "removal_confirmed" in evidence:
             entry["removal_confirmed"] = evidence["removal_confirmed"]
@@ -669,6 +686,185 @@ def _resolve_scan_dir(run_dir: Path, scan_dir: Path | None) -> Path:
     return run_dir
 
 
+def _multi_report_subdirs(run_dir: Path) -> list[Path]:
+    """Every immediate subdirectory of ``run_dir`` that looks like one
+    exploit's own ``generate``+``validate`` output (an ``exploit_*.json``
+    and/or a ``validation_report.json`` directly inside it), sorted by name
+    for a deterministic pick on a tie.
+
+    ``run_dir`` only ever qualifies for this layout when it carries NEITHER
+    ``scan_report.json`` NOR ``validation_report.json`` itself -- the old
+    single-report layout always has one or the other directly in
+    ``run_dir``, so a pre-existing caller (and every fixture under
+    ``tests/fixtures/score_third_party/``) always gets ``[]`` here and falls
+    straight through to the unchanged single-report path in
+    :func:`score_run`. A non-empty result means the harness generated+
+    validated more than one exploit from the same scan, one subdirectory
+    per exploit file stem (``third-party-campaign.yml``'s loop)."""
+    if (run_dir / "scan_report.json").is_file() or (run_dir / "validation_report.json").is_file():
+        return []
+    if not run_dir.is_dir():
+        return []
+    subdirs = []
+    for child in sorted(run_dir.iterdir(), key=lambda p: p.name):
+        if not child.is_dir():
+            continue
+        if (child / "validation_report.json").is_file() or any(child.glob("exploit_*.json")):
+            subdirs.append(child)
+    return subdirs
+
+
+def _exploit_tool(exploit_path: Path) -> str | None:
+    """The MCP tool name an exploit file's own payload names as the
+    consequential tool it exercised -- ``payload.metadata.
+    consequential_tool`` (every W4 seed sets this; see ``seed_synth.py``),
+    falling back to the first name in ``response.tool_calls`` when that key
+    is absent. ``None`` when the file is missing, unreadable, or names
+    neither."""
+    try:
+        data = json.loads(exploit_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    payload = data.get("payload")
+    if isinstance(payload, dict):
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict) and metadata.get("consequential_tool"):
+            return str(metadata["consequential_tool"])
+    response = data.get("response")
+    if isinstance(response, dict):
+        tool_calls = response.get("tool_calls")
+        if isinstance(tool_calls, list) and tool_calls:
+            return str(tool_calls[0])
+    return None
+
+
+#: Precedence for picking which per-finding subdirectory's result speaks for
+#: the whole multi-finding run -- lower wins. Mirrors the module docstring's
+#: own classification order: a product defect or an infra/invalid signal
+#: (read off the SAME shared logs for every subdirectory, so never actually
+#: disagrees between them) still overrides everything; among ordinary
+#: results, KEPT beats every not-kept classification -- "KEPT over
+#: not-kept" from the harness's own fix requirement.
+_CLASSIFICATION_RANK: dict[str, int] = {
+    PRODUCT_DEFECT: 0,
+    INFRA: 1,
+    INVALID: 2,
+    KEPT: 3,
+    FOUND_UNVALIDATED: 4,
+    NOT_KEPT: 5,
+    NOT_TESTED: 6,
+}
+
+
+def _proof_level_rank(level: object) -> int:
+    """Lower is stronger, per ``PROOF_LEVEL_ORDER`` (strongest-first) -- an
+    unknown or missing level ranks weakest of all, so it never beats a real
+    measurement when picking the strongest validated finding."""
+    from mylonite.scan.class_verdict import PROOF_LEVEL_ORDER
+
+    if isinstance(level, str) and level in PROOF_LEVEL_ORDER:
+        return PROOF_LEVEL_ORDER.index(level)
+    return len(PROOF_LEVEL_ORDER)
+
+
+def _pick_strongest(sub_results: list[dict[str, object]]) -> dict[str, object]:
+    """The one sub-result that speaks for the whole multi-finding run:
+    lowest classification rank first, then (within the same classification,
+    e.g. two KEPT subdirectories) the strongest ``proof_level`` -- "KEPT
+    over not-kept; effect-confirmed over dispatched-tool-linked"."""
+
+    def _key(result: dict[str, object]) -> tuple[int, int]:
+        rank = _CLASSIFICATION_RANK.get(str(result.get("classification")), 99)
+        return (rank, _proof_level_rank(result.get("proof_level")))
+
+    return min(sub_results, key=_key)
+
+
+def _score_multi_report_run(
+    run_dir: Path,
+    subdirs: list[Path],
+    *,
+    run_log: Path | None,
+    scan_log: Path | None,
+    validate_log: Path | None,
+    pattern: str | None,
+    scan_dir: Path | None,
+) -> dict[str, object]:
+    """Score every per-finding subdirectory under ``run_dir`` (one per
+    exploit the harness generated+validated -- see
+    :func:`_multi_report_subdirs`) and combine them into one cell verdict.
+
+    Every validated finding is recorded in ``validated_findings`` (pattern,
+    tool, verdict label, proof level), but the cell's own ``classification``
+    and ``proof_level`` are the STRONGEST one's (see :func:`_pick_strongest`)
+    -- never the alphabetically-first subdirectory, which is exactly the bug
+    the single-exploit harness had (see the module docstring's batch-4
+    finding). ``scan_findings``/``max_scan_proof_level`` mark EVERY
+    validated pattern_id, not only one."""
+    sub_results = [
+        score_run(
+            sub,
+            run_log=run_log,
+            scan_log=scan_log,
+            validate_log=validate_log,
+            pattern=pattern,
+            scan_dir=scan_dir,
+        )
+        for sub in subdirs
+    ]
+
+    validated_findings: list[dict[str, object]] = []
+    kept_pattern_ids: set[str] = set()
+    for sub, sub_result in zip(subdirs, sub_results, strict=True):
+        pattern_id = _validated_pattern_id(sub)
+        if pattern_id is None:
+            continue
+        exploit_matches = sorted(sub.glob("exploit_*.json"))
+        tool = _exploit_tool(exploit_matches[0]) if exploit_matches else None
+        label = sub_result.get("label")
+        validated_findings.append(
+            {
+                "pattern_id": pattern_id,
+                "tool": tool,
+                "label": label,
+                "proof_level": sub_result.get("proof_level"),
+            }
+        )
+        if label == "KEPT":
+            kept_pattern_ids.add(pattern_id)
+
+    real_scan_dir = _resolve_scan_dir(run_dir, scan_dir)
+    raw_report = _read_raw_report_safe(real_scan_dir)
+    validated_ids = {f["pattern_id"] for f in validated_findings if f["pattern_id"]}
+    scan_findings = _scan_findings_for(raw_report, validated_ids)
+    max_scan_proof_level = _max_scan_proof_level(scan_findings)
+
+    weakness_classes = sorted({w for sr in sub_results for w in (sr.get("weakness_classes") or [])})
+    pattern_blocks = _pattern_blocks_for(raw_report, pattern)
+    for pid in sorted(kept_pattern_ids):
+        _mark_kept(
+            pattern_blocks,
+            pattern=pattern,
+            weakness_classes=weakness_classes,
+            raw_report=raw_report,
+            validated_pattern_id=pid,
+        )
+
+    winner = _pick_strongest(sub_results)
+    result = dict(winner)
+    for weakness_key in ("w1", "w2", "w3", "w4"):
+        result.pop(weakness_key, None)
+    result.update(pattern_blocks)
+    result["weakness_classes"] = weakness_classes
+    result["validated_findings"] = validated_findings
+    result["scan_findings"] = scan_findings
+    result["max_scan_proof_level"] = max_scan_proof_level
+    result["exercised"] = any(sr.get("exercised") for sr in sub_results)
+    return result
+
+
 def score_run(
     run_dir: Path,
     *,
@@ -690,7 +886,26 @@ def score_run(
     pattern). ``scan_dir`` is the REAL scan output directory, when it
     differs from ``run_dir`` (see :func:`_resolve_scan_dir`); omitted for a
     scan-only ``run_dir`` or an offline test fixture.
+
+    When ``run_dir`` holds several per-finding subdirectories instead of a
+    single flat report (the harness now generates+validates EVERY exploit a
+    scan found, not only the alphabetically-first -- see
+    :func:`_multi_report_subdirs`), this scores each one and combines them
+    (:func:`_score_multi_report_run`); a run with the old single-report
+    layout is unaffected and scores exactly as it always has.
     """
+    subdirs = _multi_report_subdirs(run_dir)
+    if subdirs:
+        return _score_multi_report_run(
+            run_dir,
+            subdirs,
+            run_log=run_log,
+            scan_log=scan_log,
+            validate_log=validate_log,
+            pattern=pattern,
+            scan_dir=scan_dir,
+        )
+
     scan_text = _read_log(scan_log)
     validate_text = _read_log(validate_log)
     log_text = _read_log(run_log)

@@ -646,8 +646,12 @@ def _resolve_dirs(inner: Path) -> tuple[Path, Path | None]:
     ``third-party-campaign.yml``'s "Score the run" step passes: ``scan_dir``
     is always the original ``scan --output-dir`` child (``out/<timestamp>``,
     the only one in every run this script has seen); ``run_dir`` is
-    ``generated`` only when ``validate`` actually wrote a report there,
-    otherwise the same scan directory."""
+    ``generated`` whenever ``validate`` actually wrote a report there --
+    either directly (every batch this script has read so far, one validated
+    exploit per run) or, now that the harness validates every exploit a scan
+    found, in a per-exploit subdirectory of ``generated`` (``score_run``'s
+    own ``_multi_report_subdirs`` detects that shape) -- otherwise the same
+    scan directory."""
     out_root = inner / "out"
     scan_dir: Path | None = None
     if out_root.is_dir():
@@ -655,7 +659,13 @@ def _resolve_dirs(inner: Path) -> tuple[Path, Path | None]:
         if children:
             scan_dir = children[0]
     generated_dir = inner / "generated"
-    if (generated_dir / "validation_report.json").is_file():
+    validated_directly = (generated_dir / "validation_report.json").is_file()
+    validated_in_a_subdir = any(
+        (child / "validation_report.json").is_file()
+        for child in generated_dir.glob("*")
+        if child.is_dir()
+    )
+    if validated_directly or validated_in_a_subdir:
         run_dir = generated_dir
     elif scan_dir is not None:
         run_dir = scan_dir
