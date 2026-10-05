@@ -595,3 +595,38 @@ Recorded before these runs are dispatched again. **No bar changes.**
 - **Re-run.** The three OpenAI runs are re-run one at a time, spaced so that
   no two share a rate-limit window. The three Anthropic runs, which logged no
   rate-limit errors, stand.
+
+### 2026-10-05 -- a new confirm-path cell, and Breadth 1's small-tier numbers
+
+Recorded after the campaign's published results and before any run below
+is dispatched. **No existing bar changes.** Proof depth 1 and 2 stay
+published as not met, and Breadth 1's mid-tier numbers stand as measured.
+
+- **Why there is a new cell.** Integrity rule 7 made a `certified`
+  calibration a precondition of the effect-confirmed bar. `certified` adds
+  one power over `confirm_only`: clearing, which means reading "no change" as
+  proof that a resisted attempt did no damage. A kept finding never uses
+  that power. Its effect proof needs only a calibration that is allowed to
+  confirm, and both statuses confirm. So the original bar measured whether a
+  store can certify, a separate question from whether a kept finding's
+  damage was confirmed. This cell measures the second question. It is
+  written after the first measurement and says so here; it never replaces
+  the original cells.
+- **Harness change before this cell runs.** The campaign generated and
+  validated only the alphabetically first exploit of each run. On memory
+  runs this skipped the run's own strongest finding. The harness now
+  validates every exploit of a run and records each one. The run is scored
+  on its strongest validated finding, and every validated finding is
+  published.
+- **New cell: Proof depth (confirm path).** Targets `tpv-server-memory` and
+  `tpv-mcp-redis`; small tier; both providers; N=3 each, dispatched one run
+  at a time. Pass bar: on 2+/3 runs per provider, a KEPT finding whose own
+  validate effect leg reads effect-confirmed under a `certified` or
+  `confirm_only` calibration. Calibration status is published per run. If
+  `certified` is reached on no run, that is stated once as a limit of this
+  class of store, where a write needs an existing record or the record id is
+  fixed by the target file.
+- **Breadth 1, small tier.** The bar already allows "the limit is documented
+  with both tiers' numbers", and only the mid tier was measured. The same
+  cell is dispatched on the small tier (Haiku and `gpt-4o-mini`), N=3 each,
+  at validate ceiling 100. Both tiers are published together.
