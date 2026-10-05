@@ -137,6 +137,39 @@ for the one finding ``generate``/``validate`` actually processed) -- and
 (``None`` when none carries one). Only the entry with ``validated: true``
 may ever be described as kept; every other entry is found, not validated.
 
+Two proof-level axes, and which one a proof-depth bar reads
+-------------------------------------------------------------
+A scan ATTEMPT's own ``judge_evidence.proof_level`` (``scan_findings[*]
+.proof_level``, ``max_scan_proof_level``, and this run's own top-level
+``proof_level`` -- unchanged, the single-report path's existing meaning)
+is one strongest level read during the SCAN. ``validate``'s own "effect"
+gating leg re-runs the attack against the real target and reads it back
+again, under whatever calibration held at validate time, and can read a
+DIFFERENT level -- confirmed live (2026-10-05, ``tpv-server-memory``,
+openai, small tier): the scan attempt for ``delete_entities`` read
+``effect-confirmed``, while that same finding's own ``validate`` effect
+leg read only ``dispatched-tool-linked`` (``validation_report.json``'s
+"effect" outcome detail: "0 effect-confirmed ... 3 dispatched-tool-linked").
+:func:`_validated_effect_proof_level` parses that detail text directly
+from a ``validation_report.json``; it is the ONE place either axis is
+read, shared by the single-report path (``build_e2e_results.py``'s own
+``_score_one``, for a classic ``generated/`` directory) and the
+multi-report path (:func:`_score_multi_report_run`, once per per-finding
+subdirectory) -- never duplicated.
+
+For a multi-report run, each ``validated_findings`` entry therefore carries
+BOTH axes under their own names -- ``scan_proof_level`` (the scan attempt's
+own level, what the old, now-renamed ``proof_level`` key used to hold here)
+and ``validated_effect_proof_level``/``validated_effect_counts`` (validate's
+own effect leg for that exact finding) -- and this run's own top-level
+``validated_effect_proof_level``/``validated_effect_counts`` come from the
+STRONGEST KEPT finding's own validated effect level, never from the scan
+axis. A reader asking "did this bar actually prove the confirm-path depth
+claim" must read ``validated_effect_proof_level``, never the top-level
+``proof_level`` -- that field keeps meaning only "the strongest level a
+scan ATTEMPT reached," which a KEPT finding's own validate re-drive can
+read weaker (or stronger) than.
+
 Usage
 -----
 
@@ -812,6 +845,88 @@ def _local_log_text(sub: Path) -> str:
     return "\n".join(parts)
 
 
+#: ``validate``'s own "effect" gating-leg outcome prints this exact shape
+#: (``ValidationReport`` outcome for ``stage == "effect"``, see
+#: ``reference_validator.py``'s own formatting) -- three counts, always in
+#: this order, always summing to the leg's run count. This is a DIFFERENT
+#: axis from a scan ATTEMPT's own ``judge_evidence.proof_level`` (what
+#: :func:`_finding_proof_level` reads): that is the single strongest level
+#: one scan attempt reached; this is how many of VALIDATE's re-drives
+#: against the real target reached each proof level, which can -- and for
+#: some findings does -- read weaker (or stronger) than the scan attempt's
+#: own level, because validate's own effect probe gets to re-run the attack
+#: and read the target back multiple times under a calibration that may
+#: have changed between the scan and the validate re-drive. See the module
+#: docstring's "Two proof-level axes" section.
+_EFFECT_COUNTS_RE = re.compile(
+    r"by proof level:\s*(\d+)\s*effect-confirmed,\s*(\d+)\s*dispatched,\s*(\d+)\s*dispatched-tool-linked"
+)
+
+#: Effect-level strength order, strongest first -- mirrors the gating leg's
+#: own priority order inside :func:`_validated_effect_proof_level`. Used
+#: only to pick which KEPT finding's own validated effect level speaks for
+#: a multi-report run's top-level ``validated_effect_proof_level``.
+_EFFECT_LEVEL_ORDER: tuple[str, ...] = (
+    "effect-confirmed",
+    "dispatched-tool-linked",
+    "dispatched",
+)
+
+
+def _effect_level_rank(level: object) -> int:
+    """Lower is stronger. An unknown or missing level ranks weakest of all,
+    so it never beats a real measurement when picking the strongest
+    validated finding."""
+    if isinstance(level, str) and level in _EFFECT_LEVEL_ORDER:
+        return _EFFECT_LEVEL_ORDER.index(level)
+    return len(_EFFECT_LEVEL_ORDER)
+
+
+def _validated_effect_proof_level(
+    report_dir: Path,
+) -> tuple[str | None, dict[str, int] | None]:
+    """``(strongest_level, counts)`` from ``report_dir/validation_report.json``'s
+    own "effect" outcome detail text, or ``(None, None)`` when no validation
+    report exists there (the cell never reached ``validate``) or its
+    "effect" outcome's detail does not match the expected shape (an
+    aborted/short-circuited validate run that never reached the effect
+    leg). ``strongest_level`` is ``"effect-confirmed"``,
+    ``"dispatched-tool-linked"`` or ``"dispatched"`` (the strongest
+    non-zero count, matching the gating leg's own priority order), or
+    ``None`` when all three counts are zero.
+
+    This is the ONE place either proof-level axis is parsed -- shared by
+    the single-report path (``build_e2e_results.py``'s own ``_score_one``,
+    called once against a classic ``generated/`` directory) and the
+    multi-report path (:func:`_score_multi_report_run`, called once per
+    per-finding subdirectory) -- never duplicated. See the module
+    docstring's "Two proof-level axes" section."""
+    path = report_dir / "validation_report.json"
+    if not path.is_file():
+        return None, None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None, None
+    effect = next((o for o in data.get("outcomes", []) if o.get("stage") == "effect"), None)
+    if effect is None:
+        return None, None
+    match = _EFFECT_COUNTS_RE.search(str(effect.get("detail", "")))
+    if match is None:
+        return None, None
+    n_ec, n_d, n_dtl = (int(g) for g in match.groups())
+    counts = {"effect_confirmed": n_ec, "dispatched": n_d, "dispatched_tool_linked": n_dtl}
+    if n_ec > 0:
+        strongest = "effect-confirmed"
+    elif n_dtl > 0:
+        strongest = "dispatched-tool-linked"
+    elif n_d > 0:
+        strongest = "dispatched"
+    else:
+        strongest = None
+    return strongest, counts
+
+
 def _score_subdir(sub: Path, *, pattern: str | None, scan_dir: Path | None) -> dict[str, object]:
     """Score one per-finding subdirectory using ONLY its own logs -- never
     the shared ``run.log``/``scan.log`` another exploit's crash could have
@@ -863,15 +978,27 @@ def _score_multi_report_run(
     label/proof_level; see the harness review this fixes).
 
     Every validated finding is recorded in ``validated_findings`` (pattern,
-    tool, verdict label, proof level, AND that subdirectory's own
-    ``classification`` -- ``label`` is ``None`` and ``classification`` names
-    the failure, e.g. ``PRODUCT_DEFECT``, when that exploit's own
-    generate/validate crashed; the crash is recorded, never silently
-    dropped). The cell's own top-level ``classification`` and
-    ``proof_level`` are the STRONGEST sub-result's (see
-    :func:`_pick_strongest`) -- never the alphabetically-first subdirectory,
-    which is exactly the bug the single-exploit harness had (see the module
-    docstring's batch-4 finding).
+    tool, verdict label, BOTH proof-level axes -- ``scan_proof_level`` (the
+    scan attempt's own level) and ``validated_effect_proof_level``/
+    ``validated_effect_counts`` (that exact finding's own ``validate``
+    effect leg, parsed by :func:`_validated_effect_proof_level` -- the same
+    parser the single-report path uses, never duplicated) -- AND that
+    subdirectory's own ``classification`` -- ``label`` is ``None`` and
+    ``classification`` names the failure, e.g. ``PRODUCT_DEFECT``, when that
+    exploit's own generate/validate crashed; the crash is recorded, never
+    silently dropped). See the module docstring's "Two proof-level axes"
+    section for why a finding's scan-level and validate-level proof can
+    differ, and which one a proof-depth bar must read.
+
+    The cell's own top-level ``classification`` and ``proof_level`` are the
+    STRONGEST sub-result's (see :func:`_pick_strongest`) -- never the
+    alphabetically-first subdirectory, which is exactly the bug the
+    single-exploit harness had (see the module docstring's batch-4
+    finding). ``proof_level`` keeps its existing, scan-attempt meaning
+    unchanged. The run's own top-level ``validated_effect_proof_level``/
+    ``validated_effect_counts`` are a SEPARATE field, computed from the
+    STRONGEST KEPT finding's own validated effect level (never from the
+    scan axis) -- ``(None, None)`` when no finding here was KEPT.
 
     Deliberate choice on a mixed run (one exploit crashed, a sibling KEPT):
     the top-level ``classification`` reads the CRASH (``PRODUCT_DEFECT``
@@ -898,17 +1025,37 @@ def _score_multi_report_run(
         exploit_matches = sorted(sub.glob("exploit_*.json"))
         tool = _exploit_tool(exploit_matches[0]) if exploit_matches else None
         label = sub_result.get("label")
+        effect_level, effect_counts = _validated_effect_proof_level(sub)
         validated_findings.append(
             {
                 "pattern_id": pattern_id,
                 "tool": tool,
                 "label": label,
-                "proof_level": sub_result.get("proof_level"),
+                "scan_proof_level": sub_result.get("proof_level"),
+                "validated_effect_proof_level": effect_level,
+                "validated_effect_counts": effect_counts,
                 "classification": sub_result.get("classification"),
             }
         )
         if label == "KEPT":
             kept_pattern_ids.add(pattern_id)
+
+    # The run's own top-level validated-effect level/counts: the STRONGEST
+    # KEPT finding's own validate effect leg -- a separate axis from the
+    # scan-based `proof_level` below (see the module docstring). `(None,
+    # None)` when nothing here was KEPT, matching the single-report path's
+    # own "no validation_report.json/effect outcome" default.
+    kept_findings = [f for f in validated_findings if f.get("label") == "KEPT"]
+    if kept_findings:
+        strongest_kept = min(
+            kept_findings,
+            key=lambda f: _effect_level_rank(f.get("validated_effect_proof_level")),
+        )
+        top_validated_effect_level = strongest_kept.get("validated_effect_proof_level")
+        top_validated_effect_counts = strongest_kept.get("validated_effect_counts")
+    else:
+        top_validated_effect_level = None
+        top_validated_effect_counts = None
 
     real_scan_dir = _resolve_scan_dir(run_dir, scan_dir)
     raw_report = _read_raw_report_safe(real_scan_dir)
@@ -937,6 +1084,10 @@ def _score_multi_report_run(
     result["scan_findings"] = scan_findings
     result["max_scan_proof_level"] = max_scan_proof_level
     result["exercised"] = any(sr.get("exercised") for sr in sub_results)
+    # Separate from `proof_level` above (the scan axis, unchanged) -- see
+    # the module docstring's "Two proof-level axes" section.
+    result["validated_effect_proof_level"] = top_validated_effect_level
+    result["validated_effect_counts"] = top_validated_effect_counts
     return result
 
 

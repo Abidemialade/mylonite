@@ -74,7 +74,12 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from scripts.score_third_party import precision_rollup, rollup, score_run  # noqa: E402
+from scripts.score_third_party import (  # noqa: E402
+    _validated_effect_proof_level,
+    precision_rollup,
+    rollup,
+    score_run,
+)
 
 PREREG_FILE = "verification/PREREG_E2E_2026_10.md"
 
@@ -746,59 +751,6 @@ def _resist_details(scan_dir: Path | None) -> list[dict[str, object]]:
     return details
 
 
-#: ``validate``'s own "effect" gating-leg outcome prints this exact shape
-#: (``ValidationReport`` outcome for ``stage == "effect"``, see
-#: ``reference_validator.py``'s own formatting) -- three counts, always in
-#: this order, always summing to the leg's run count. This is DIFFERENT
-#: from the scan attempt's own ``judge_evidence.proof_level`` (what
-#: :func:`scripts.score_third_party._finding_proof_level` reads): that is
-#: the single strongest level one scan ATTEMPT reached; this is how many of
-#: VALIDATE's re-drives against the real target each proof level, which can
-#: -- and for Redis's counted runs, does -- read stronger than the scan
-#: attempt's own level, because validate's own effect probe gets to re-run
-#: the attack and read the target back multiple times under a calibration
-#: that may have improved between the scan and the validate re-drive.
-_EFFECT_COUNTS_RE = re.compile(
-    r"by proof level:\s*(\d+)\s*effect-confirmed,\s*(\d+)\s*dispatched,\s*(\d+)\s*dispatched-tool-linked"
-)
-
-
-def _validated_effect_proof_level(run_dir: Path) -> tuple[str | None, dict[str, int] | None]:
-    """``(strongest_level, counts)`` from ``run_dir/validation_report.json``'s
-    own "effect" outcome detail text, or ``(None, None)`` when no
-    validation report exists here (the cell never reached `validate`, e.g.
-    Breadth 3's scan-only dispatch) or its "effect" outcome's detail does
-    not match the expected shape (an aborted/short-circuited validate run
-    that never reached the effect leg). ``strongest_level`` is
-    ``"effect-confirmed"``, ``"dispatched-tool-linked"`` or ``"dispatched"``
-    (the strongest non-zero count, matching the gating leg's own priority
-    order), or ``None`` when all three counts are zero."""
-    path = run_dir / "validation_report.json"
-    if not path.is_file():
-        return None, None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None, None
-    effect = next((o for o in data.get("outcomes", []) if o.get("stage") == "effect"), None)
-    if effect is None:
-        return None, None
-    match = _EFFECT_COUNTS_RE.search(str(effect.get("detail", "")))
-    if match is None:
-        return None, None
-    n_ec, n_d, n_dtl = (int(g) for g in match.groups())
-    counts = {"effect_confirmed": n_ec, "dispatched": n_d, "dispatched_tool_linked": n_dtl}
-    if n_ec > 0:
-        strongest = "effect-confirmed"
-    elif n_dtl > 0:
-        strongest = "dispatched-tool-linked"
-    elif n_d > 0:
-        strongest = "dispatched"
-    else:
-        strongest = None
-    return strongest, counts
-
-
 #: A validate leg that hits its own hard request ceiling (``[MYL-ABT-001]``)
 #: aborts mid-run, before printing its own ``llm: N calls`` summary line --
 #: so `compute_run_cost.py` (reading only the lines that DID print) counts
@@ -868,9 +820,18 @@ def _score_one(
     score["target"] = target
     score.update(_cost(inner))
     score["resist_details"] = _resist_details(scan_dir)
-    level, counts = _validated_effect_proof_level(run_dir)
-    score["validated_effect_proof_level"] = level
-    score["validated_effect_counts"] = counts
+    # The single-report layout: score_run never sets these keys itself (see
+    # its own docstring), so read run_dir's own validation_report.json
+    # directly, exactly as before the multi-report layout existed. A
+    # multi-report run (score["validated_findings"] present) already
+    # carries its own top-level validated_effect_proof_level/counts --
+    # the strongest KEPT finding's own validated effect level, computed by
+    # score_third_party._score_multi_report_run itself -- never overwritten
+    # here.
+    if "validated_effect_proof_level" not in score:
+        level, counts = _validated_effect_proof_level(run_dir)
+        score["validated_effect_proof_level"] = level
+        score["validated_effect_counts"] = counts
     run_log_path = inner / "run.log"
     run_log_text = (
         run_log_path.read_text(encoding="utf-8", errors="replace") if run_log_path.is_file() else ""
