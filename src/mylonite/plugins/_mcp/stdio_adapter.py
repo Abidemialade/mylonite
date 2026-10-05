@@ -45,6 +45,7 @@ from mylonite.plugins._mcp._session_adapter import (  # noqa: F401
     _extract_first_number,
     _json_string_leaves,
     _MCPAttackSession,
+    _open_client_session,
     _planted_payload_retrieved,
     _RecordingServerShim,
     _render_seed_args,
@@ -168,7 +169,9 @@ async def _open_mcp_session(
 
     Both ``stdio_client`` and ``ClientSession`` are async context managers;
     composing them here keeps the call sites flat. Subprocess cleanup is
-    guaranteed by the SDK on exit.
+    guaranteed by the SDK on exit. :func:`_open_client_session` does the
+    composing, so a notification the server sends while the session closes
+    does not fail an attempt whose calls all returned.
 
     ``command``/``args`` default to the spec's launch; a caller can override them
     to start a target's deliberately-unguarded (``vulnerable_launch``) variant.
@@ -203,11 +206,14 @@ async def _open_mcp_session(
         params = StdioServerParameters(command=launch_command, args=launch_args, env=env)
     else:
         params = StdioServerParameters(command=launch_command, args=launch_args, env=env, cwd=cwd)
-    async with (
-        stdio_client(params) as (read_stream, write_stream),
-        ClientSession(read_stream, write_stream, read_timeout_seconds=read_timeout) as session,
-    ):
-        await session.initialize()
+    # The shared opener closes the session and the transport so a server
+    # notification arriving during the close can't fail a finished attempt.
+    async with _open_client_session(
+        stdio_client(params),
+        lambda read_stream, write_stream: ClientSession(
+            read_stream, write_stream, read_timeout_seconds=read_timeout
+        ),
+    ) as session:
         yield session
 
 

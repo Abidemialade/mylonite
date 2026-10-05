@@ -33,6 +33,7 @@ from datetime import timedelta
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
+import anyio
 from mcp import ClientSession
 
 # Import the package init so per-target predicates register.
@@ -200,6 +201,72 @@ def _unwrap_sole_exception(exc: BaseException) -> BaseException:
     while isinstance(exc, ExceptionGroup) and len(exc.exceptions) == 1:
         exc = exc.exceptions[0]
     return exc
+
+
+#: anyio's "the other end of this in-memory stream is closed" errors. The MCP
+#: SDK's transports (stdio, SSE, streamable HTTP) forward each message the
+#: server sends into a stream that ``ClientSession`` reads; once
+#: ``ClientSession`` has closed its end, forwarding one more message raises
+#: one of these from the transport's reader task.
+_CLOSED_STREAM_ERRORS: tuple[type[BaseException], ...] = (
+    anyio.BrokenResourceError,
+    anyio.ClosedResourceError,
+)
+
+
+def _only_closed_stream_errors(exc: BaseException) -> bool:
+    """True when ``exc`` is a closed-stream error, or a (nested) exception
+    group made of nothing else."""
+    if isinstance(exc, BaseExceptionGroup):
+        return bool(exc.exceptions) and all(
+            _only_closed_stream_errors(sub) for sub in exc.exceptions
+        )
+    return isinstance(exc, _CLOSED_STREAM_ERRORS)
+
+
+@contextlib.asynccontextmanager
+async def _open_client_session(
+    transport: AbstractAsyncContextManager[Any],
+    session_factory: Any,
+) -> AsyncIterator[ClientSession]:
+    """Enter an SDK transport and a ``ClientSession`` over it, initialise the
+    session and yield it; close both so a message the server sends during
+    the close can't fail an attempt that already finished.
+
+    ``transport`` is an SDK client context manager (``stdio_client(...)``,
+    ``sse_client(...)``, ``streamablehttp_client(...)``) that yields a
+    ``(read_stream, write_stream, ...)`` tuple. ``session_factory(read,
+    write)`` builds the ``ClientSession`` context manager over its streams.
+
+    Why: the transport and the session are two separate
+    context managers and do not close together. ``ClientSession`` closes
+    its end of the read stream first; the transport's reader task is torn
+    down a little later. A notification the server sends in that gap (a
+    timer a tool call turned on, a resource-updated push, a log line) makes
+    the reader raise ``BrokenResourceError`` out of the transport's exit,
+    and the whole attempt used to be reported as a crashed target although
+    the server was alive and every call had returned.
+
+    The rule is structural, not a match on the message: a closed-stream
+    error is ignored ONLY when it is raised after the caller's body has
+    returned normally, i.e. during teardown. If the body raised (a call
+    still in flight when the transport broke, a server that died mid-call),
+    ``yield`` raises, the flag below is never set and the error propagates
+    unchanged, so a real crash is still reported as one.
+    """
+    body_returned = False
+    try:
+        async with transport as streams, session_factory(streams[0], streams[1]) as session:
+            await session.initialize()
+            yield session
+            body_returned = True
+    except Exception as exc:
+        if not (body_returned and _only_closed_stream_errors(exc)):
+            raise
+        logger.debug(
+            "ignored a server message that arrived while the MCP session was closing: %r",
+            exc,
+        )
 
 
 def _serialise_tools(descs: list[ToolDescription]) -> list[ToolSpec]:

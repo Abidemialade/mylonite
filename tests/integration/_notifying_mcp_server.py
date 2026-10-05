@@ -40,12 +40,20 @@ Env knobs:
   consequential "turn this on" tool through. Models a server whose
   state-toggling tool starts unsolicited sends mid-session rather than
   from the first byte.
+* ``MYLONITE_TEST_NOTIFY_KIND`` -- which notification the timer sends:
+  ``log`` (default, ``notifications/message``) or ``resource``
+  (``notifications/resources/updated``).
+* ``MYLONITE_TEST_NOTIFY_ON_EOF`` -- "1" makes the server write one raw
+  notification line straight to stdout the moment the client closes its
+  side of stdin, i.e. while the client is tearing the session down.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
+import sys
 
 import mcp.types as types
 from mcp.server import Server
@@ -107,6 +115,31 @@ async def _call_tool(name: str, arguments: dict[str, object]) -> list[types.Text
     return [types.TextContent(type="text", text="pong")]
 
 
+async def _send_one(session: object) -> None:
+    """Send one notification of the kind ``MYLONITE_TEST_NOTIFY_KIND`` names."""
+    if os.environ.get("MYLONITE_TEST_NOTIFY_KIND", "log") == "resource":
+        from pydantic import AnyUrl
+
+        await session.send_resource_updated(AnyUrl("memo://tick"))  # type: ignore[attr-defined]
+    else:
+        await session.send_log_message(  # type: ignore[attr-defined]
+            level="info", data="tick", logger="timer"
+        )
+
+
+def _write_raw_notification() -> None:
+    """Write one log notification line straight to stdout, bypassing the
+    (already closed) server session -- a server that still has something to
+    say while the client is closing."""
+    line = {
+        "jsonrpc": "2.0",
+        "method": "notifications/message",
+        "params": {"level": "info", "logger": "timer", "data": "closing"},
+    }
+    sys.stdout.write(json.dumps(line) + "\n")
+    sys.stdout.flush()
+
+
 async def _notify_loop(interval_s: float, exit_on_error: bool) -> None:
     """Fire an unsolicited log notification every ``interval_s`` seconds.
 
@@ -120,9 +153,7 @@ async def _notify_loop(interval_s: float, exit_on_error: bool) -> None:
     while True:
         await asyncio.sleep(interval_s)
         try:
-            await session.send_log_message(  # type: ignore[attr-defined]
-                level="info", data="tick", logger="timer"
-            )
+            await _send_one(session)
         except Exception:
             if exit_on_error:
                 # Models the Node SDK's unhandled 'error' event on a write to
@@ -144,6 +175,8 @@ async def _main() -> None:
             None if toggle_mode else asyncio.create_task(_notify_loop(interval_s, exit_on_error))
         )
         await app.run(read_stream, write_stream, app.create_initialization_options())
+        if os.environ.get("MYLONITE_TEST_NOTIFY_ON_EOF") == "1":
+            _write_raw_notification()
         # The client's read of stdin just hit EOF (it closed its write side),
         # but this server's own timer keeps running on its own schedule --
         # modeling a server never told, or that ignores, "the client is
