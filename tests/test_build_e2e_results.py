@@ -11,6 +11,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 
 import build_e2e_results as builder
@@ -395,3 +397,72 @@ class TestCellRounds:
         runs = [self._run("e2e-batch99/some-run", "fix_retest_1", "NOT_TESTED")]
         rounds = builder._cell_rounds(runs)
         assert rounds[0]["label"] == "counted"
+
+
+# --- a shared-state sweep flagged two unenforced "exactly one candidate"
+# invariants: `_resolve_dirs`'s `out/` child and `_score_one`'s inner run
+# directory were both picked via an unchecked `children[0]`, so a stray
+# second candidate (a duplicate download, a leftover scan dir) would be
+# silently picked or dropped rather than failing loudly. Zero candidates is
+# unchanged in both; more than one now raises, naming the folder and every
+# candidate.
+
+
+class TestResolveDirsCandidateCount:
+    def test_single_scan_dir_candidate_is_used(self, tmp_path: Path) -> None:
+        inner = tmp_path
+        scan_child = inner / "out" / "2026-01-01T00-00-00Z"
+        scan_child.mkdir(parents=True)
+        run_dir, scan_dir = builder._resolve_dirs(inner)
+        assert scan_dir == scan_child
+        # No `generated/` at all -- falls back to the scan directory itself.
+        assert run_dir == scan_child
+
+    def test_two_scan_dir_candidates_raises(self, tmp_path: Path) -> None:
+        inner = tmp_path
+        (inner / "out" / "2026-01-01T00-00-00Z").mkdir(parents=True)
+        (inner / "out" / "2026-01-02T00-00-00Z").mkdir(parents=True)
+        with pytest.raises(RuntimeError, match="expected at most one scan output directory"):
+            builder._resolve_dirs(inner)
+
+    def test_zero_scan_dir_candidates_is_unchanged(self, tmp_path: Path) -> None:
+        inner = tmp_path
+        (inner / "out").mkdir()
+        run_dir, scan_dir = builder._resolve_dirs(inner)
+        assert scan_dir is None
+        # Preflight-failure fallback: run_dir is `inner` itself.
+        assert run_dir == inner
+
+    def test_multi_report_layout_under_generated_is_detected(self, tmp_path: Path) -> None:
+        """The new per-exploit `generated/<stem>/` shape (one subdirectory
+        per validated exploit) must still resolve `run_dir` to `generated`
+        -- unaffected by the candidate-count check above, which only
+        applies to `out/`'s own children."""
+        inner = tmp_path
+        scan_child = inner / "out" / "2026-01-01T00-00-00Z"
+        scan_child.mkdir(parents=True)
+        sub = inner / "generated" / "create_relations"
+        sub.mkdir(parents=True)
+        (sub / "validation_report.json").write_text("{}", encoding="utf-8")
+        run_dir, scan_dir = builder._resolve_dirs(inner)
+        assert run_dir == inner / "generated"
+        assert scan_dir == scan_child
+
+
+class TestScoreOneCandidateCount:
+    def test_single_inner_candidate_succeeds(self, tmp_path: Path) -> None:
+        batch_dir = tmp_path / "e2e-batch1" / "folder"
+        (batch_dir / "run123").mkdir(parents=True)
+        result = builder._score_one(tmp_path, "e2e-batch1", "folder", "my-target", None)
+        assert result["target"] == "my-target"
+
+    def test_two_inner_candidates_raises(self, tmp_path: Path) -> None:
+        batch_dir = tmp_path / "e2e-batch1" / "folder"
+        (batch_dir / "run-a").mkdir(parents=True)
+        (batch_dir / "run-b").mkdir(parents=True)
+        with pytest.raises(RuntimeError, match="expected exactly one inner run directory"):
+            builder._score_one(tmp_path, "e2e-batch1", "folder", "my-target", None)
+
+    def test_zero_inner_candidates_is_unchanged(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            builder._score_one(tmp_path, "e2e-batch1", "folder", "my-target", None)

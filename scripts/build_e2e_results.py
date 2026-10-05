@@ -651,11 +651,26 @@ def _resolve_dirs(inner: Path) -> tuple[Path, Path | None]:
     exploit per run) or, now that the harness validates every exploit a scan
     found, in a per-exploit subdirectory of ``generated`` (``score_run``'s
     own ``_multi_report_subdirs`` detects that shape) -- otherwise the same
-    scan directory."""
+    scan directory.
+
+    ``scan --output-dir out`` is only ever supposed to write ONE timestamped
+    child per run -- an invariant this function used to trust silently by
+    taking ``children[0]``. A shared-state sweep flagged that as unenforced:
+    a duplicate/leftover scan directory under the same ``out/`` would be
+    picked (or dropped) with no signal at all, scoring the wrong scan's
+    ``attempts``/``calibration`` into the published results. Zero children
+    is unchanged (``scan_dir`` stays ``None`` -- a preflight failure that
+    never got as far as ``scan --output-dir``); more than one now raises
+    loudly instead of silently picking the alphabetically-first."""
     out_root = inner / "out"
     scan_dir: Path | None = None
     if out_root.is_dir():
         children = sorted(c for c in out_root.iterdir() if c.is_dir())
+        if len(children) > 1:
+            raise RuntimeError(
+                f"{out_root}: expected at most one scan output directory, found "
+                f"{len(children)}: {[c.name for c in children]}"
+            )
         if children:
             scan_dir = children[0]
     generated_dir = inner / "generated"
@@ -818,10 +833,28 @@ def _ceiling_floor_calls(run_log_text: str) -> int:
 def _score_one(
     artifacts_root: Path, batch: str, folder: str, target: str, pattern: str | None
 ) -> dict[str, object]:
+    """Score one counted run directory.
+
+    ``batch_dir`` is expected to hold exactly one inner run directory (the
+    GitHub Actions artifact download unpacks a run's own files directly
+    under it, one level deep). A shared-state sweep flagged the old
+    ``children[0]`` of an unsorted ``iterdir()`` as unenforced: a second,
+    leftover/duplicate download folder sitting next to the real one would
+    be silently picked (or dropped) with no signal at all, scoring a
+    sibling run's artifacts into the published results under the wrong
+    run's own identity. Zero candidates is unchanged (still raises
+    ``FileNotFoundError``, as before this fix); more than one now raises
+    loudly, naming the batch directory and every candidate, instead of
+    picking whichever one ``iterdir()`` happened to return first."""
     batch_dir = artifacts_root / batch / folder
     children = [c for c in batch_dir.iterdir() if c.is_dir()] if batch_dir.is_dir() else []
     if not children:
         raise FileNotFoundError(f"no inner run directory under {batch_dir}")
+    if len(children) > 1:
+        raise RuntimeError(
+            f"{batch_dir}: expected exactly one inner run directory, found "
+            f"{len(children)}: {sorted(c.name for c in children)}"
+        )
     inner = children[0]
     run_dir, scan_dir = _resolve_dirs(inner)
     score = score_run(
