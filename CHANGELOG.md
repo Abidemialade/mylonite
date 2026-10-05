@@ -204,6 +204,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Calibration now passes stores that echo the key or reply empty for a
+  missing record.** A key-value store whose not-found reply repeats the key,
+  and a note store that returns nothing for a missing id, used to fail at
+  `discrimination_read` even though the planted record read back correctly.
+  The check now reads two never-planted tokens and requires the replies to
+  match once each token is masked, with no error and none of the planted
+  record's content. The planted read is the anchor. An error, a raised call,
+  replies that differ, or a reply that carries the planted content still
+  fail, and a declared id still gives `confirm_only`, never `certified`.
+
 - **W2 seed synthesis no longer assumes a store+recall tool pair is covered
   just because one exists.** The one hand-authored catalogue seed for that
   shape is hard-keyed to a literal `read_note` recall tool, so a custom

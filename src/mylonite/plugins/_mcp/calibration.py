@@ -23,9 +23,11 @@ without a model, against the live target:
   reads (no change between them), the plant (the seed control's own plant
   when it ran, so one record serves both), a positive read that must show
   the planted token, a second read that must not grow and must still show
-  it, then a read that sends a never-planted token in the verify template's
-  argument slot and must answer with a non-empty, non-error result that
-  lacks it (an error, an empty result or a raised call fails). When the
+  it, then two reads that each send a different never-planted token in the
+  verify template's argument slot. Those must both answer without an error,
+  read the same once each requested token is masked, and lack the planted
+  record's content marker; an empty reply or one that repeats the requested
+  token is fine, an error or a raised call fails. When the
   seed control has no recall tool and so never plants, this control plants
   the record itself through ``seed_arm``. Passing it gives ``confirm_only``, never
   ``certified``: the probe can confirm a planted record appears, but it
@@ -63,7 +65,7 @@ from jsonschema.validators import validator_for
 
 from mylonite._redaction import redact
 from mylonite.contracts import ToolSpec
-from mylonite.plugins._mcp import target_registry
+from mylonite.plugins._mcp import removal_probe, target_registry
 from mylonite.plugins._mcp._session_adapter import (
     _render_seed_args,
     _result_readback_text,
@@ -1432,7 +1434,21 @@ async def _readback_finish(
     # and the planted record is still there. An error or empty read
     # (``_probe_verify_content`` maps ``isError`` to "") loses the token, so it
     # fails here rather than reading as "no change".
-    still = await adapter._probe_verify_content(session, probe, rb.token)
+    # The same read the probe makes, kept whole so the discrimination read
+    # can see this reply through its own reader (:func:`_reply_text`), the
+    # one it applies to the never-planted reads.
+    planted_args = _render_seed_args(probe.verify_args_template, rb.token, adapter._scope)
+    try:
+        still_result = await adapter._bounded(
+            session.call_tool(probe.verify_tool or "", planted_args)
+        )
+    except Exception:
+        still_result = None
+    still: str | None = None
+    if still_result is not None:
+        still = (
+            "" if getattr(still_result, "isError", False) else _result_readback_text(still_result)
+        )
     if still is None:
         return _readback_failed(
             rb, INC_POSITIVE_FAILED, read_failed, is_read_failure=True, step=STEP_PLANT
@@ -1453,92 +1469,217 @@ async def _readback_finish(
             step=STEP_PLANT,
             reply=_quote(still),
         )
-    return await _discrimination_read(adapter, session, rb)
+    return await _discrimination_read(adapter, session, rb, still_result)
 
 
-def _with_string_leaves(value: Any, replacement: str) -> tuple[Any, int]:
-    """``value`` with every string leaf replaced, and how many were replaced."""
+def _string_leaves(value: Any, path: tuple[Any, ...] = ()) -> list[tuple[tuple[Any, ...], str]]:
+    """Every string leaf of ``value`` with its path (dict keys and list indexes)."""
     if isinstance(value, str):
-        return replacement, 1
-    if isinstance(value, dict):
-        out: dict[str, Any] = {}
-        count = 0
-        for key, item in value.items():
-            out[key], n = _with_string_leaves(item, replacement)
-            count += n
-        return out, count
+        return [(path, value)]
+    if isinstance(value, Mapping):
+        return [leaf for k, v in value.items() for leaf in _string_leaves(v, (*path, k))]
     if isinstance(value, (list, tuple)):
-        items = [_with_string_leaves(item, replacement) for item in value]
-        return [i for i, _ in items], sum(n for _, n in items)
-    return value, 0
+        return [leaf for i, v in enumerate(value) for leaf in _string_leaves(v, (*path, i))]
+    return []
 
 
-async def _discrimination_read(
-    adapter: MCPSessionAdapterBase, session: ClientSession, rb: _Readback
-) -> ToolControl:
-    """Send a never-planted token to the server through the verify read.
+def _with_leaf(value: Any, path: tuple[Any, ...], replacement: str) -> Any:
+    """``value`` with the one leaf at ``path`` replaced; every other leaf kept."""
+    if not path:
+        return replacement
+    head, rest = path[0], path[1:]
+    if isinstance(value, Mapping):
+        return {k: (_with_leaf(v, rest, replacement) if k == head else v) for k, v in value.items()}
+    return [_with_leaf(v, rest, replacement) if i == head else v for i, v in enumerate(value)]
 
-    The token goes in the same argument slot the positive read selects its
-    record by (every string leaf of the rendered ``verify_args_template``).
-    The read discriminates only when the call succeeds and returns a
-    non-empty, non-error result that lacks the token. An error, an empty
-    result or a raised call proves nothing, so it is never read as "absent";
-    an echo of the token means the read cannot tell a planted record from
-    its own query.
+
+def _record_slot(planted_args: Any, rb: _Readback, scope: str | None) -> tuple[Any, ...] | None:
+    """The path of the one leaf in the planted read's arguments that names the
+    record, or ``None`` when no single such leaf can be identified.
+
+    A template with one string leaf has nothing else to filter by, so that
+    leaf is the slot. With several, the slot is the one id-shaped parameter
+    whose value the ``seed_arm`` also used to address the record it planted;
+    every other leaf (a filter, a collection name) stays as the planted read
+    sent it.
     """
-    probe = rb.probe
-    unplanted = _new_token()
-    rendered = _render_seed_args(probe.verify_args_template, unplanted, adapter._scope)
-    args, slots = _with_string_leaves(rendered, unplanted)
-    if not slots:
-        return _readback_failed(
-            rb,
-            INC_POSITIVE_FAILED,
-            f"{probe.verify_tool!r}'s verify_args_template has no argument to send a "
-            "never-planted token through, so the read was not shown to discriminate",
-            step=STEP_DISCRIMINATION_READ,
-        )
-    verify = probe.verify_tool or ""
-    not_shown = "so the read was not shown to discriminate"
+    leaves = _string_leaves(planted_args)
+    if len(leaves) == 1:
+        return leaves[0][0]
+    planted_ids = {
+        _render_seed_args(value, "", scope)
+        for _path, value in _string_leaves(rb.arm.args_template)
+        if "{payload}" not in value
+    }
+    slots = [
+        path
+        for path, value in leaves
+        if path
+        and isinstance(path[-1], str)
+        and hint_matches(path[-1], _ID_PARAM_HINTS)
+        and value in planted_ids
+    ]
+    return slots[0] if len(slots) == 1 else None
+
+
+def _reply_text(result: Any) -> str:
+    """The one reader for every discrimination-step reply: each text block's
+    text, every other block in full, plus ``structuredContent``. An empty
+    reply reads as ``""``. The planted read and both never-planted reads go
+    through it, so a reply in a non-text block is seen the same on each side.
+    """
+    content = getattr(result, "content", None)
+    parts: list[str] = []
+    if isinstance(content, str):
+        parts.append(content)
+    elif isinstance(content, (list, tuple)):
+        for block in content:
+            text = getattr(block, "text", None)
+            if isinstance(text, str):
+                parts.append(text)
+            elif hasattr(block, "model_dump"):
+                parts.append(json.dumps(block.model_dump(mode="json"), default=str))
+            else:
+                parts.append(str(block))
+    text = "\n".join(p for p in parts if p)
+    structured = getattr(result, "structuredContent", None)
+    if structured:
+        try:
+            structured_text = json.dumps(structured, default=str)
+        except TypeError:
+            structured_text = str(structured)
+        if structured_text not in text:
+            text = f"{text}\n{structured_text}" if text else structured_text
+    return text
+
+
+async def _keyed_read(
+    adapter: MCPSessionAdapterBase,
+    session: ClientSession,
+    verify: str,
+    args: Any,
+) -> tuple[str, str]:
+    """One verify read: ``("ok", text)``, ``("error", text)`` for an
+    ``isError`` reply, or ``("raised", exception type name)``."""
     try:
         result = await adapter._bounded(session.call_tool(verify, args))
     except Exception as exc:
-        return _readback_failed(
-            rb,
-            INC_POSITIVE_FAILED,
-            f"the read with a never-planted token raised {type(exc).__name__}, {not_shown}",
-            is_read_failure=True,
-            step=STEP_DISCRIMINATION_READ,
-        )
-    text = _result_readback_text(result)
+        return "raised", type(exc).__name__
+    return _read_outcome(result)
+
+
+def _read_outcome(result: Any) -> tuple[str, str]:
+    """``("error", text)`` for an ``isError`` reply, else ``("ok", text)``."""
+    text = _reply_text(result)
     if getattr(result, "isError", False):
+        return "error", text
+    return "ok", text
+
+
+async def _discrimination_read(
+    adapter: MCPSessionAdapterBase, session: ClientSession, rb: _Readback, planted_result: Any
+) -> ToolControl:
+    """Show the verify read tells the planted record from a never-planted one.
+
+    This is the known-absent comparison removal confirmation uses
+    (:mod:`removal_probe`). ``planted_result`` is the planted record's last
+    read (the stability read before this step); then two different
+    never-planted identifiers go in the leaf that names the record
+    (:func:`_record_slot`), every other argument unchanged. All three replies
+    go through one reader (:func:`_reply_text`). The read discriminates only
+    when all of these hold:
+
+    1. the planted record's read is non-error, non-empty and carries the
+       content marker;
+    2. both never-planted reads succeed with no error;
+    3. their replies are identical once each requested identifier is masked;
+    4. neither reply carries the content marker.
+
+    The content marker (the plant's own token, and the probe's rendered
+    ``expect_marker`` when set) is kept apart from the identifier that
+    addresses the record: a reply that repeats the requested identifier
+    ("key ... does not exist") is fine, and so is an empty reply, because the
+    planted read is the anchor that shows the record is there. An error or a
+    raised call proves nothing, so it is never read as "absent".
+    """
+    probe = rb.probe
+    verify = probe.verify_tool or ""
+    not_shown = "so the read was not shown to discriminate"
+    markers = [m for m in (rb.token, rb.marker) if m]
+    planted_args = _render_seed_args(probe.verify_args_template, rb.token, adapter._scope)
+    if not _string_leaves(planted_args):
         return _readback_failed(
             rb,
             INC_POSITIVE_FAILED,
-            f"the read with a never-planted token returned an error, {not_shown}",
+            f"{verify!r}'s verify_args_template has no argument to send a "
+            f"never-planted token through, {not_shown}",
             step=STEP_DISCRIMINATION_READ,
-            reply=_quote(text),
         )
-    if not text.strip():
+    slot = _record_slot(planted_args, rb, adapter._scope)
+    if slot is None:
         return _readback_failed(
             rb,
             INC_POSITIVE_FAILED,
-            f"the read with a never-planted token returned nothing, {not_shown}",
+            f"{verify!r}'s verify_args_template has no single argument that names the "
+            f"planted record, {not_shown}",
             step=STEP_DISCRIMINATION_READ,
         )
-    if unplanted in text:
+
+    outcome, planted = _read_outcome(planted_result)
+    if outcome == "error" or not planted.strip() or not all(m in planted for m in markers):
+        return _readback_failed(
+            rb,
+            INC_POSITIVE_FAILED,
+            f"the read of the planted record did not carry its content marker, {not_shown}",
+            step=STEP_DISCRIMINATION_READ,
+            reply=_quote(planted),
+        )
+
+    shapes: list[str] = []
+    replies: list[str] = []
+    for identifier in (_new_token(), _new_token()):
+        args = _with_leaf(planted_args, slot, identifier)
+        outcome, text = await _keyed_read(adapter, session, verify, args)
+        if outcome == "raised":
+            return _readback_failed(
+                rb,
+                INC_POSITIVE_FAILED,
+                f"the read with a never-planted token raised {text}, {not_shown}",
+                is_read_failure=True,
+                step=STEP_DISCRIMINATION_READ,
+            )
+        if outcome == "error":
+            return _readback_failed(
+                rb,
+                INC_POSITIVE_FAILED,
+                f"the read with a never-planted token returned an error, {not_shown}",
+                step=STEP_DISCRIMINATION_READ,
+                reply=_quote(text),
+            )
+        if any(m in text for m in markers):
+            return _readback_failed(
+                rb,
+                INC_NEGATIVE_FAILED,
+                "the read with a never-planted token carried the planted record's content "
+                "marker, so it cannot tell a planted record from an absent one",
+                step=STEP_DISCRIMINATION_READ,
+                reply=_quote(text),
+            )
+        replies.append(text)
+        shapes.append(removal_probe.normalise(text, identifier))
+    if shapes[0] != shapes[1]:
         return _readback_failed(
             rb,
             INC_NEGATIVE_FAILED,
-            "the read with a never-planted token echoed that token back, so it cannot "
-            "tell a planted record from its own query",
+            "the reads with two never-planted tokens answered differently once each token "
+            f"was masked, {not_shown}",
             step=STEP_DISCRIMINATION_READ,
-            reply=_quote(text),
+            reply=_quote(replies[1]),
         )
     return ToolControl(
         rb.arm.tool,
         TOOL_READBACK,
         None,
-        "the planted record appeared, stayed, and a read for a never-planted token "
-        "answered without it",
+        "the planted record appeared and stayed, and reads for two never-planted tokens "
+        "answered alike without it",
     )

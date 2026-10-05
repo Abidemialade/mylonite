@@ -292,11 +292,19 @@ on its own nor failed to read, calibration checks the probe on that record, in t
 3. A verify read that must show the planted token.
 4. A second verify read that must not grow and must still show the token. An error or
    empty reply fails here.
-5. A read through the same verify tool with a different, never-planted token in place of
-   each string value of `verify_args_template`. It must succeed and return a non-empty
-   reply without that token. An error, an empty reply or a raised call fails, and so does
-   a reply that echoes the token. A `verify_args_template` with no string value fails,
-   because no token can be sent.
+5. Two reads through the same verify tool, each with a different never-planted token in
+   place of the one value that names the record: the only string value of
+   `verify_args_template`, or else the one id-shaped argument (`id`, `key` and the like)
+   whose value `seed_arm` also used. Every other argument stays as the planted read sent
+   it. When no single value names the record, the read fails. All three replies are read
+   the same way, whatever block type they arrive in. Both must succeed with no error,
+   their replies must match once each requested token is masked, and neither may carry
+   the planted record's content (its token, or the probe's `expect_marker`). A not-found
+   reply that repeats the requested key, or an empty reply for a missing id, passes: the
+   planted read in step 4 is the anchor that shows the record is there. An error, a
+   raised call, two replies that differ, or a reply that carries the planted content
+   fails. A `verify_args_template` with no string value fails, because no token can be
+   sent.
 
 Passing it reads `calibration: confirm_only [MYL-INC-003]`, never
 `certified`: the probe can confirm a planted record appears; it cannot clear a call that
