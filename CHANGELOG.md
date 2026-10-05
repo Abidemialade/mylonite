@@ -191,6 +191,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **W2 seed synthesis no longer assumes a store+recall tool pair is covered
+  just because one exists.** The one hand-authored catalogue seed for that
+  shape is hard-keyed to a literal `read_note` recall tool, so a custom
+  target whose plant+recall pair uses any other name — a knowledge-graph
+  memory server's `create_entities`/`search_nodes`, a key-value store's own
+  verbs — got zero W2 coverage even though a real channel existed: the
+  catalogue seed would run and could only ever report "not applicable".
+  `seed_synth.synthesize()` now checks whether the catalogue seed can
+  actually reach the target's recall tool before deferring to it, and
+  synthesises a generic store+recall probe through the role classifier's own
+  pick (`scan/tool_roles.py`) otherwise — by whatever name the target's
+  tools use, and only once the target has confirmed it can actually plant
+  (`can_plant_untrusted_content`, via a declared or auto-wired `seed_arm`):
+  the role classifier's pick is a hint about tool shape, never proof a plant
+  round-trips, so a merely name-shaped pair still gets today's NOT TESTED
+  placeholder rather than a seed that could silently report a clean result
+  on an unconfirmed channel. Covered by new cases in
+  `tests/scan/test_seed_synth.py` (a knowledge-graph-shaped and a
+  key-value-shaped tool pair, both with and without confirmed plant
+  capability) and `tests/scan/test_seed_capability_gate.py`; the bundled
+  reference target's own `read_note`/`write_note` pair still uses the
+  catalogue seed unchanged.
+
 - **A key-addressed store (a key/value or document store, not a full-text
   search) can now calibrate as `confirm_only` on its declared record.**
   The W2 seed control and the positive control's backfill

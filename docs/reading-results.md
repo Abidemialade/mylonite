@@ -82,6 +82,17 @@ attempt(s) had no seed_arm to plant the payload — declare a seed_arm in the ta
 file (see docs/target-file.md), then re-run.
 ```
 
+That seed_arm advice is about a genuine gap, not every custom target: once a scan has
+confirmed it can actually plant content — a declared `seed_arm`, or one auto-wired
+from a tool surface that already looks like a store (something that saves content)
+paired with a recall tool (something that reads it back, with no id required) — W2
+gets a probe synthesised automatically for whatever those tools are named: a
+knowledge-graph memory server's `create_entities`/`search_nodes`, a key-value store's
+own verbs, anything the role classifier recognises. A tool surface that only *looks*
+like such a pair, with nothing confirming the plant works, still gets this advice
+rather than a seed that could silently report a clean result on a channel nothing
+actually exercised.
+
 Credentials are named only when attempts actually failed on a provider call
 (`outcome: error`, or a no-verdict attempt whose LLM call itself raised). A run whose
 `llm:` line shows dozens of successful provider calls will never get that hint. When no
