@@ -726,6 +726,60 @@ jobs:
             # non-zero status propagates through the pipe into `sort` and
             # kills this whole step, exactly the bug this `|| true` closes
             # (a clean resist must never read as a failed job).
+            # Give each exploit's generate+validate a fresh target store
+            # before it starts, so one exploit's validate can never leave a
+            # record the next exploit's removal check finds already present
+            # (the P0-refuses-a-pre-existing-record failure mode this fixes;
+            # same defect class as the shared per-exploit logs fixed above).
+            # One place for every stateful target's own reset: a target with
+            # no persistent store (the precision cells, the REST shim, the
+            # streamable-HTTP demo server) falls through the `*)` branch and
+            # gets nothing, which is correct -- its state lives only inside
+            # the one server process `generate`/`validate` already launches
+            # fresh per command.
+            reset_target_store() {
+              local exploit_stem="$1"
+              case "$TPV_TARGET" in
+                tpv-server-memory)
+                  # A brand-new throwaway path per exploit, same scheme as
+                  # the one the scan step above picked for the whole job.
+                  TPV_MEMORY_FILE="$RUNNER_TEMP/tpv-memory-$exploit_stem-$RANDOM.json"
+                  export TPV_MEMORY_FILE
+                  echo "reset target store ($TPV_TARGET) before $exploit_stem: fresh TPV_MEMORY_FILE" >> run.log
+                  ;;
+                tpv-mcp-redis)
+                  # redis-cli is not on this runner (see the target-2 launch
+                  # step above); FLUSHDB over a raw RESP request on the
+                  # campaign venv's own python needs no extra dependency.
+                  # (The heredoc body below is pinned at this workflow
+                  # file's own base script indentation -- 10 spaces -- not
+                  # the deeper, cosmetic indentation of the surrounding
+                  # bash, because YAML's block scalar strips exactly that
+                  # much from every line, and Python rejects an indented
+                  # top-level statement.)
+                  if ! "$RUNNER_TEMP/campaign-venv/bin/python" - <<'PYEOF'
+          import socket
+          import sys
+
+          with socket.create_connection(("127.0.0.1", 6379), timeout=5) as sock:
+              sock.sendall(b"*1\r\n$7\r\nFLUSHDB\r\n")
+              reply = sock.recv(64)
+          if not reply.startswith(b"+OK"):
+              print(f"FLUSHDB did not return +OK: {reply!r}", file=sys.stderr)
+              sys.exit(1)
+          PYEOF
+                  then
+                    echo "::error::redis FLUSHDB failed resetting the target store before exploit $exploit_stem"
+                    exit 1
+                  fi
+                  echo "reset target store ($TPV_TARGET) before $exploit_stem: FLUSHDB" >> run.log
+                  ;;
+                *)
+                  : # no persistent store to reset for this target
+                  ;;
+              esac
+            }
+
             mapfile -t exploit_paths < <(compgen -G "$scan_dir/exploit_*.json" | sort || true)
             if [ "${#exploit_paths[@]}" -gt 0 ]; then
               any_validated=false
@@ -734,6 +788,7 @@ jobs:
                 stem="${stem#exploit_}"
                 finding_out="generated/$stem"
                 mkdir -p "$finding_out"
+                reset_target_store "$stem"
                 echo "--- exploit $stem ---" >> run.log
                 set +e
                 if [ -z "$TARGET_FILE" ]; then
