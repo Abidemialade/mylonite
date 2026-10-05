@@ -227,6 +227,99 @@ def test_collect_only_collects_without_running(tmp_path: Path) -> None:
     assert result.collected is True
 
 
+# --- failure_tail: a bare exit code says WHAT, not WHY ------------------------
+
+
+def test_internal_error_from_a_raising_hook(tmp_path: Path) -> None:
+    """A conftest hook that raises during configure crashes pytest itself
+    (exit 3), not the test it's running — the real-world shape of an
+    ``INTERNALERROR`` that a wheel-install plugin mismatch can also produce."""
+    (tmp_path / "conftest.py").write_text(
+        "def pytest_configure(config):\n    raise RuntimeError('boom-configure')\n",
+        encoding="utf-8",
+    )
+    f = _write(tmp_path, "test_ok.py", "def test_ok():\n    assert True\n")
+    result = run_test_file(f)
+    assert result.outcome is PytestOutcome.INTERNAL_ERROR
+    assert result.passed is False
+    assert result.collected is False
+    assert result.exit_code == 3
+    tail = pytest_runner.failure_tail(result)
+    assert "INTERNALERROR" in tail
+    assert "boom-configure" in tail
+
+
+def test_failure_tail_is_bounded_and_prioritises_diagnostic_lines() -> None:
+    """Noisy stdout surrounding a short ``INTERNALERROR`` block must not push
+    the diagnostic lines out of the budget."""
+    noise = "\n".join(f"captured stdout line {i}" for i in range(200))
+    result = PytestRunResult(
+        outcome=PytestOutcome.INTERNAL_ERROR,
+        exit_code=3,
+        stdout=noise,
+        stderr="INTERNALERROR> Traceback (most recent call last):\nINTERNALERROR> RuntimeError: boom\n",
+        detail="internal pytest error (exit 3)",
+    )
+    tail = pytest_runner.failure_tail(result, max_chars=600)
+    assert len(tail) <= 600
+    assert "INTERNALERROR" in tail
+    assert "RuntimeError: boom" in tail
+
+
+def test_failure_tail_redacts_secret_shaped_strings() -> None:
+    """A secret-shaped token captured in a test's own output (e.g. echoed from
+    an env var) must never reach a report un-redacted."""
+    secret = "sk-ant-" + "a" * 24  # pragma: allowlist secret
+    result = PytestRunResult(
+        outcome=PytestOutcome.INTERNAL_ERROR,
+        exit_code=3,
+        stdout="",
+        stderr=f"INTERNALERROR> RuntimeError: boom {secret}\n",
+        detail="internal pytest error (exit 3)",
+    )
+    tail = pytest_runner.failure_tail(result)
+    assert secret not in tail
+    assert "REDACTED" in tail
+
+
+def test_ini_file_discovery_cannot_find_an_ancestor_project_config(tmp_path: Path) -> None:
+    """Root-cause regression guard for a real CI-only internal error.
+
+    pytest's ini-file discovery ignores ``--rootdir`` and walks UP from the
+    test file looking for an ini (``pyproject.toml``/``pytest.ini``/...). When
+    the emitted test is written inside a project whose OWN ini sets
+    ``filterwarnings = ["error"]`` next to an option no installed plugin
+    recognises (mylonite's own `pyproject.toml` does exactly this, pairing
+    `filterwarnings=error` with `asyncio_mode`, an option `pytest-asyncio`
+    defines — absent from a plain wheel install), pytest's own "unknown
+    config option" warning gets promoted to an exception raised inside the
+    `pytest_collection` hook, where nothing catches it: INTERNALERROR (exit
+    3). ``-o addopts=`` alone does not stop this — only pinning an isolated
+    ini with ``-c`` does, regardless of where the emitted test lives."""
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\n"
+        'filterwarnings = ["error"]\n'
+        'mylonite_regression_guard_unknown_option = "x"\n',
+        encoding="utf-8",
+    )
+    nested = tmp_path / "generated"
+    nested.mkdir()
+    f = _write(nested, "test_ok.py", "def test_ok():\n    assert True\n")
+
+    result = run_test_file(f)
+
+    assert result.outcome is PytestOutcome.PASSED, (result.detail, result.stdout, result.stderr)
+    assert result.passed is True
+    assert result.exit_code == 0
+
+
+def test_failure_tail_empty_when_no_output() -> None:
+    result = PytestRunResult(
+        outcome=PytestOutcome.TIMEOUT, exit_code=-1, stdout="", stderr="", detail="timed out"
+    )
+    assert pytest_runner.failure_tail(result) == ""
+
+
 def test_collect_only_on_a_broken_file_is_a_collection_error(tmp_path: Path) -> None:
     f = _write(tmp_path, "test_syntax.py", "def test_x(:\n    assert True\n")
     result = run_test_file(f, collect_only=True)

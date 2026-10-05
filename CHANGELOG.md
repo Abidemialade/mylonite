@@ -21,6 +21,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connection while a call is still waiting for its reply is still reported as
   a crash. Nothing is retried. `anyio>=4.5,<5` is now a declared dependency,
   since the opener relies on its stream-error types.
+- **A wheel-installed `validate`/`gate` run no longer crashes pytest with an
+  internal error when the committed test lives inside this project's own
+  checkout.** pytest's own config-file discovery ignores `--rootdir` and
+  walks up from the emitted test file looking for a `pyproject.toml` (or
+  `pytest.ini`/`setup.cfg`/`tox.ini`); when that test is written inside this
+  repository, it found this project's own `[tool.pytest.ini_options]`,
+  whose `filterwarnings = ["error", ...]` turns pytest's "unknown config
+  option: asyncio_mode" warning into an exception the moment a plain
+  `pip install mylonite` (no `pytest-asyncio`, a dev-only dependency) runs
+  it — an internal pytest error (exit 3) with no useful explanation. An
+  editable install (where `pytest-asyncio` is present) or a test written
+  outside the checkout never showed this. The emitted test now always runs
+  with its own throwaway, empty pytest config, pinned explicitly, so no
+  project setting — not just `addopts` — can reach it regardless of where
+  the committed artefact lives.
+
+- **A build-leg rejection says why pytest failed, not just its exit code.**
+  When the committed test doesn't pass against the recorded fixtures (for
+  example an internal pytest error, exit 3), the build detail used to report
+  only the exit code and pytest's one-line classification — leaving a reader
+  no way to tell a wheel-install plugin mismatch from a fixture-path problem
+  from a genuine test failure. The detail now also carries a short,
+  redacted tail (roughly 600 characters) of pytest's own stdout/stderr,
+  prioritising `INTERNALERROR`/`E` lines, so the real cause shows up in the
+  validation report instead of a dead end. Passing builds are unchanged, and
+  no verdict changes.
 
 - **A no-verdict run names a provider rate limit instead of pointing at the
   wrong fix.** A run that reaches no verdict because a provider rate limit
