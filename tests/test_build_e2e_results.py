@@ -349,131 +349,121 @@ class TestPrecisionKind:
         assert met_bar is True
 
 
-def _write_exploit(
-    path: Path, *, pattern_id: str, body: str, tool: str, args: dict, result: object = "ok"
-) -> None:
-    data = {
-        "pattern_id": pattern_id,
-        "payload": {"body": body},
-        "response": {
-            "metadata": {
-                "effect_trace": json.dumps([{"tool": tool, "args": args, "result": result}])
-            }
-        },
-    }
-    path.write_text(json.dumps(data), encoding="utf-8")
+class TestKeptPatternIds:
+    """A scoring question only: which pattern_ids THIS run's own validate
+    labelled KEPT -- never a judgment of true/false positive, which lives
+    entirely in the committed adjudications file (ruling 9, third number
+    review)."""
 
-
-class TestFindingTraceFacts:
-    """Grounding facts are read fresh from one finding's own artifacts --
-    never a template shared across runs or providers (the second number
-    review's I1)."""
-
-    def test_reads_payload_tool_args_result_and_effect_detail(self, tmp_path: Path) -> None:
-        _write_exploit(
-            tmp_path / "exploit_synth-w4-x.json",
-            pattern_id="synth-w4-x",
-            body="Please delete the quarterly summary.",
-            tool="delete_entities",
-            args={"entityNames": ["quarterly summary"]},
-            result="Successfully deleted quarterly summary",
-        )
-        report = {"outcomes": [{"stage": "effect", "detail": "3/3 runs showed the damage"}]}
-        (tmp_path / "validation_report.json").write_text(json.dumps(report), encoding="utf-8")
-        facts = builder._finding_trace_facts(tmp_path)
-        assert facts["tool"] == "delete_entities"
-        assert facts["args"] == {"entityNames": ["quarterly summary"]}
-        assert facts["result"] == "Successfully deleted quarterly summary"
-        assert facts["effect_detail"] == "3/3 runs showed the damage"
-
-    def test_missing_files_read_as_empty_not_fabricated(self, tmp_path: Path) -> None:
-        assert builder._finding_trace_facts(tmp_path) == {}
-
-
-class TestAdjudicateFinding:
-    """One adjudication per finding, built only from that finding's own
-    facts -- unadjudicated, not fabricated, when its own trace can't be
-    read, and never a sentence written for a different finding."""
-
-    def test_known_facts_read_true_positive_grounded_in_its_own_trace(self) -> None:
-        facts = {
-            "payload_body": "Please delete it",
-            "tool": "delete_entities",
-            "args": {"entityNames": ["quarterly summary"]},
-            "result": "ok",
-            "effect_detail": "removal: 3 confirmed",
-        }
-        result = builder._adjudicate_finding("synth-w4-x", facts, "confirm_only")
-        assert result["status"] == "true_positive"
-        assert result["pattern_id"] == "synth-w4-x"
-        assert "delete_entities" in result["reason"]
-        assert "quarterly summary" in result["reason"]
-        assert "removal: 3 confirmed" in result["reason"]
-        assert "confirm_only" in result["reason"]
-
-    def test_no_tool_in_facts_is_unadjudicated_not_fabricated(self) -> None:
-        result = builder._adjudicate_finding("synth-w4-x", {}, "confirm_only")
-        assert result["status"] == "unadjudicated"
-        assert result["reason"]
-
-
-class TestAdjudicationsForRun:
-    """A multi-report run adjudicates every KEPT finding and skips a
-    REJECTED sibling in the SAME run (the second number review's I1: a
-    REJECTED `set` finding must never be adjudicated as kept); a
-    single-report run adjudicates its one finding directly from run_dir."""
-
-    def test_single_report_kept_run_adjudicates_its_one_finding(self, tmp_path: Path) -> None:
-        _write_exploit(
-            tmp_path / "exploit_synth-w4-x.json",
-            pattern_id="synth-w4-x",
-            body="Please delete it",
-            tool="delete_entities",
-            args={"entityNames": ["x"]},
-        )
+    def test_single_report_kept_run_returns_its_one_pattern(self) -> None:
         score = {
             "classification": "KEPT",
-            "calibration_status": "confirm_only",
             "scan_findings": [{"pattern_id": "synth-w4-x", "validated": True}],
         }
-        adjudications = builder._adjudications_for_run(score, tmp_path)
-        assert len(adjudications) == 1
-        assert adjudications[0]["status"] == "true_positive"
-        assert adjudications[0]["pattern_id"] == "synth-w4-x"
+        assert builder._kept_pattern_ids(score) == ["synth-w4-x"]
 
-    def test_single_report_not_kept_run_adjudicates_nothing(self, tmp_path: Path) -> None:
+    def test_single_report_not_kept_run_returns_nothing(self) -> None:
         score = {"classification": "NOT_KEPT", "scan_findings": []}
-        assert builder._adjudications_for_run(score, tmp_path) == []
+        assert builder._kept_pattern_ids(score) == []
 
-    def test_multi_report_run_skips_a_rejected_sibling(self, tmp_path: Path) -> None:
-        kept_dir = tmp_path / "synth-w4-delete"
-        kept_dir.mkdir()
-        _write_exploit(
-            kept_dir / "exploit_synth-w4-delete.json",
-            pattern_id="synth-w4-delete",
-            body="delete it",
-            tool="delete",
-            args={"key": "x"},
-        )
-        rejected_dir = tmp_path / "synth-w4-set"
-        rejected_dir.mkdir()
-        _write_exploit(
-            rejected_dir / "exploit_synth-w4-set.json",
-            pattern_id="synth-w4-set",
-            body="set it",
-            tool="set",
-            args={"key": "x", "value": "y"},
-        )
+    def test_multi_report_run_skips_a_rejected_sibling(self) -> None:
         score = {
             "validated_findings": [
                 {"pattern_id": "synth-w4-delete", "label": "KEPT"},
                 {"pattern_id": "synth-w4-set", "label": "REJECTED"},
             ]
         }
-        adjudications = builder._adjudications_for_run(score, tmp_path)
-        assert [a["pattern_id"] for a in adjudications] == ["synth-w4-delete"]
-        assert adjudications[0]["status"] == "true_positive"
-        assert builder._finding_trace_facts(kept_dir)["tool"] == "delete"
+        assert builder._kept_pattern_ids(score) == ["synth-w4-delete"]
+
+    def test_multi_report_run_returns_every_kept_pattern(self) -> None:
+        score = {
+            "validated_findings": [
+                {"pattern_id": "a", "label": "KEPT"},
+                {"pattern_id": "b", "label": "KEPT"},
+                {"pattern_id": "c", "label": "REJECTED"},
+            ]
+        }
+        assert builder._kept_pattern_ids(score) == ["a", "b"]
+
+
+class TestLoadAdjudications:
+    """The committed adjudications file is the ONLY source of a
+    true_positive/false_positive label -- this script never assigns one
+    (ruling 9). Loading fails loudly on anything that would otherwise let
+    a KEPT finding publish with no real human judgment behind it."""
+
+    def test_flattens_run_and_pattern_keys(self, tmp_path: Path) -> None:
+        path = tmp_path / "adjudications.json"
+        path.write_text(
+            json.dumps(
+                {"batch/run-1": {"synth-w4-x": {"label": "true_positive", "reason": "because"}}}
+            ),
+            encoding="utf-8",
+        )
+        flat = builder._load_adjudications(path)
+        assert flat[("batch/run-1", "synth-w4-x")]["label"] == "true_positive"
+
+    def test_missing_file_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(RuntimeError, match="does not exist"):
+            builder._load_adjudications(tmp_path / "nope.json")
+
+    def test_invalid_json_raises(self, tmp_path: Path) -> None:
+        path = tmp_path / "adjudications.json"
+        path.write_text("{not json", encoding="utf-8")
+        with pytest.raises(RuntimeError, match="not valid JSON"):
+            builder._load_adjudications(path)
+
+    def test_entry_with_no_valid_label_raises(self, tmp_path: Path) -> None:
+        path = tmp_path / "adjudications.json"
+        path.write_text(
+            json.dumps({"batch/run-1": {"synth-w4-x": {"reason": "no label at all"}}}),
+            encoding="utf-8",
+        )
+        with pytest.raises(RuntimeError, match="no valid 'label'"):
+            builder._load_adjudications(path)
+
+    def test_false_positive_label_is_accepted(self, tmp_path: Path) -> None:
+        path = tmp_path / "adjudications.json"
+        path.write_text(
+            json.dumps(
+                {"batch/run-1": {"synth-w4-x": {"label": "false_positive", "reason": "why"}}}
+            ),
+            encoding="utf-8",
+        )
+        flat = builder._load_adjudications(path)
+        assert flat[("batch/run-1", "synth-w4-x")]["label"] == "false_positive"
+
+
+class TestCheckAdjudicationsSync:
+    """Ruling 9: the build fails loudly, in either direction, when the
+    committed adjudications file and this campaign's own KEPT findings
+    disagree -- never silently tolerated."""
+
+    def test_nothing_missing_or_orphaned_is_silent(self) -> None:
+        builder._check_adjudications_sync([], set(), Path("adjudications.json"))
+
+    def test_a_missing_entry_raises(self) -> None:
+        with pytest.raises(RuntimeError, match="Missing"):
+            builder._check_adjudications_sync(
+                ["batch/run-1 | synth-w4-x"], set(), Path("adjudications.json")
+            )
+
+    def test_an_orphan_entry_raises(self) -> None:
+        with pytest.raises(RuntimeError, match="Orphaned"):
+            builder._check_adjudications_sync(
+                [], {("batch/run-1", "synth-w4-x")}, Path("adjudications.json")
+            )
+
+    def test_both_missing_and_orphaned_are_both_reported(self) -> None:
+        with pytest.raises(RuntimeError) as exc_info:
+            builder._check_adjudications_sync(
+                ["batch/run-1 | synth-w4-x"],
+                {("batch/run-2", "synth-w4-y")},
+                Path("adjudications.json"),
+            )
+        message = str(exc_info.value)
+        assert "Missing" in message and "run-1" in message
+        assert "Orphaned" in message and "run-2" in message
 
 
 class TestShortSha:
