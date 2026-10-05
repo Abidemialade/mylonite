@@ -45,6 +45,7 @@ from mylonite.plugins._reference.reference_validator import (
     ReferenceVulnerableOracle,
 )
 from mylonite.report.render import _render_validation_report
+from mylonite.scan.pytest_runner import PytestOutcome, PytestRunResult
 
 _FAILING_SOURCE = "def test_guard_holds():\n    assert False\n"
 _SKIPPING_SOURCE = (
@@ -90,6 +91,49 @@ def test_build_test_that_fails_or_skips_is_never_kept(
     out = _rendered(report)
     assert "build fail" in out
     assert "verdict: KEPT" not in out
+
+
+def test_build_internal_error_surfaces_pytest_tail_and_redacts_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A bare exit code (``INTERNAL_ERROR``, exit 3) says pytest crashed but not
+    why. The build detail must carry a short, redacted tail of the real pytest
+    output so an exit-3 rejection is self-explaining instead of a dead end."""
+    _install_fake_acompletion(monkeypatch)
+    secret = "sk-ant-" + "a" * 24  # pragma: allowlist secret
+    fake_result = PytestRunResult(
+        outcome=PytestOutcome.INTERNAL_ERROR,
+        exit_code=3,
+        stdout="",
+        stderr=(
+            "INTERNALERROR> Traceback (most recent call last):\n"
+            f"INTERNALERROR> RuntimeError: boom {secret}\n"
+        ),
+        detail="internal pytest error (exit 3)",
+    )
+    monkeypatch.setattr(
+        "mylonite.plugins._reference.reference_validator.run_test_file",
+        lambda *args, **kwargs: fake_result,
+    )
+    exploit = _build_exploit()
+    test = _emit_test(exploit)
+    validator = DifferentialValidator(
+        model="stub",
+        iterations=2,
+        completion_fn=_ScriptedCompletion(),
+        record_fixtures_dir=tmp_path / "gen" / "fixtures",
+    )
+    report = validator.validate(
+        test, ReferenceVulnerableOracle().adapter(), ReferenceVulnerableOracle()
+    )
+
+    build = _outcome(report, "build")
+    assert build.passed is False
+    assert "exit_code=3" in build.detail
+    assert "RuntimeError: boom" in build.detail
+    assert secret not in build.detail
+    assert "REDACTED" in build.detail
+    assert report.kept is False
 
 
 def test_skipped_build_is_not_a_plain_keep() -> None:

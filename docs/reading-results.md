@@ -129,6 +129,15 @@ An unguarded run that was cut off by `--iteration-timeout` or stopped by the cal
 budget reached no verdict, which is not the same as the attack failing to land.
 When any were, the line counts them and points at the time limit instead.
 
+When the **build** leg fails — the emitted test didn't collect, or didn't pass against
+the recorded fixtures — the detail names the pytest exit code plus a short classification
+("internal pytest error (exit 3)", "collection error", and so on). If that run also
+captured pytest's own output, the detail appends a redacted excerpt of it (at most
+around 600 characters, pytest's own `INTERNALERROR`/`E` lines first) so you can see
+*why* pytest failed — a plugin mismatch, a broken fixture path, a real assertion — rather
+than just the bare exit code. Any secret-shaped string in that excerpt is masked the same
+way the rest of the CLI's output is.
+
 With `--iterations 1` the flakiness leg has nothing to compare, because one run per build
 gives a rate of 0% or 100% by construction. The panel then shows that leg as
 `· not measured`, the gate line as `flakiness (not measured)`, and the verdict reason

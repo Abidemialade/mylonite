@@ -119,7 +119,7 @@ from mylonite.scan.evidence_tier import attempt_evidence_tier, rests_on_judge_on
 from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.llm_types import CompletionFn
 from mylonite.scan.obfuscate import _MULTILINGUAL_PREFIX, _split_words, _zero_width
-from mylonite.scan.pytest_runner import PytestOutcome, run_test_file
+from mylonite.scan.pytest_runner import PytestOutcome, failure_tail, run_test_file
 from mylonite.scan.seeds import SEED_CATALOGUE
 from mylonite.scan.wiring import build_scan, note_id_counter
 from mylonite.testkit import FIXTURE_FORMAT_VERSION
@@ -1983,6 +1983,7 @@ class DifferentialValidator(ValidatorBase):
             test_path.write_text(test.source, encoding="utf-8")
             result = run_test_file(test_path, collect_only=True)
         collected = result.outcome is PytestOutcome.COLLECTED
+        tail = "" if collected else failure_tail(result)
         return ValidationOutcome(
             stage="build",
             passed=collected,
@@ -1990,6 +1991,7 @@ class DifferentialValidator(ValidatorBase):
                 f"collect-only: emitted test "
                 f"{'collected (not run)' if collected else 'did NOT collect'} under pytest "
                 f"(exit_code={result.exit_code}: {result.detail}){suffix}"
+                + (f" — pytest output: {tail}" if tail else "")
             ),
         )
 
@@ -2077,6 +2079,7 @@ class DifferentialValidator(ValidatorBase):
 
         # 4. Run the ON-DISK committed test offline — FULL pass required (exit 0).
         result = run_test_file(test_path)
+        tail = "" if result.passed else failure_tail(result)
         return ValidationOutcome(
             stage="build",
             passed=result.passed,
@@ -2084,5 +2087,6 @@ class DifferentialValidator(ValidatorBase):
                 f"full offline pass: on-disk committed test "
                 f"{'PASSED' if result.passed else 'did NOT pass'} against the recorded "
                 f"canonical guarded fixtures (exit_code={result.exit_code}: {result.detail})"
+                + (f" — pytest output: {tail}" if tail else "")
             ),
         )

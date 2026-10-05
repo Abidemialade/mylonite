@@ -60,11 +60,14 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 
-__all__ = ["PytestOutcome", "PytestRunResult", "run_test_file"]
+from mylonite._redaction import redact
+
+__all__ = ["PytestOutcome", "PytestRunResult", "failure_tail", "run_test_file"]
 
 
 class PytestOutcome(Enum):
@@ -306,45 +309,74 @@ def run_test_file(
     # filename has an empty parent (``Path("")``); fall back to the cwd.
     rootdir = test_path.parent if str(test_path.parent) else Path.cwd()
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "pytest",
-        str(test_path),
-        "-p",
-        "no:cacheprovider",
-        "-o",
-        "addopts=",  # do NOT inherit the repo's addopts (coverage, -ra, etc.)
-        "--rootdir",
-        str(rootdir),
-        "-q",
-    ]
-    if collect_only:
-        cmd.append("--collect-only")
-
-    # Force the child to speak UTF-8 on every platform (Windows A3 guard). Drop
-    # PYTEST_ADDOPTS for the same reason `-o addopts=` drops the ini addopts: an
-    # inherited flag (say -rA) changes the output the pass check reads.
-    env = {
-        **{k: v for k, v in os.environ.items() if k != "PYTEST_ADDOPTS"},
-        "PYTHONUTF8": "1",
-        "PYTHONIOENCODING": "utf-8",
-    }
-
     try:
-        # cmd is a fixed argv list (sys.executable -m pytest <path> <flags>);
-        # shell=False and no string is shell-interpolated, so this is safe by
-        # construction — not deferred to a later phase.
-        completed = subprocess.run(  # noqa: S603
-            cmd,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            shell=False,
-            timeout=timeout,
-            env=env,
-        )
+        # `-o addopts=` alone is NOT enough: pytest's own ini-file discovery
+        # ignores `--rootdir` and walks UP from the test file looking for an
+        # ini (pyproject.toml / pytest.ini / setup.cfg / tox.ini). When the
+        # emitted test is written inside this project's own checkout (as
+        # `validate`/`gate` do, since the committed artefact lives in the
+        # user's repo), that walk finds THIS project's `pyproject.toml` —
+        # whose `[tool.pytest.ini_options]` carries `filterwarnings = ["error",
+        # ...]` and `asyncio_mode = "auto"` (an option only `pytest-asyncio`,
+        # a dev-only extra NOT installed alongside a plain `pip install
+        # mylonite`, understands). With that ini picked up and
+        # `pytest-asyncio` absent, pytest's own "unknown config option:
+        # asyncio_mode" warning gets promoted to an exception by the
+        # inherited `filterwarnings=error`, raised inside the
+        # `pytest_collection` hook where nothing catches it —
+        # `PytestOutcome.INTERNAL_ERROR` (exit 3), confirmed by actually
+        # reproducing it: a wheel install (no `pytest-asyncio`) running an
+        # emitted test from inside this checkout crashes; from an editable
+        # install (where `pytest-asyncio` IS present as a dev dependency) or
+        # from outside the checkout (no ini to find) it passes. An empty,
+        # throwaway ini pinned with `-c` makes pytest use EXACTLY that file —
+        # it never searches for another — so no project setting, not just
+        # `addopts`, can reach the emitted run regardless of where it lives.
+        with tempfile.TemporaryDirectory() as ini_dir:
+            isolated_ini = Path(ini_dir) / "pytest.ini"
+            isolated_ini.write_text("[pytest]\n", encoding="utf-8")
+
+            cmd = [
+                sys.executable,
+                "-m",
+                "pytest",
+                str(test_path),
+                "-p",
+                "no:cacheprovider",
+                "-c",
+                str(isolated_ini),
+                "-o",
+                "addopts=",  # belt-and-suspenders: also drop `-c`'s own addopts
+                "--rootdir",
+                str(rootdir),
+                "-q",
+            ]
+            if collect_only:
+                cmd.append("--collect-only")
+
+            # Force the child to speak UTF-8 on every platform (Windows A3
+            # guard). Drop PYTEST_ADDOPTS for the same reason `-o addopts=`
+            # drops the ini addopts: an inherited flag (say -rA) changes the
+            # output the pass check reads.
+            env = {
+                **{k: v for k, v in os.environ.items() if k != "PYTEST_ADDOPTS"},
+                "PYTHONUTF8": "1",
+                "PYTHONIOENCODING": "utf-8",
+            }
+
+            # cmd is a fixed argv list (sys.executable -m pytest <path>
+            # <flags>); shell=False and no string is shell-interpolated, so
+            # this is safe by construction — not deferred to a later phase.
+            completed = subprocess.run(  # noqa: S603
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                shell=False,
+                timeout=timeout,
+                env=env,
+            )
     except subprocess.TimeoutExpired as exc:
         # Decode any partial captured output for diagnostics; never re-raise.
         out = _coerce_stream(exc.stdout)
@@ -376,3 +408,51 @@ def _coerce_stream(stream: str | bytes | None) -> str:
     if isinstance(stream, bytes):
         return stream.decode("utf-8", errors="replace")
     return stream
+
+
+#: Lines pytest itself marks as diagnostic: an internal-error traceback line
+#: (``INTERNALERROR> ...``, always on stderr) or an assertion-failure line
+#: from its own report (``E   ...``).
+_DIAGNOSTIC_PREFIXES = ("INTERNALERROR", "E ")
+
+
+def failure_tail(result: PytestRunResult, *, max_chars: int = 600) -> str:
+    """A short, redacted tail of ``result``'s captured output for a non-pass run.
+
+    A caller that only reports ``exit_code`` and :attr:`PytestRunResult.detail`
+    (a one-line classification such as ``"internal pytest error (exit 3)"``)
+    gives no clue WHY pytest failed that way — e.g. a wheel install missing a
+    plugin's entry point, or a rootdir/fixture-path problem, each produce a
+    different ``INTERNALERROR`` traceback. This surfaces a bounded excerpt of
+    the real pytest output instead.
+
+    ``INTERNALERROR>`` and ``E   `` lines are the most diagnostic, so they are
+    surfaced first; when THOSE alone overflow the budget, their own tail is
+    kept (the raised exception is the last line of an internal-error
+    traceback, not the first). Any remaining budget is filled from the tail of
+    the rest of the combined stdout/stderr. The result is passed through
+    :func:`mylonite._redaction.redact` so a secret-shaped string captured in
+    the test's own output never reaches a report, and is capped at
+    approximately ``max_chars``.
+
+    Returns ``""`` when there is no captured output at all (e.g. a timeout
+    with nothing captured, or the import preflight never invoked pytest).
+    """
+    lines = [
+        ln for stream in (result.stderr, result.stdout) if stream for ln in stream.splitlines()
+    ]
+    if not lines:
+        return ""
+
+    is_diagnostic = [ln.lstrip().startswith(_DIAGNOSTIC_PREFIXES) for ln in lines]
+    diagnostic_text = "\n".join(ln for ln, hit in zip(lines, is_diagnostic, strict=True) if hit)
+    if len(diagnostic_text) > max_chars:
+        return redact(diagnostic_text[-max_chars:])
+
+    other_text = "\n".join(ln for ln, hit in zip(lines, is_diagnostic, strict=True) if not hit)
+    remaining = max_chars - len(diagnostic_text)
+    filler = other_text[-remaining:] if remaining > 0 and other_text else ""
+    text = "\n".join(part for part in (diagnostic_text, filler) if part)
+    if len(text) > max_chars:
+        text = text[-max_chars:]
+    return redact(text)
