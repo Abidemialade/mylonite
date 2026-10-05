@@ -31,7 +31,9 @@ The target's command never started, so nothing was tested. Shown as `⚠ LAUNCH 
 
 ## MYL-NT-002
 
-The planner failed before the attack could be delivered.
+The planner failed before the attack could be delivered. A notification the server
+sends while Mylonite closes the session does not count; a connection lost while a
+call is still waiting for its reply does.
 
 **Fix:** Check connectivity to the target and to the model.
 

@@ -34,6 +34,7 @@ from mylonite.contracts import TargetDescriptor
 from mylonite.plugins._mcp._session_adapter import (
     DEFAULT_MCP_READ_TIMEOUT,
     MCPSessionAdapterBase,
+    _open_client_session,
 )
 from mylonite.scan._types import AdapterDescribeFailed
 
@@ -163,13 +164,15 @@ async def _open_remote_session(
     else:  # pragma: no cover - guarded by TargetFile/registry validation
         raise ValueError(f"unsupported remote transport {transport!r}")
 
-    async with client_cm as streams:
-        read_stream, write_stream = streams[0], streams[1]
-        async with ClientSession(
+    # The shared opener closes the session and the transport so a server
+    # notification arriving during the close can't fail a finished attempt.
+    async with _open_client_session(
+        client_cm,
+        lambda read_stream, write_stream: ClientSession(
             read_stream, write_stream, read_timeout_seconds=read_timeout
-        ) as session:
-            await session.initialize()
-            yield session
+        ),
+    ) as session:
+        yield session
 
 
 class MCPRemoteAdapter(MCPSessionAdapterBase):

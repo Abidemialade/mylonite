@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A server notification during session close no longer costs an attempt.**
+  When a tool call turned on a server's timed notifications (log messages,
+  resource-updated pushes), a notification arriving while Mylonite closed the
+  MCP session raised `BrokenResourceError` and the whole attempt was reported
+  as NOT TESTED (`MYL-NT-002`, `subprocess_crash`), although the server was
+  alive and every call had returned. A closed-stream error raised after the
+  attempt's own calls returned is now treated as a clean close, on stdio and
+  remote transports and for every session Mylonite opens (scan attempts,
+  calibration, effect probes, validation, testkit). A server that drops the
+  connection while a call is still waiting for its reply is still reported as
+  a crash. Nothing is retried.
+
 - **A no-verdict run names a provider rate limit instead of pointing at the
   wrong fix.** A run that reaches no verdict because a provider rate limit
   (HTTP 429) survived every retry used to tell the operator to "declare an

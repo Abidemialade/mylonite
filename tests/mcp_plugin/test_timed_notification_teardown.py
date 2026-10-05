@@ -1,114 +1,48 @@
-"""MYL-NT-002 root cause: a consequential tool call that turns ON a server's
-unsolicited-notification timer mid-session reliably crashes Mylonite's
-stdio session, losing the whole attempt with no retry.
+"""A server notification that arrives while Mylonite closes an MCP session
+must not fail an attempt whose calls all returned.
 
-Field evidence (the official "everything" reference server, Node stdio): 4
-of 6 third-party runs skip ``synth-w1-rug-pull`` as
-``[MYL-NT-002] subprocess_crash on synth-w1-rug-pull: BrokenResourceError()``;
-``write EPIPE`` appears in exactly those 4 crashed runs' Node stderr and in
-neither of the 2 clean runs; the crashed runs' ``tool_call_trace`` is empty
-(the session died before `invoke()` ever returned, so nothing was persisted
--- it does not mean zero MCP calls happened); and the run plan's
-consequential tools (scan.log) include state-toggling tools
-(``toggle-simulated-logging``, ``toggle-subscriber-updates``) -- exactly the
-shape "a tool call that starts timed sends".
+Field evidence: against a stdio server whose tools can turn on timed
+notifications (simulated logging, resource-subscription updates), 4 of 6
+runs skipped an attempt as ``[MYL-NT-002] subprocess_crash ...:
+BrokenResourceError()`` although the server never died.
 
-## Repro history
+Mechanism: the SDK transport (``stdio_client``) and ``ClientSession`` are
+two separate context managers that do not close together.
+``ClientSession`` closes its end of the read stream first; the transport's
+``stdout_reader`` task is torn down a little later. A message the server
+writes in that gap makes ``read_stream_writer.send(...)`` raise
+``anyio.BrokenResourceError`` out of the transport's exit. A timer started by
+a tool call mid-session fires its first tick right as the attempt finishes,
+so it lands in the gap reliably; a timer running from process start rarely
+does (kept below as two negative repros).
 
-An EARLIER repro attempt (a server whose notification timer ran from
-process start, independent of any tool call) did NOT reproduce this --
-negative results are kept below as
-``test_a_periodic_notification_timer_does_not_crash_the_attempt`` and
-``test_a_notification_at_the_close_instant_does_not_crash_the_attempt``.
-Starting the timer from a TOOL CALL instead (this module's main repro)
-reproduces it reliably (every run observed while writing this test): same
-exception type (``anyio.BrokenResourceError``), same classification
-(``subprocess_crash``, ``_session_adapter.py``'s ``_classify_failure``) and
-the same free-text detail Mylonite's own logs shows
-(``subprocess_crash on synth-w1-rug-pull: BrokenResourceError()``) as the
-field evidence, byte for byte.
-
-## Mechanism (confirmed via the raised exception's own traceback)
-
-``anyio.BrokenResourceError`` is raised from
-``mcp/client/stdio/__init__.py``'s ``stdout_reader`` task, inside
-``await read_stream_writer.send(session_message)`` -- i.e. while FORWARDING
-an already-read line from the child's stdout into the memory-object stream
-``mcp.ClientSession`` reads from. ``send()`` only raises
-``BrokenResourceError`` (not ``WouldBlock``) when the receiving end has
-already been closed. ``ClientSession`` and the ``stdio_client`` transport
-are two SEPARATE, nested async context managers
-(``async with (stdio_client(...) as streams, ClientSession(...) as
-session):`` in ``stdio_adapter._open_mcp_session``) that do not close
-atomically: ``ClientSession.__aexit__`` (closing its handle on the shared
-read stream) runs, then a few event-loop ticks pass, THEN
-``stdio_client``'s own task group tears down ``stdout_reader``. Any message
-the still-alive server writes that lands in that gap crashes the forwarding
-task with ``BrokenResourceError``, which escapes ``stdio_client``'s task
-group and propagates out of
-``MCPSessionAdapterBase.invoke``'s ``async with self._session(...)``
-exactly like a failure in the attempt's own body would.
-
-A notification timer running from the first byte (the earlier, negative
-repro) rarely lands a write in that few-millisecond gap, because the WHOLE
-session typically finishes and tears down long before the timer's first
-tick. A timer a TOOL CALL starts mid-session fires its first tick almost
-immediately (no warm-up delay) -- right as the attempt's own remaining work
-(the rug-pull re-list, then teardown) is ALSO finishing -- which is why it
-lands in the gap reliably instead of by chance.
-
-## General mechanism (not server-specific)
-
-ANY server where a tool call starts pushing unsolicited notifications
-(logging messages, resource updates, anything) independently of
-request/response traffic can have its first push land in this
-client-library close-sequencing gap, at a point in an attempt's lifetime
-Mylonite does not control and cannot predict. The crash has nothing to do
-with whether the probe landed or failed -- the attempt's own business logic
-(the tool call, the rug-pull comparison) can have already fully succeeded.
-
-## Verdict: MYLONITE
-
-General, not server-specific. The race lives in how the ``mcp`` client
-library composes two nested context managers (arguably a defect worth
-reporting upstream), but Mylonite is what drives this exact code path with
-no resilience to it: on a transport-crash classification
-(``subprocess_crash`` et al.), the whole seed is lost for the run with no
-retry, misattributed as third-party flakiness. The field evidence's
-"Consequential tools this run may drive: ... toggle-simulated-logging,
-toggle-subscriber-updates" (the crashed runs' own scan.log line) is almost
-certainly what the planner called right before four of six runs crashed:
-the SAME shape this module's main repro forces deterministically.
-
-A retry alone is still not a full fix for every shape of this bug (a server
-that crashes outright, rather than just racing a client-library teardown
-gap, cannot be retried into success) -- but it is the correct response to
-THIS mechanism specifically, because the server here never dies: only the
-CLIENT's own close sequencing loses a message. Described, not implemented
-(per the task): the general root-cause fix is to retry the attempt once,
-against a fresh subprocess, on a transport-crash classification for an
-attempt whose planner had not yet produced a final result -- the same
-one-shot shape already used for a provider ``rate_limit`` in
-``_classify_failure``'s own docstring. A more complete fix would also close
-``ClientSession`` and the ``stdio_client`` transport in a way that drains or
-ignores a message arriving during this specific shutdown window, but that
-is a change to how the adapter composes the MCP SDK's own context managers,
-not described further here.
+The fix (``_session_adapter._open_client_session``) is structural: a
+closed-stream error raised only after the attempt's own body returned is a
+clean close. One raised while a call is still in flight still propagates
+and is still classified ``subprocess_crash``. A retry was rejected: it would
+re-run the attack and hide the defect.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import sys
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import anyio
 import pytest
 
 from mylonite.contracts import Payload
 from mylonite.plugins._mcp import stdio_adapter, target_registry
+from mylonite.plugins._mcp._session_adapter import (
+    MCPSessionAdapterBase,
+    _open_client_session,
+    _unwrap_sole_exception,
+)
 from mylonite.plugins._mcp.stdio_adapter import MCPStdioAdapter, _open_mcp_session
 from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
 from mylonite.scan._types import AdapterInvocationSkipped
@@ -244,7 +178,6 @@ async def test_a_notification_at_the_close_instant_does_not_crash_the_attempt(
     result -- a single notification AFTER the planner-facing ``yield``
     returns is not early enough to land in the gap this module's main repro
     hits (see that test's docstring for exactly where the gap is)."""
-    from contextlib import asynccontextmanager
 
     @asynccontextmanager
     async def _session_then_ping(*args: Any, **kwargs: Any) -> Any:
@@ -262,48 +195,172 @@ async def test_a_notification_at_the_close_instant_does_not_crash_the_attempt(
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "MYL-NT-002: a consequential tool call that starts a server's "
-        "notification timer mid-session reliably races mcp.ClientSession's "
-        "and stdio_client's non-atomic shutdown, raising "
-        "anyio.BrokenResourceError (classified subprocess_crash) and losing "
-        "the whole attempt with no retry -- general, not server-specific. "
-        "Fix: retry the attempt once against a fresh subprocess on a "
-        "transport-crash classification before giving up on the seed (see "
-        "this module's docstring)."
-    ),
-)
 async def test_a_tool_call_that_starts_timed_sends_does_not_crash_the_attempt(
     _toggle_target: target_registry.TargetSpec,
 ) -> None:
     adapter = MCPStdioAdapter(
         family=FAMILY, scope=None, completion_fn=_tool_call_then_done("toggle_logging")
     )
-    # Today: reliably raises AdapterInvocationSkipped(reason=subprocess_crash,
-    # exception=BrokenResourceError) -- byte-identical to the field evidence's
-    # own "[MYL-NT-002] subprocess_crash on synth-w1-rug-pull:
-    # BrokenResourceError()" -- and the seed is gone for the whole scan. The
-    # fix should make this line return a normal AdapterResponse instead (a
-    # transparent one-shot retry).
+    # Before the fix this reliably raised AdapterInvocationSkipped
+    # (subprocess_crash, BrokenResourceError) and the seed was lost.
     response = await adapter.invoke(_PAYLOAD)
     assert response.payload_pattern_id == "synth-w1-rug-pull"
 
 
-def test_a_tool_call_that_starts_timed_sends_is_classified_subprocess_crash(
-    _toggle_target: target_registry.TargetSpec,
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["log", "resource"])
+async def test_each_notification_shape_started_by_a_tool_call_leaves_the_attempt_intact(
+    kind: str,
 ) -> None:
-    """Documents today's actual (non-xfail) behaviour precisely: the EXACT
-    exception/reason pair the field evidence shows, not an approximation --
-    so the xfail test above is read as "no retry exists yet", not "nothing
-    is classified" (#319 already gets the label right)."""
-    import asyncio
-
-    adapter = MCPStdioAdapter(
-        family=FAMILY, scope=None, completion_fn=_tool_call_then_done("toggle_logging")
+    """A logging message and a resource-updated push both race the close the
+    same way; neither may cost the attempt."""
+    _register(
+        {
+            "MYLONITE_TEST_TOGGLE_STARTS_NOTIFY": "1",
+            "MYLONITE_TEST_NOTIFY_INTERVAL_S": "0.0",
+            "MYLONITE_TEST_NOTIFY_LINGER_S": "1.0",
+            "MYLONITE_TEST_NOTIFY_KIND": kind,
+        }
     )
-    with pytest.raises(AdapterInvocationSkipped) as excinfo:
-        asyncio.run(adapter.invoke(_PAYLOAD))
-    assert excinfo.value.attempt_metadata["reason"] == "subprocess_crash"
-    assert excinfo.value.attempt_metadata["exception"] == "BrokenResourceError"
+    try:
+        adapter = MCPStdioAdapter(
+            family=FAMILY, scope=None, completion_fn=_tool_call_then_done("toggle_logging")
+        )
+        response = await adapter.invoke(_PAYLOAD)
+    finally:
+        target_registry.clear_runtime_targets()
+    assert response.payload_pattern_id == "synth-w1-rug-pull"
+
+
+@pytest.mark.asyncio
+async def test_a_notification_written_while_the_client_closes_leaves_the_attempt_intact() -> None:
+    """The server writes one notification the moment the client closes its
+    stdin, i.e. inside the client's own teardown."""
+    _register({"MYLONITE_TEST_NOTIFY_ON_EOF": "1", "MYLONITE_TEST_NOTIFY_LINGER_S": "0"})
+    try:
+        adapter = MCPStdioAdapter(
+            family=FAMILY, scope=None, completion_fn=_tool_call_then_done("ping")
+        )
+        response = await adapter.invoke(_PAYLOAD)
+    finally:
+        target_registry.clear_runtime_targets()
+    assert response.payload_pattern_id == "synth-w1-rug-pull"
+
+
+@pytest.mark.asyncio
+async def test_a_server_that_sends_no_notifications_is_unchanged() -> None:
+    _register({"MYLONITE_TEST_TOGGLE_STARTS_NOTIFY": "0", "MYLONITE_TEST_NOTIFY_LINGER_S": "0"})
+    try:
+        adapter = MCPStdioAdapter(
+            family=FAMILY, scope=None, completion_fn=_tool_call_then_done("ping")
+        )
+        response = await adapter.invoke(_PAYLOAD)
+    finally:
+        target_registry.clear_runtime_targets()
+    assert response.payload_pattern_id == "synth-w1-rug-pull"
+    assert "ping" in response.tool_calls
+
+
+@pytest.mark.asyncio
+async def test_a_server_that_dies_mid_call_still_skips_the_attempt() -> None:
+    """The teardown rule must not swallow a real crash: the server exits
+    while answering the planner's tool call."""
+    _register({"MYLONITE_TEST_CRASH_ON_CALL_TOOL": "1", "MYLONITE_TEST_NOTIFY_LINGER_S": "0"})
+    try:
+        adapter = MCPStdioAdapter(
+            family=FAMILY, scope=None, completion_fn=_tool_call_then_done("ping")
+        )
+        with pytest.raises(AdapterInvocationSkipped):
+            await adapter.invoke(_PAYLOAD)
+    finally:
+        target_registry.clear_runtime_targets()
+
+
+# --- The rule itself, on a fake transport -----------------------------------
+
+
+class _FakeSession:
+    """Stands in for ``ClientSession``; optionally sets ``on_exit`` and yields
+    to the loop while closing, the way the real one does."""
+
+    def __init__(self, on_exit: anyio.Event | None = None) -> None:
+        self._on_exit = on_exit
+
+    async def __aenter__(self) -> _FakeSession:
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        if self._on_exit is not None:
+            self._on_exit.set()
+            await anyio.sleep(0.05)
+
+    async def initialize(self) -> None:
+        return None
+
+
+def _transport_whose_reader_breaks(fire: anyio.Event, error: BaseException) -> Any:
+    """A transport whose background reader raises ``error`` once ``fire`` is
+    set -- the SDK's ``stdout_reader`` forwarding into a closed stream."""
+
+    @asynccontextmanager
+    async def _transport() -> AsyncIterator[tuple[None, None]]:
+        async def _reader() -> None:
+            await fire.wait()
+            raise error
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(_reader)
+            yield (None, None)
+            await anyio.sleep(0.05)  # the transport's own close takes a moment
+            tg.cancel_scope.cancel()
+
+    return _transport()
+
+
+@pytest.mark.asyncio
+async def test_a_closed_stream_error_during_teardown_is_a_clean_close() -> None:
+    fire = anyio.Event()
+    async with _open_client_session(
+        _transport_whose_reader_breaks(fire, anyio.BrokenResourceError()),
+        lambda r, w: _FakeSession(on_exit=fire),
+    ):
+        pass
+
+
+@pytest.mark.asyncio
+async def test_a_closed_stream_error_while_a_call_is_in_flight_is_still_a_crash() -> None:
+    fire = anyio.Event()
+    with pytest.raises(BaseException) as excinfo:
+        async with _open_client_session(
+            _transport_whose_reader_breaks(fire, anyio.BrokenResourceError()),
+            lambda r, w: _FakeSession(),
+        ):
+            fire.set()
+            await anyio.sleep(5)  # a call still awaiting its reply
+    leaf = _unwrap_sole_exception(excinfo.value)
+    assert isinstance(leaf, anyio.BrokenResourceError)
+    assert MCPSessionAdapterBase._classify_failure(leaf) == "subprocess_crash"
+
+
+@pytest.mark.asyncio
+async def test_a_different_error_during_teardown_still_propagates() -> None:
+    fire = anyio.Event()
+    with pytest.raises(BaseException) as excinfo:
+        async with _open_client_session(
+            _transport_whose_reader_breaks(fire, BrokenPipeError()),
+            lambda r, w: _FakeSession(on_exit=fire),
+        ):
+            pass
+    assert isinstance(_unwrap_sole_exception(excinfo.value), BrokenPipeError)
+
+
+@pytest.mark.asyncio
+async def test_an_error_from_the_body_itself_is_never_swallowed() -> None:
+    fire = anyio.Event()
+    with pytest.raises(BaseException) as excinfo:
+        async with _open_client_session(
+            _transport_whose_reader_breaks(fire, anyio.BrokenResourceError()),
+            lambda r, w: _FakeSession(),
+        ):
+            raise anyio.BrokenResourceError
+    assert isinstance(_unwrap_sole_exception(excinfo.value), anyio.BrokenResourceError)
