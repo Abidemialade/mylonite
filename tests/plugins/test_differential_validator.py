@@ -1163,6 +1163,45 @@ def test_validate_custom_target_rejects_when_effect_probe_errored() -> None:
     assert "no effect_probe declared" not in effect.detail
 
 
+def test_validate_custom_target_names_a_rate_limit_in_the_stability_detail() -> None:
+    """A run that reached no verdict because every retry on a provider 429 was
+    exhausted must name that in the stability detail, not just "N/n runs
+    reached no verdict" -- the bare count reads as a scan that simply found
+    nothing, when the real cause was the provider cutting the attempt off
+    before the planner ever ran. ``skip_reason`` is what ``_classify_failure``
+    (``MCPSessionAdapterBase``) stamps on the attempt once ``scan._llm``'s
+    retry loop gives up on a 429; see ``_rate_limited_count``."""
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+
+    def _fake_run_custom_iteration(self, target, pattern_id, *, factory=None):
+        return _CustomRun(
+            finding=False,
+            effect_confirmed="unprobed",
+            response=None,
+            resisted=False,
+            skip_reason=f"rate_limit on {pattern_id}: RuntimeError: Error code: 429",
+        )
+
+    validator = DifferentialValidator(
+        model="stub",
+        iterations=2,
+        vuln_threshold=0,
+        completion_fn=_cust_completion,
+        run_build=False,
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            DifferentialValidator, "_run_custom_iteration", _fake_run_custom_iteration, raising=True
+        )
+        report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    stability = next(o for o in report.outcomes if o.stage == "stability")
+    assert "2/2 runs reached no verdict" in stability.detail
+    assert "rate limit (429)" in stability.detail
+    assert "lower --max-concurrent" in stability.detail
+
+
 def test_vuln_threshold_default_is_non_trivial_at_iterations_one() -> None:
     """DCR-0024: the DEFAULT vuln_threshold (no explicit override) used to be
     `iterations - 1`, which is 0 at iterations=1 — making the custom-target
@@ -1381,6 +1420,49 @@ def test_custom_differential_server_layer_reject_reads_honestly() -> None:
     assert "did not discriminate" in differential.detail
     assert "synthetic" not in differential.detail.lower()
     assert "[guarded-twin=server-layer]" in (report.notes or "")
+
+
+def test_custom_differential_names_a_rate_limit_instead_of_an_effect_probe() -> None:
+    """When every guarded-side no-verdict run was cut off by a provider rate
+    limit (429) surviving every retry, the differential detail must name that
+    cause and must NOT tell the operator to "declare an effect_probe" -- that
+    advice misnames a provider outage as a calibration gap (see the module
+    docstring and `_rate_limited_count`)."""
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    n = 3
+
+    def _fake_run_custom_iteration(self, target, pattern_id, *, factory=None):
+        if factory is None:
+            return _CustomRun(finding=True, effect_confirmed="unprobed", response=None)
+        return _CustomRun(
+            finding=False,
+            effect_confirmed="unprobed",
+            response=None,
+            resisted=False,
+            skip_reason=f"rate_limit on {pattern_id}: RuntimeError: Error code: 429",
+        )
+
+    validator = DifferentialValidator(
+        model="stub",
+        iterations=n,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
+        guarded_adapter_factory=lambda: _FakeCustomAdapter("true"),
+        control_weakness="W2",
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            DifferentialValidator, "_run_custom_iteration", _fake_run_custom_iteration, raising=True
+        )
+        report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+
+    differential = _outcome(report, "differential")
+    assert differential.passed is False
+    assert "rate limit (429)" in differential.detail
+    assert "lower --max-concurrent" in differential.detail
+    assert "effect_probe" not in differential.detail
 
 
 def test_custom_differential_leg_metric_is_the_differential_metric_not_flakiness() -> None:

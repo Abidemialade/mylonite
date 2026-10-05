@@ -177,6 +177,14 @@ def test_classify_failure_generic() -> None:
     assert _classify_failure(ValueError("nope")) == "planner_exception"
 
 
+def test_classify_failure_rate_limit() -> None:
+    # Every retry under scan._llm's backoff loop was exhausted and the
+    # provider's own exception still reached the adapter -- named "rate_limit",
+    # not the generic "planner_exception", so the operator sees the provider
+    # cut this attempt off, not the planner.
+    assert _classify_failure(RuntimeError("Error code: 429 - rate limit exceeded")) == "rate_limit"
+
+
 # --- _extract_first_number ------------------------------------------------------
 
 
