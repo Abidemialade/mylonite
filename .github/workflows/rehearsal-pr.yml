@@ -1,0 +1,259 @@
+# rehearsal-pr: proves, on a REAL GitHub repository, that "Mylonite opens
+# the PR, and the generated CI passes on its first run" -- using the
+# RELEASED package from PyPI, never this checkout.
+#
+# It runs the journey's own commit-the-gate step
+# (docs/journey/6-commit-the-gate.md: `gate --workflows --open-pr`) against
+# a dedicated scratch repository, then finds the PR that opened and waits
+# for ITS checks -- including the "Mylonite gate" workflow `--workflows`
+# just wrote into that PR -- to finish, printing every check and its
+# conclusion and failing unless every one of them passed. A gate run that
+# finds nothing to keep is explicitly NOT a pass (see the "Run gate" step):
+# this workflow exists to prove a kept finding reaches a green PR, not to
+# prove gate exits cleanly.
+#
+# Needs, on THIS repository:
+#   - variable MYLONITE_SCRATCH_REPO ("owner/repo")
+#   - secret MYLONITE_SCRATCH_REPO_TOKEN (fine-grained, scoped only to that
+#     repo: contents:write, pull-requests:write, actions:read/write)
+#   - secret MYLONITE_OPENAI_KEY (OpenAI) -- drives the live gate run below
+# ...and, already set on the SCRATCH repo itself:
+#   - secret MYLONITE_API_KEY (OpenAI) -- drives the generated per-PR gate
+#     workflow once it runs against the opened PR.
+#
+# Credential handling: the scratch token is never written to .git/config --
+# every git/gh command that needs it gets it through a step-scoped
+# GIT_ASKPASS script (git) or a step-scoped GH_TOKEN (gh), declared in each
+# step's own `env:`, never the job's. `mylonite gate --open-pr` runs scan ->
+# generate -> validate -> commit -> push -> gh pr create as ONE process:
+# each phase stops the target MCP server before the next starts, so by the
+# time that process's internal `git push`/`gh pr create` run, the target has
+# already exited -- scoping the credential to this one step also scopes it
+# to after the target's own process is gone, never to the target's
+# environment. The one step that runs gate also still starts/stops that
+# target subprocess, which inherits this step's env like any child process
+# (the same residual noted in third-party-campaign.yml): use a
+# dedicated, spend-limited scratch token, not a shared production one.
+name: rehearsal-pr
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Full model id for the live gate run, e.g. openai/gpt-4o-mini"
+        required: true
+      version:
+        description: "Released mylonite version to install from PyPI"
+        default: "0.12.0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rehearsal-pr
+  cancel-in-progress: false
+
+jobs:
+  rehearsal-pr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Validate inputs (only openai/* is wired -- MYLONITE_OPENAI_KEY)
+        id: inputs
+        shell: bash
+        env:
+          REH_MODEL: ${{ inputs.model }}
+          REH_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -z "${REH_MODEL:-}" ]; then
+            echo "::error::model is required, e.g. openai/gpt-4o-mini" >&2
+            exit 1
+          fi
+          case "$REH_MODEL" in
+            openai/*) ;;
+            *)
+              echo "::error::model must be an openai/* model id -- this workflow only wires MYLONITE_OPENAI_KEY, got '$REH_MODEL'" >&2
+              exit 1
+              ;;
+          esac
+          if [ -z "${REH_VERSION:-}" ]; then
+            echo "::error::version is required" >&2
+            exit 1
+          fi
+          echo "model=$REH_MODEL" >> "$GITHUB_OUTPUT"
+          echo "version=$REH_VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      # Node for the server-memory target (an @modelcontextprotocol package
+      # run through npx) -- same pin as rehearsal.yml.
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: "22"
+
+      - name: Create a fresh venv and install the RELEASED package from PyPI
+        shell: bash
+        env:
+          REH_VERSION: ${{ steps.inputs.outputs.version }}
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/venv/bin/python" -m pip install "mylonite[demo]==$REH_VERSION"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Prepare a step-scoped git credential (never written to .git/config)
+        shell: bash
+        run: |
+          cat > "$RUNNER_TEMP/askpass.sh" <<'EOF'
+          #!/usr/bin/env bash
+          # Reads the token from THIS step's own env, never a file or
+          # .git/config -- the caller sets REH_ASKPASS_TOKEN per step.
+          echo "$REH_ASKPASS_TOKEN"
+          EOF
+          chmod +x "$RUNNER_TEMP/askpass.sh"
+          {
+            echo "GIT_ASKPASS=$RUNNER_TEMP/askpass.sh"
+            echo "GIT_TERMINAL_PROMPT=0"
+          } >> "$GITHUB_ENV"
+
+      - name: Clone the scratch repo into a temp dir (never this checkout)
+        shell: bash
+        env:
+          REH_SCRATCH_REPO: ${{ vars.MYLONITE_SCRATCH_REPO }}
+          REH_ASKPASS_TOKEN: ${{ secrets.MYLONITE_SCRATCH_REPO_TOKEN }}
+        run: |
+          if [ -z "${REH_SCRATCH_REPO:-}" ]; then
+            echo "::error::repo variable MYLONITE_SCRATCH_REPO is not set" >&2
+            exit 1
+          fi
+          if [ -z "${REH_ASKPASS_TOKEN:-}" ]; then
+            echo "::error::secret MYLONITE_SCRATCH_REPO_TOKEN is not set" >&2
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/scratch"
+          # Username-only URL -- the token itself only ever reaches git via
+          # GIT_ASKPASS above, so nothing lands in this clone's .git/config.
+          git clone --depth 1 "https://x-access-token@github.com/${REH_SCRATCH_REPO}.git" "$RUNNER_TEMP/scratch"
+          git -C "$RUNNER_TEMP/scratch" config user.name "Mylonite Rehearsal"
+          git -C "$RUNNER_TEMP/scratch" config user.email "rehearsal@example.invalid"
+          {
+            echo "REH_SCRATCH=$RUNNER_TEMP/scratch"
+            echo "REH_SCRATCH_REPO=$REH_SCRATCH_REPO"
+          } >> "$GITHUB_ENV"
+
+      - name: "Point at the app (journey step 3): scaffold the server-memory target"
+        shell: bash
+        run: |
+          cd "$REH_SCRATCH"
+          mylonite scan --command npx --arg "-y" --arg "@modelcontextprotocol/server-memory" \
+            --env "MEMORY_FILE_PATH=/tmp/mylonite-memory.json" \
+            --scaffold app.yaml --scope server-memory
+
+      - name: "Commit the gate (journey step 6): gate --workflows --open-pr"
+        id: gate
+        shell: bash
+        env:
+          OPENAI_API_KEY: ${{ secrets.MYLONITE_OPENAI_KEY }}
+          REH_ASKPASS_TOKEN: ${{ secrets.MYLONITE_SCRATCH_REPO_TOKEN }}
+          GH_TOKEN: ${{ secrets.MYLONITE_SCRATCH_REPO_TOKEN }}
+          REH_MODEL: ${{ steps.inputs.outputs.model }}
+          MYLONITE_MAX_LLM_REQUESTS: "150"
+        run: |
+          cd "$REH_SCRATCH"
+          set +e
+          mylonite gate --target-file app.yaml --authorize server-memory \
+            --model "$REH_MODEL" --max-llm-calls 150 \
+            --open-pr --workflows --base main 2>&1 | tee "$RUNNER_TEMP/gate.log"
+          RC=${PIPESTATUS[0]}
+          set -e
+          case "$RC" in
+            9)
+              echo "gate kept a proven finding and opened the PR (exit 9)."
+              ;;
+            0)
+              echo "::error::gate ran clean -- it found nothing, so there is no finding to open a PR for. That is not a pass for this rehearsal." >&2
+              exit 1
+              ;;
+            10)
+              echo "::error::gate found only an unproven candidate (STABLE, NOT PROVEN) -- never-keep-unproven, so nothing was written or opened. That is not a pass." >&2
+              exit 1
+              ;;
+            5)
+              echo "::error::gate's finding was rejected by validation rather than kept -- nothing was opened. That is not a pass." >&2
+              exit 1
+              ;;
+            *)
+              echo "::error::gate exited $RC -- the run itself failed before reaching a kept/rejected verdict." >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Find the PR gate opened on the scratch repo
+        id: find_pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.MYLONITE_SCRATCH_REPO_TOKEN }}
+        run: |
+          PR_JSON=$(gh pr list --repo "$REH_SCRATCH_REPO" --state open \
+            --json number,url,headRefName,createdAt \
+            --jq '[.[] | select(.headRefName | startswith("mylonite/gate-"))] | sort_by(.createdAt) | reverse | .[0]')
+          if [ -z "$PR_JSON" ] || [ "$PR_JSON" = "null" ]; then
+            echo "::error::no open PR with a 'mylonite/gate-' head branch was found on $REH_SCRATCH_REPO, although gate exited 9 (kept + opened)" >&2
+            exit 1
+          fi
+          PR_NUMBER=$(echo "$PR_JSON" | jq -r '.number')
+          PR_URL=$(echo "$PR_JSON" | jq -r '.url')
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "$PR_URL" > "$RUNNER_TEMP/pr_url.txt"
+          echo "Opened PR: $PR_URL"
+
+      - name: Wait for the PR's checks and require a clean first run (bounded, 20 min)
+        id: wait_for_checks
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.MYLONITE_SCRATCH_REPO_TOKEN }}
+          PR_NUMBER: ${{ steps.find_pr.outputs.pr_number }}
+        run: |
+          set -u
+          DEADLINE=$(( $(date +%s) + 1200 ))
+          GATE_NAME="Mylonite gate"
+          ROLLUP="[]"
+          while :; do
+            ROLLUP=$(gh pr view "$PR_NUMBER" --repo "$REH_SCRATCH_REPO" --json statusCheckRollup --jq '.statusCheckRollup')
+            HAS_GATE=$(echo "$ROLLUP" | jq --arg n "$GATE_NAME" '[.[] | select(.workflowName == $n or .name == $n)] | length')
+            PENDING=$(echo "$ROLLUP" | jq '[.[] | select(.status != "COMPLETED")] | length')
+            if [ "$HAS_GATE" -gt 0 ] && [ "$PENDING" -eq 0 ]; then
+              break
+            fi
+            if [ "$(date +%s)" -ge "$DEADLINE" ]; then
+              echo "::error::timed out after 20 minutes waiting for the generated '$GATE_NAME' check on PR #$PR_NUMBER to complete" >&2
+              exit 1
+            fi
+            sleep 20
+          done
+          echo "$ROLLUP" > "$RUNNER_TEMP/pr-checks.json"
+          echo "Checks on PR #$PR_NUMBER:"
+          echo "$ROLLUP" | jq -r '.[] | "  \(.workflowName // .context // .name): \(.conclusion // .state)"'
+          FAILED=$(echo "$ROLLUP" | jq '[.[] | select((.conclusion // "") != "SUCCESS")] | length')
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::error::not every check on PR #$PR_NUMBER passed on its first run -- see the list printed above" >&2
+            exit 1
+          fi
+          echo "Every check on PR #$PR_NUMBER passed on its first run."
+          # Never merged from here -- the scratch PR stays open as the record.
+
+      - name: Upload the run log, PR URL and gate output
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rehearsal-pr-${{ steps.inputs.outputs.version }}
+          path: |
+            ${{ runner.temp }}/gate.log
+            ${{ runner.temp }}/pr_url.txt
+            ${{ runner.temp }}/pr-checks.json
+            ${{ runner.temp }}/scratch/.mylonite/gate/**
+          if-no-files-found: warn
+          include-hidden-files: true
