@@ -630,7 +630,7 @@ once the precondition is fixed.
 ### The reusable Action
 
 ```yaml
-- uses: Abidemialade/mylonite/gate-action@v0.11.0
+- uses: Abidemialade/mylonite/gate-action@v0.12.0
   with:
     target-file: .mylonite/gate/target.yaml
     authorize: ${{ vars.MYLONITE_AUTHORIZE }}   # your target's scope, or family if no scope
@@ -657,7 +657,7 @@ red check on a specific result reads the output —
 non-zero on that result:
 
 ```yaml
-- uses: Abidemialade/mylonite/gate-action@v0.11.0
+- uses: Abidemialade/mylonite/gate-action@v0.12.0
   id: gate
   with:
     target-file: .mylonite/gate/target.yaml
