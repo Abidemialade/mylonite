@@ -33,7 +33,28 @@ Two cache-key algorithms exist, selected PER ``fixtures_dir`` (see
   everything that changes what response comes back for the same
   conversation — while still excluding ``api_key`` (a secret, and rotating
   it must never cause a cache miss) and other non-identity call plumbing
-  (e.g. ``timeout``).
+  (e.g. ``timeout``). v2 is kept for replay of directories recorded before
+  v3; nothing records NEW fixtures with it.
+* **v3** (:func:`_stable_key_v3`, the current :data:`CACHE_KEY_VERSION`)
+  hashes the same fields as v2, but over their REDACTED form: every string
+  goes through :func:`mylonite._redaction.redact` first. A v3 recording also
+  stores only the redacted response (see "Redaction" below), so a later turn
+  that carries a recorded reply back into the conversation hashes the same
+  at replay time as it did at record time. A call with nothing secret-shaped
+  in it hashes identically under v2 and v3.
+
+Redaction
+---------
+A recorded fixture is committed by ``mylonite gate`` and lives in the user's
+repository, and a target can echo a live secret into a model reply. Record
+mode therefore writes every response through
+:func:`mylonite._redaction.redact_value` before it reaches disk; the live,
+unredacted response is still what the record-time caller receives. Record mode
+only writes v3: a directory that declares an older ``cache_key_version`` is
+refused with :class:`FixtureVersionError` (its keys were computed over the
+unredacted request, so redacted replies recorded into it would not replay).
+Replay of an older directory still works with its own algorithm. A version
+this module does not know is refused in either mode, never guessed.
 
 A ``fixtures_dir`` declares its version via a ``_meta.json`` sidecar's
 ``cache_key_version`` field (``{"cache_key_version": 2, ...}``). This is a
@@ -69,12 +90,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from importlib.resources.abc import Traversable
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
+
+from mylonite._redaction import redact, redact_value
 
 #: Generic re-record guidance used when a construction site doesn't supply
 #: its own ``missing_fixture_hint`` (e.g. record-mode-only callers, where a
@@ -96,6 +119,12 @@ class CorruptFixtureError(FixtureError):
 
 class FixtureConflictError(FixtureError):
     """Raised in record mode when a key already exists with different content."""
+
+
+class FixtureVersionError(FixtureError):
+    """Raised when a ``fixtures_dir`` declares a ``cache_key_version`` this
+    recorder cannot use: unknown in either mode, or older than
+    :data:`CACHE_KEY_VERSION` in record mode."""
 
 
 def _stable_key_v1(model: str, messages: Sequence[Any]) -> str:
@@ -132,6 +161,16 @@ _stable_key = _stable_key_v1
 _KEY_V2_IDENTITY_KWARGS: tuple[str, ...] = ("tools", "tool_choice", "response_format", "api_base")
 
 
+def _identity_payload(model: str, messages: Sequence[Any], **kwargs: Any) -> dict[str, Any]:
+    """The ``(model, messages)`` pair plus the identity kwargs that are set."""
+    payload: dict[str, Any] = {"model": model, "messages": list(messages)}
+    for name in _KEY_V2_IDENTITY_KWARGS:
+        value = kwargs.get(name)
+        if value is not None:
+            payload[name] = value
+    return payload
+
+
 def _stable_key_v2(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
     """v2 cache-key algorithm: ``(model, messages)`` plus identity-relevant kwargs.
 
@@ -145,13 +184,53 @@ def _stable_key_v2(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
     ``response_format`` class) falls back to ``str()``, which is stable for
     the same object/class across calls.
     """
-    payload: dict[str, Any] = {"model": model, "messages": list(messages)}
-    for name in _KEY_V2_IDENTITY_KWARGS:
-        value = kwargs.get(name)
-        if value is not None:
-            payload[name] = value
+    payload = _identity_payload(model, messages, **kwargs)
     body = json.dumps(payload, sort_keys=True, default=str)
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _stable_key_v3(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
+    """v3 cache-key algorithm: the v2 fields, hashed over their redacted form.
+
+    The payload is first canonicalised to plain JSON (``default=str``, as v2
+    does), then every string leaf goes through the shape-based
+    :func:`mylonite._redaction.redact`. A recorded reply is stored redacted,
+    so at replay time the conversation carries the redacted text where the
+    record-time conversation carried the raw secret; redacting both before
+    hashing makes them the same key. :func:`redact` is idempotent, which is
+    what makes the second pass over already-redacted text a no-op. Shape-based
+    only (no key-name rule), so a tool schema that names a ``token`` parameter
+    keys the same as it did under v2.
+    """
+    canonical = json.loads(
+        json.dumps(_identity_payload(model, messages, **kwargs), sort_keys=True, default=str)
+    )
+    body = json.dumps(_redact_strings(canonical), sort_keys=True)
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def _redact_strings(value: Any) -> Any:
+    """Apply :func:`mylonite._redaction.redact` to every string leaf of ``value``."""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, dict):
+        return {k: _redact_strings(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_strings(v) for v in value]
+    return value
+
+
+def _key_v1_any_kwargs(model: str, messages: Sequence[Any], **_kwargs: Any) -> str:
+    """:func:`_stable_key_v1` with the shared signature (v1 ignores kwargs)."""
+    return _stable_key_v1(model, messages)
+
+
+#: Every cache-key algorithm this module can replay, by version.
+_KEY_ALGORITHMS: dict[int, Callable[..., str]] = {
+    1: _key_v1_any_kwargs,
+    2: _stable_key_v2,
+    3: _stable_key_v3,
+}
 
 
 #: The ``_meta.json`` sidecar field this module reads for cache-key-algorithm
@@ -172,7 +251,7 @@ CACHE_KEY_VERSION_FIELD = "cache_key_version"
 #: (or before) recording into a fresh directory should use THIS constant
 #: rather than a locally hardcoded literal, so the sidecar can never drift
 #: from what the recorder actually used.
-CACHE_KEY_VERSION = 2
+CACHE_KEY_VERSION = 3
 
 
 def _read_meta_cache_key_version(fixtures_dir: Path | Traversable) -> int | None:
@@ -430,6 +509,19 @@ class LiteLLMRecorder:
         # per fixtures_dir/run, so a `_meta.json` written mid-run (e.g. by a
         # sibling recorder) is not expected to change an already-live instance.
         self._key_version: int = _resolve_key_version(self.fixtures_dir, self.mode)
+        if self._key_version not in _KEY_ALGORITHMS:
+            raise FixtureVersionError(
+                f"{self.fixtures_dir} declares cache_key_version={self._key_version}, which "
+                f"this mylonite does not support (it reads 1 to {CACHE_KEY_VERSION}). "
+                f"Upgrade mylonite or re-record. {self.missing_fixture_hint}"
+            )
+        if self.mode == "record" and self._key_version != CACHE_KEY_VERSION:
+            raise FixtureVersionError(
+                f"refusing to record into {self.fixtures_dir}: its _meta.json declares "
+                f"cache_key_version={self._key_version}, the format from before recorded "
+                f"fixtures were redacted (current: {CACHE_KEY_VERSION}). Delete that "
+                "fixtures directory (its *.json files and _meta.json) and record again."
+            )
 
     @property
     def key_version(self) -> int:
@@ -453,11 +545,7 @@ class LiteLLMRecorder:
 
     async def __call__(self, *, model: str, messages: Sequence[Any], **kwargs: Any) -> Any:
         msgs = list(messages)
-        key = (
-            _stable_key_v2(model, msgs, **kwargs)
-            if self._key_version >= 2
-            else _stable_key_v1(model, msgs)
-        )
+        key = _KEY_ALGORITHMS[self._key_version](model, msgs, **kwargs)
         short, full = _fixture_candidates(self.fixtures_dir, key)
         # An existing full-length file (a directory recorded before short names)
         # wins in both modes: replay reads it, and record compares against it
@@ -482,8 +570,15 @@ class LiteLLMRecorder:
     def _load_fixture(self, *, key: str, model: str, path: Path | Traversable) -> SimpleNamespace:
         if not path.is_file():
             self.cache_misses += 1
+            older = (
+                f" This directory uses cache_key_version={self._key_version}, the format "
+                "from before recorded fixtures were redacted; a re-record writes the "
+                "current one."
+                if self._key_version < CACHE_KEY_VERSION
+                else ""
+            )
             missing = MissingFixtureError(
-                f"No fixture for sha256={key} (model={model!r}) at {path}. "
+                f"No fixture for sha256={key} (model={model!r}) at {path}.{older} "
                 f"{self.missing_fixture_hint}"
             )
             self.last_error = missing
@@ -518,7 +613,13 @@ class LiteLLMRecorder:
         import litellm
 
         real = await litellm.acompletion(model=model, messages=list(messages), **kwargs)
-        recorded = _dictify_response(real)
+        # The fixture is committed to the user's repository: never write a
+        # secret the target echoed into the reply. The caller still gets the
+        # live response; the v3 key hashes the redacted conversation, so
+        # replaying this redacted body reaches the same next key.
+        recorded = redact_value(_dictify_response(real))
+        if not isinstance(recorded, dict):  # pragma: no cover - redact_value keeps dicts
+            raise TypeError("redacted fixture is not a JSON object")
         if path.name != f"{key}.json":
             # A short name drops most of the key; store it so replay can tell
             # this recording from another key's with the same prefix.
@@ -552,6 +653,7 @@ __all__ = [
     "CorruptFixtureError",
     "FixtureConflictError",
     "FixtureError",
+    "FixtureVersionError",
     "LiteLLMRecorder",
     "MissingFixtureError",
 ]
