@@ -120,8 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   indirect-injection class resisted on stronger models, decided by the judge
   reading the full trace, published as the honest result either way. 11
   KEPT findings land in this round's own counted runs, every one
-  adjudicated true positive (by the campaign's AI agents; a person's
-  review is pending) against its own trace and its own validate-
+  adjudicated true positive (by the campaign's AI agents; the
+  maintainer spot-checked them on 2026-10-06) against its own trace and its own validate-
   measured effect proof level; 30 runs read KEPT across every status
   (18 on superseded rounds, 1 on a voided run), none false positive. Spend
   is reported as a measured lower bound: four ceiling-stopped runs' own
@@ -164,7 +164,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   including superseded and one void run. Every finding's true-positive
   label is adjudicated from its own trace in a committed data file,
   `verification/results/0.12.0/e2e/adjudications.json`, then checked by
-  a separate AI reviewer; a person's review is still pending — `scripts/build_e2e_results.py` never assigns
+  a separate AI reviewer, then spot-checked by the maintainer on 2026-10-06 — `scripts/build_e2e_results.py` never assigns
   that label itself, and fails loudly if a KEPT finding has no entry
   there or an entry no longer matches a real KEPT finding. A corrected
   ceiling count adds a fifth ceiling-stopped
