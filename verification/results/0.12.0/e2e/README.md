@@ -834,8 +834,8 @@ prereg.
   true-positive/false-positive label with a one-line reason. Each entry
   was written from that finding's own trace by the AI agents that ran
   this campaign, then checked entry by entry against the traces by a
-  separate AI reviewer. No person has reviewed these labels yet; the
-  prereg's first integrity rule asks for one, so that review is pending. `scripts/build_e2e_results.py` never assigns this label
+  separate AI reviewer. The maintainer then spot-checked the labels against
+  their traces on 2026-10-06, as the prereg's first integrity rule asks. `scripts/build_e2e_results.py` never assigns this label
   itself — it fails loudly, before writing `results.json`, if any KEPT
   finding has no entry here, or any entry here no longer matches a real
   KEPT finding.
