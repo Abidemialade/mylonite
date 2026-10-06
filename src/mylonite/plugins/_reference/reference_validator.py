@@ -82,7 +82,7 @@ from typing import Any, ClassVar, Final, Literal, get_args
 
 from mylonite._concurrency import gather_bounded, run_twins
 from mylonite._redaction import redact, redact_exception, redact_value
-from mylonite._replay import LiteLLMRecorder
+from mylonite._replay import LiteLLMRecorder, check_recordable
 from mylonite._twin_fidelity import PROOF_CLAIM_SERVER, format_guard_mode, format_marker
 from mylonite._verdict import (
     JUDGE_ONLY_CLAUSE,
@@ -689,6 +689,10 @@ class DifferentialValidator(ValidatorBase):
         self._completion_fn = completion_fn
         self._run_build = run_build
         self._record_fixtures_dir = record_fixtures_dir
+        if record_fixtures_dir is not None:
+            # Refuse an unrecordable folder now, before any live call; the
+            # recorder would refuse it only after the paid legs had run.
+            check_recordable(record_fixtures_dir)
         # The exploit file name the recorded test loads; `gate` names it after
         # the finding's short id. None keeps `exploit_<pattern_id>.json`.
         self._record_exploit_filename = record_exploit_filename

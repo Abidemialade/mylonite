@@ -2452,6 +2452,11 @@ def validate(
             provider=provider,
             api_base=effective_policy.api_base,
         )
+        # The fixtures folder the run records into must be recordable; check
+        # it now, before the provider pre-flight's first live call.
+        from mylonite.commands.validate_errors import check_fixtures_recordable_or_exit
+
+        check_fixtures_recordable_or_exit(test_path.parent / "fixtures")
         # Fail fast on an unreachable provider with a distinct exit 4 — otherwise
         # the full loop would just report a misleading non-discriminating result.
         # V1/T7: one tiny completion per role model, scoped to the run's own

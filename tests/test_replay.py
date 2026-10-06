@@ -51,12 +51,22 @@ def _fixture_payload(content: str = "hello") -> str:
     return json.dumps({"choices": [{"message": {"content": content, "tool_calls": []}}]})
 
 
+def _stamped(directory: Path, version: int = CACHE_KEY_VERSION) -> Path:
+    """Write the ``_meta.json`` sidecar a recorder needs once ``directory``
+    holds recordings (unless one is already there); return ``directory``."""
+    meta = directory / "_meta.json"
+    if not meta.is_file():
+        meta.write_text(json.dumps({CACHE_KEY_VERSION_FIELD: version}), encoding="utf-8")
+    return directory
+
+
 def _write_fixture(
     directory: Path,
     model: str,
     msgs: list[Any],
     content: str = "hello",
 ) -> Path:
+    _stamped(directory)
     key = _stable_key(model, msgs)
     path = directory / f"{key}.json"
     path.write_text(_fixture_payload(content), encoding="utf-8")
@@ -75,7 +85,7 @@ def _fake_response(content: str = "ok") -> SimpleNamespace:
 @pytest.mark.asyncio
 async def test_replay_hit_returns_fixture_shaped_response(tmp_path: Path) -> None:
     _write_fixture(tmp_path, "claude-x", _MSGS)
-    recorder = LiteLLMRecorder(fixtures_dir=tmp_path)
+    recorder = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path))
     response = await recorder(model="claude-x", messages=_MSGS)
     assert response.choices[0].message.content == "hello"
     assert response.choices[0].message.tool_calls is None
@@ -91,7 +101,7 @@ async def test_replay_hit_returns_fixture_shaped_response(tmp_path: Path) -> Non
 async def test_replay_miss_raises_missing_fixture_error_naming_rerecord_hint(
     tmp_path: Path,
 ) -> None:
-    recorder = LiteLLMRecorder(fixtures_dir=tmp_path)
+    recorder = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path))
     with pytest.raises(MissingFixtureError) as excinfo:
         await recorder(model="claude-x", messages=_MSGS)
     assert "Re-record this fixture set" in str(excinfo.value)
@@ -113,7 +123,7 @@ async def test_missing_fixture_hint_is_parameterised_per_construction_site(
 
 @pytest.mark.asyncio
 async def test_reset_zeroes_counters_and_clears_last_error(tmp_path: Path) -> None:
-    recorder = LiteLLMRecorder(fixtures_dir=tmp_path)
+    recorder = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path))
     with pytest.raises(MissingFixtureError):
         await recorder(model="claude-x", messages=_MSGS)
     assert recorder.cache_misses == 1
@@ -132,8 +142,9 @@ async def test_corrupt_fixture_raises_wrapped_error_not_jsondecodeerror(
     tmp_path: Path,
 ) -> None:
     key = _stable_key("claude-x", _MSGS)
+    _stamped(tmp_path)
     (tmp_path / f"{key}.json").write_text("{not valid json", encoding="utf-8")
-    recorder = LiteLLMRecorder(fixtures_dir=tmp_path)
+    recorder = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path))
     with pytest.raises(CorruptFixtureError) as excinfo:
         await recorder(model="claude-x", messages=_MSGS)
     assert "fixture corrupt — reinstall mylonite or re-record" in str(excinfo.value)
@@ -229,6 +240,7 @@ async def test_fixtures_dir_accepts_importlib_resources_traversable(tmp_path: Pa
     archive = tmp_path / "fixtures.zip"
     with zipfile.ZipFile(archive, "w") as zf:
         zf.writestr(f"fixtures/{key}.json", _fixture_payload())
+        zf.writestr("fixtures/_meta.json", json.dumps({CACHE_KEY_VERSION_FIELD: CACHE_KEY_VERSION}))
     root = zipfile.Path(archive) / "fixtures"  # a Traversable, not a pathlib.Path
     recorder = LiteLLMRecorder(fixtures_dir=root)
     response = await recorder(model="claude-x", messages=_MSGS)
@@ -358,33 +370,32 @@ def test_format_version_field_alone_is_ignored_by_cache_key_dispatch(tmp_path: P
 # --- (close-the-loop) proof the implicit v1 fallback is actually gone ---------
 
 
-@pytest.mark.asyncio
-async def test_fresh_sidecar_less_dir_no_longer_silently_assumes_v1(tmp_path: Path) -> None:
-    """The concrete failure mode the old fallback risked, made impossible.
-
-    Before: a sidecar-less directory replayed under v1, which ignores
-    `tools=` entirely — a fixture recorded (or hand-placed) under the v1 key
-    for a tool-bearing call would silently satisfy ANY call with the same
-    (model, messages) regardless of its tool schema.
-
-    After: a sidecar-less directory now resolves `CACHE_KEY_VERSION` (v2) by
-    default, which folds `tools=` into the key. A fixture file that only
-    exists under the OLD v1 key name is no longer found for a tools-bearing
-    call — it misses loudly (`MissingFixtureError`) instead of silently
-    matching.
-    """
-    tools = [{"type": "function", "function": {"name": "read_note", "parameters": {}}}]
-    # Written under the v1 key — the key a legacy (pre-close-the-loop) replay
-    # would have computed for this exact call.
+@pytest.mark.parametrize("mode", ["record", "replay"])
+def test_a_sidecar_less_dir_holding_recordings_is_refused(tmp_path: Path, mode: str) -> None:
+    """No sidecar, but recordings present: Mylonite cannot tell how they were
+    keyed, so it refuses rather than guess (an old guess was v1, then the
+    current default; either can return a stale reply or miss silently)."""
     v1_key = _stable_key_v1("claude-x", _MSGS)
     (tmp_path / f"{v1_key}.json").write_text(
         _fixture_payload("stale-v1-response"), encoding="utf-8"
     )
+    with pytest.raises(FixtureVersionError, match="declares no cache_key_version"):
+        LiteLLMRecorder(fixtures_dir=tmp_path, mode=mode)  # type: ignore[arg-type]
 
-    recorder = LiteLLMRecorder(fixtures_dir=tmp_path)  # no _meta.json anywhere
-    assert recorder.key_version == CACHE_KEY_VERSION  # the unified default, not the old v1 fallback
-    with pytest.raises(MissingFixtureError):
-        await recorder(model="claude-x", messages=_MSGS, tools=tools)
+
+@pytest.mark.parametrize(
+    ("sidecar", "match"),
+    [
+        ("{not json", "not valid JSON"),
+        ("[3]", "not a JSON object"),
+        ('{"cache_key_version": "3"}', "not an integer"),
+        ('{"cache_key_version": true}', "not an integer"),
+    ],
+)
+def test_a_damaged_sidecar_is_refused(tmp_path: Path, sidecar: str, match: str) -> None:
+    (tmp_path / "_meta.json").write_text(sidecar, encoding="utf-8")
+    with pytest.raises(FixtureVersionError, match=match):
+        LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
 
 
 # --- (T8) usage / finish_reason round-trip through record + replay -------------
@@ -409,7 +420,7 @@ async def test_finish_reason_roundtrips(tmp_path: Path, monkeypatch: pytest.Monk
     recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
     await recorder(model="claude-x", messages=_MSGS)
 
-    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
     response = await replay(model="claude-x", messages=_MSGS)
     assert response.choices[0].finish_reason == "length"
 
@@ -433,7 +444,7 @@ async def test_usage_roundtrips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
     await recorder(model="claude-x", messages=_MSGS)
 
-    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
     response = await replay(model="claude-x", messages=_MSGS)
     assert response.usage is not None
     assert response.usage.prompt_tokens == 12
@@ -452,7 +463,7 @@ async def test_v2_recording_with_tools_replays_when_sidecar_declares_v2(tmp_path
     key = _stable_key_v2("claude-x", _MSGS, tools=tools)
     (tmp_path / f"{key}.json").write_text(_fixture_payload(""), encoding="utf-8")
 
-    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
     assert replay.key_version == 2
     response = await replay(model="claude-x", messages=_MSGS, tools=tools)
     assert response.choices[0].message.content == ""
@@ -492,7 +503,7 @@ async def test_replay_reads_a_short_fixture_name(tmp_path: Path) -> None:
     (tmp_path / f"{key[:FIXTURE_NAME_LENGTH]}.json").write_text(
         _fixture_payload("short"), encoding="utf-8"
     )
-    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
     response = await replay(model="claude-x", messages=_MSGS)
     assert response.choices[0].message.content == "short"
     assert replay.cache_hits == 1
@@ -501,7 +512,7 @@ async def test_replay_reads_a_short_fixture_name(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_replay_still_reads_a_full_length_fixture_name(tmp_path: Path) -> None:
     _write_fixture(tmp_path, "claude-x", _MSGS, content="legacy")
-    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
     response = await replay(model="claude-x", messages=_MSGS)
     assert response.choices[0].message.content == "legacy"
     assert replay.cache_hits == 1
@@ -529,13 +540,15 @@ async def test_record_into_a_full_length_directory_keeps_the_full_name(
     )
     short.unlink()
 
-    await LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")(model="claude-x", messages=_MSGS)
-    assert [p.name for p in tmp_path.glob("*.json")] == [f"{key}.json"]
+    await LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="record")(
+        model="claude-x", messages=_MSGS
+    )
+    assert [p.name for p in tmp_path.glob("*.json") if p.name != "_meta.json"] == [f"{key}.json"]
 
 
 @pytest.mark.asyncio
 async def test_missing_fixture_error_names_the_short_path(tmp_path: Path) -> None:
-    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
     with pytest.raises(MissingFixtureError) as excinfo:
         await replay(model="claude-x", messages=_MSGS)
     key = _stable_key_v2("claude-x", _MSGS)
@@ -550,7 +563,7 @@ async def test_a_short_name_holding_another_keys_recording_is_a_miss(tmp_path: P
     other = json.loads(_fixture_payload("someone else's answer"))
     other["_key"] = key[:FIXTURE_NAME_LENGTH] + "f" * (64 - FIXTURE_NAME_LENGTH)
     (tmp_path / f"{key[:FIXTURE_NAME_LENGTH]}.json").write_text(json.dumps(other), encoding="utf-8")
-    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
     with pytest.raises(MissingFixtureError):
         await replay(model="claude-x", messages=_MSGS)
     assert replay.cache_hits == 0
@@ -657,7 +670,7 @@ async def test_a_redacted_multi_turn_recording_replays(
     for path in tmp_path.glob("*.json"):
         assert _SECRET not in path.read_text(encoding="utf-8")
 
-    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
     replayed = await replay(model="claude-x", messages=_MSGS)
     replayed_args = replayed.choices[0].message.tool_calls[0].function.arguments
     assert _SECRET not in replayed_args
@@ -701,6 +714,152 @@ def test_an_unknown_cache_key_version_fails_clearly(tmp_path: Path, mode: str) -
 @pytest.mark.asyncio
 async def test_a_miss_in_an_older_directory_names_its_version(tmp_path: Path) -> None:
     (tmp_path / "_meta.json").write_text(json.dumps({CACHE_KEY_VERSION_FIELD: 2}), encoding="utf-8")
-    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
     with pytest.raises(MissingFixtureError, match="cache_key_version=2"):
         await replay(model="claude-x", messages=_MSGS)
+
+
+# --- the v3 key never merges recordings whose real content differs ------------
+#
+# A guard whose job is to mask a credential in tool output, and the same tool
+# with the guard removed, must not share a recording: a shared key would replay
+# the guarded reply for the unguarded run and pass a test that should fail.
+
+# Built at runtime so no secret-shaped literal sits in the source.
+_OTHER_SECRET = "sk-" + "live" + "Z9y8X7w6V5u4T3s2R1q0P9o8"  # pragma: allowlist secret
+
+
+def _tool_turn(tool_output: str) -> list[dict[str, Any]]:
+    return [
+        {"role": "user", "content": "read my config"},
+        {"role": "tool", "tool_call_id": "call_1", "content": tool_output},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        (f"api_key: {_SECRET}", f"api_key: {_OTHER_SECRET}"),
+        ("api_key: ***REDACTED***", f"api_key: {_SECRET}"),
+        ("password=xxxxxxxxxxxxxxxx", "password=CorrectHorse1234"),  # pragma: allowlist secret
+        ("Bearer " + "0" * 24, "Bearer " + "a1" * 12),
+        (f"token: {_SECRET}", "token: sk-" + "X" * 30),
+    ],
+)
+def test_tool_outputs_that_differ_inside_a_secret_span_key_differently(
+    first: str, second: str
+) -> None:
+    assert _stable_key_v3("claude-x", _tool_turn(first)) != _stable_key_v3(
+        "claude-x", _tool_turn(second)
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_recording_never_answers_for_a_different_secret_in_tool_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def fake_acompletion(**_: Any) -> SimpleNamespace:
+        return _fake_response("guarded reply")
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    guarded = _tool_turn("api_key: ***REDACTED***")
+    leaked = _tool_turn(f"api_key: {_SECRET}")
+    await LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")(model="claude-x", messages=guarded)
+
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
+    assert (await replay(model="claude-x", messages=guarded)).choices[0].message.content == (
+        "guarded reply"
+    )
+    with pytest.raises(MissingFixtureError):
+        await replay(model="claude-x", messages=leaked)
+
+
+@pytest.mark.asyncio
+async def test_a_target_secret_in_tool_output_replays_and_is_never_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same secret in the same tool output (the target is deterministic)
+    replays, and neither the file name, the stored key nor the body is a fast
+    hash of it or holds it."""
+
+    async def fake_acompletion(**_: Any) -> SimpleNamespace:
+        return _fake_response("ok")
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    messages = _tool_turn(f"api_key: {_SECRET}")
+    await LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")(model="claude-x", messages=messages)
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
+    assert (await replay(model="claude-x", messages=messages)).choices[0].message.content == "ok"
+
+    import hashlib
+
+    fast = hashlib.sha256(_SECRET.encode()).hexdigest()
+    for path in tmp_path.glob("*.json"):
+        text = path.read_text(encoding="utf-8")
+        assert _SECRET not in text
+        assert fast[:FIXTURE_NAME_LENGTH] not in path.name + text
+
+
+def test_a_secret_span_enters_the_key_only_through_scrypt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Brute-forcing a span from the stored key costs one scrypt per guess."""
+    import hashlib
+
+    from mylonite import _replay
+
+    calls: list[dict[str, Any]] = []
+    real = hashlib.scrypt
+
+    def spy(password: bytes, **kwargs: Any) -> bytes:
+        calls.append(kwargs)
+        return real(password, **kwargs)
+
+    monkeypatch.setattr(_replay.hashlib, "scrypt", spy)
+    _replay._span_digest.cache_clear()
+    _stable_key_v3("claude-x", _tool_turn(f"api_key: {_OTHER_SECRET}"))
+    assert calls
+    assert calls[0]["n"] >= 2**15
+    assert calls[0]["r"] >= 8
+    _stable_key_v3("claude-x", _MSGS)  # nothing secret-shaped: no scrypt at all
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_key_name_only_secret_echoed_back_replays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A tool-call argument masked only because of its key name (``password``)
+    and echoed by the target without that key still replays: the echo of a
+    reply span is keyed as the redacted echo."""
+    password = "Correct" + "Horse" + "Battery9"  # pragma: allowlist secret
+    raw_args = json.dumps({"password": password})
+    replies = iter([_tool_call_response(raw_args), _fake_response("done")])
+
+    async def fake_acompletion(**_: Any) -> SimpleNamespace:
+        return next(replies)
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
+    first = await recorder(model="claude-x", messages=_MSGS)
+    live_args = first.choices[0].message.tool_calls[0].function.arguments
+    sent = json.loads(live_args)["password"]
+    await recorder(model="claude-x", messages=_conversation(live_args, f"logged in as {sent}"))
+    for path in tmp_path.glob("*.json"):
+        assert password not in path.read_text(encoding="utf-8")
+
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
+    replayed = await replay(model="claude-x", messages=_MSGS)
+    replayed_args = replayed.choices[0].message.tool_calls[0].function.arguments
+    sent = json.loads(replayed_args)["password"]
+    second = await replay(
+        model="claude-x", messages=_conversation(replayed_args, f"logged in as {sent}")
+    )
+    assert second.choices[0].message.content == "done"
+    assert replay.cache_misses == 0

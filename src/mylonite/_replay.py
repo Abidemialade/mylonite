@@ -88,6 +88,7 @@ core usable from the testkit, the validator, and standalone scripts alike).
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 from collections.abc import Callable, Sequence
@@ -97,7 +98,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
 
-from mylonite._redaction import redact, redact_value
+from mylonite._redaction import REDACTION_PLACEHOLDER, redact, redact_value, secret_spans
 
 #: Generic re-record guidance used when a construction site doesn't supply
 #: its own ``missing_fixture_hint`` (e.g. record-mode-only callers, where a
@@ -190,23 +191,117 @@ def _stable_key_v2(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
 
 
 def _stable_key_v3(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
-    """v3 cache-key algorithm: the v2 fields, hashed over their redacted form.
+    """v3 cache-key algorithm: the v2 fields, with secret-shaped spans handled.
 
-    The payload is first canonicalised to plain JSON (``default=str``, as v2
-    does), then every string leaf goes through the shape-based
-    :func:`mylonite._redaction.redact`. A recorded reply is stored redacted,
-    so at replay time the conversation carries the redacted text where the
-    record-time conversation carried the raw secret; redacting both before
-    hashing makes them the same key. :func:`redact` is idempotent, which is
-    what makes the second pass over already-redacted text a no-op. Shape-based
-    only (no key-name rule), so a tool schema that names a ``token`` parameter
-    keys the same as it did under v2.
+    Three rules, applied to the payload after it is canonicalised to plain
+    JSON (``default=str``, as v2 does):
+
+    1. **Recorded replies are keyed redacted.** An ``assistant`` message is
+       a reply this recorder stored redacted, so every string in it goes
+       through :func:`mylonite._redaction.redact`. At replay time the agent
+       copies the redacted reply back; at record time it copied the raw one;
+       both redact to the same text (:func:`redact` is idempotent).
+    2. **Echoes of a reply are keyed as the redacted echo.** In every other
+       message, each secret span that an earlier assistant message carried is
+       replaced by the placeholder first, because at replay time the target
+       is sent the redacted value and echoes that instead.
+    3. **Everything else that is secret-shaped is keyed by content, slowly.**
+       A secret-shaped span left in a tool, user or system message came from
+       the target or the caller, not from a stored reply, so it is the same at
+       record and replay time and must tell two recordings apart: a guard
+       that masks a credential and one that leaks it must never share a key.
+       The span is replaced by the placeholder in the hashed payload, and its
+       content enters the key only through :func:`_span_digest` (scrypt,
+       salted with its own redacted context), so the stored key and file name
+       are not a fast hash of the secret.
+
+    With nothing secret-shaped in a call, the hashed body is exactly v2's.
     """
     canonical = json.loads(
         json.dumps(_identity_payload(model, messages, **kwargs), sort_keys=True, default=str)
     )
-    body = json.dumps(_redact_strings(canonical), sort_keys=True)
+    echoes: set[str] = set()
+    for message in canonical.get("messages", []):
+        if isinstance(message, dict) and message.get("role") == "assistant":
+            for leaf in _string_leaves(message):
+                echoes.update(secret_spans(leaf))
+    ordered_echoes = sorted(echoes, key=len, reverse=True)
+    digests: list[str] = []
+
+    def keyed(value: Any) -> Any:
+        if isinstance(value, str):
+            for echo in ordered_echoes:
+                value = value.replace(echo, REDACTION_PLACEHOLDER)
+            masked = redact(value)
+            digests.extend(_span_digest(span, masked) for span in secret_spans(value))
+            return masked
+        if isinstance(value, dict):
+            return {k: keyed(v) for k, v in sorted(value.items())}
+        if isinstance(value, list):
+            return [keyed(v) for v in value]
+        return value
+
+    hashed: dict[str, Any] = {}
+    for name, value in sorted(canonical.items()):
+        if name == "messages" and isinstance(value, list):
+            hashed[name] = [
+                _redact_strings(m)
+                if isinstance(m, dict) and m.get("role") == "assistant"
+                else keyed(m)
+                for m in value
+            ]
+        else:
+            hashed[name] = keyed(value)
+    if digests:
+        hashed[_SPAN_DIGESTS_FIELD] = digests
+    body = json.dumps(hashed, sort_keys=True)
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+#: Hashed-payload field (never stored) that carries the span digests.
+_SPAN_DIGESTS_FIELD = "_secret_span_digests"
+
+#: scrypt cost for :func:`_span_digest`: 2**15 x 8 x 128 bytes = 32 MiB of
+#: memory and on the order of 0.1 s per span on one core. A guess at a span
+#: costs the same, so recovering a random 12-character credential-alphabet
+#: value (64**12, about 4.7e21 candidates) from a stored key is out of reach,
+#: and a dictionary attack pays this per guess per context.
+_SCRYPT_N = 2**15
+_SCRYPT_R = 8
+_SCRYPT_P = 1
+_SCRYPT_MAXMEM = 2**26
+
+
+@functools.lru_cache(maxsize=4096)
+def _span_digest(span: str, context: str) -> str:
+    """A slow, context-salted digest of one secret-shaped span.
+
+    The salt is the redacted string the span sits in, so a table built for
+    one context does not carry over to another. Cached, because the same
+    span in the same context (a secret in a system prompt) recurs on every
+    call of a run.
+    """
+    salt = hashlib.sha256(("mylonite-fixture-span-v3\0" + context).encode("utf-8")).digest()
+    return hashlib.scrypt(
+        span.encode("utf-8"),
+        salt=salt,
+        n=_SCRYPT_N,
+        r=_SCRYPT_R,
+        p=_SCRYPT_P,
+        maxmem=_SCRYPT_MAXMEM,
+        dklen=32,
+    ).hex()
+
+
+def _string_leaves(value: Any) -> list[str]:
+    """Every string leaf of ``value``, depth first."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [leaf for v in value.values() for leaf in _string_leaves(v)]
+    if isinstance(value, list):
+        return [leaf for v in value for leaf in _string_leaves(v)]
+    return []
 
 
 def _redact_strings(value: Any) -> Any:
@@ -246,45 +341,70 @@ _KEY_ALGORITHMS: dict[int, Callable[..., str]] = {
 CACHE_KEY_VERSION_FIELD = "cache_key_version"
 
 #: The cache-key algorithm this module uses by default — in EITHER mode —
-#: when a ``fixtures_dir`` has no ``_meta.json`` (or no ``cache_key_version``
-#: field in it) to declare otherwise. Writers that stamp ``_meta.json`` after
+#: when an EMPTY ``fixtures_dir`` has no ``_meta.json`` (or no
+#: ``cache_key_version`` field in it) to declare otherwise. Writers that stamp ``_meta.json`` after
 #: (or before) recording into a fresh directory should use THIS constant
 #: rather than a locally hardcoded literal, so the sidecar can never drift
 #: from what the recorder actually used.
 CACHE_KEY_VERSION = 3
 
 
-def _read_meta_cache_key_version(fixtures_dir: Path | Traversable) -> int | None:
-    """Read the :data:`CACHE_KEY_VERSION_FIELD` int out of ``_meta.json``, or ``None``.
-
-    ``None`` covers every "no usable signal" case uniformly — no sidecar, an
-    unreadable file, invalid JSON, a non-object payload, or a missing/non-int
-    ``cache_key_version`` field (including a LEGACY sidecar that only carries
-    the unrelated ``format_version`` field, from before this field existed) —
-    so :func:`_resolve_key_version` can apply one consistent default rather
-    than each caller re-deriving intent from a different failure mode.
-    """
+def _has_recorded_fixtures(fixtures_dir: Path | Traversable) -> bool:
+    """True when ``fixtures_dir`` holds at least one recorded ``*.json`` file."""
     try:
-        meta_path = fixtures_dir / "_meta.json"
+        if not fixtures_dir.is_dir():
+            return False
+        return any(
+            entry.name.endswith(".json") and entry.name != "_meta.json"
+            for entry in fixtures_dir.iterdir()
+        )
+    except OSError:
+        return False
+
+
+def _read_meta_cache_key_version(fixtures_dir: Path | Traversable) -> int | None:
+    """Read the :data:`CACHE_KEY_VERSION_FIELD` int out of ``_meta.json``.
+
+    ``None`` means the directory declares no version: no sidecar, or a
+    sidecar object without the field (a LEGACY sidecar that only carries the
+    unrelated ``format_version`` field). A sidecar that exists but cannot be
+    read, is not valid JSON, is not an object, or carries a field that is not
+    a plain int (``true`` is refused, although Python counts it as an int)
+    raises :class:`FixtureVersionError`: a damaged sidecar never silently
+    resolves to the default.
+    """
+    meta_path = fixtures_dir / "_meta.json"
+    try:
         if not meta_path.is_file():
             return None
         raw = meta_path.read_text(encoding="utf-8")
-    except OSError:
-        return None
+    except OSError as exc:
+        raise FixtureVersionError(f"cannot read {meta_path}: {exc}") from exc
     try:
         data = json.loads(raw)
-    except json.JSONDecodeError:
-        return None
+    except json.JSONDecodeError as exc:
+        raise FixtureVersionError(f"{meta_path} is not valid JSON ({exc})") from exc
     if not isinstance(data, dict):
+        raise FixtureVersionError(f"{meta_path} is not a JSON object")
+    if CACHE_KEY_VERSION_FIELD not in data:
         return None
-    version = data.get(CACHE_KEY_VERSION_FIELD)
-    return version if isinstance(version, int) else None
+    version = data[CACHE_KEY_VERSION_FIELD]
+    if type(version) is not int:
+        raise FixtureVersionError(
+            f"{meta_path} has {CACHE_KEY_VERSION_FIELD}={version!r}, which is not an integer"
+        )
+    return version
 
 
 def _resolve_key_version(
     fixtures_dir: Path | Traversable, mode: Literal["record", "replay"]
 ) -> int:
-    """Pick which cache-key algorithm (1 or 2) a recorder over ``fixtures_dir`` uses.
+    """Pick which cache-key algorithm (1 to 3) a recorder over ``fixtures_dir`` uses.
+
+    A directory that declares no version but already holds recorded fixtures
+    raises :class:`FixtureVersionError` in either mode: guessing would replay
+    or extend it under an algorithm it may not have been recorded with. A
+    damaged sidecar raises too (see :func:`_read_meta_cache_key_version`).
 
     A directory that declares its own ``_meta.json`` :data:`CACHE_KEY_VERSION_FIELD`
     wins outright, in EITHER mode — an explicit sidecar speaks for itself.
@@ -310,7 +430,7 @@ def _resolve_key_version(
     unless a directory explicitly opts out — removes the implicit "assume
     legacy v1" behaviour :data:`CACHE_KEY_VERSION_FIELD`'s docstring warns
     can silently return a stale, wrong response for a tool-bearing call: a
-    brand-new, sidecar-less directory now gets v2 (folding in
+    brand-new, sidecar-less directory now gets the current version (folding in
     ``tools``/``tool_choice``/``response_format``/``api_base``) rather than
     silently inheriting v1 behaviour it was never recorded with. A call with
     none of those extra kwargs hashes identically under v1 and v2 (see
@@ -320,7 +440,45 @@ def _resolve_key_version(
     declared = _read_meta_cache_key_version(fixtures_dir)
     if declared is not None:
         return declared
+    if _has_recorded_fixtures(fixtures_dir):
+        raise FixtureVersionError(
+            f"{fixtures_dir} holds recorded fixtures but its _meta.json declares no "
+            f"{CACHE_KEY_VERSION_FIELD}, so Mylonite cannot tell how they were keyed. "
+            "Restore the sidecar, or delete the directory and record again."
+        )
     return CACHE_KEY_VERSION
+
+
+def check_recordable(fixtures_dir: Path) -> None:
+    """Raise :class:`FixtureVersionError` unless record mode can write to ``fixtures_dir``.
+
+    The same checks :class:`LiteLLMRecorder` makes when it is built in record
+    mode, without creating anything, so a caller can run them before it
+    spends a live model call.
+    """
+    version = _resolve_key_version(fixtures_dir, "record")
+    _check_version(fixtures_dir, version, "record")
+
+
+def _check_version(
+    fixtures_dir: Path | Traversable,
+    version: int,
+    mode: Literal["record", "replay"],
+    hint: str = GENERIC_RERECORD_HINT,
+) -> None:
+    if version not in _KEY_ALGORITHMS:
+        raise FixtureVersionError(
+            f"{fixtures_dir} declares {CACHE_KEY_VERSION_FIELD}={version}, which this "
+            f"mylonite does not support (it reads 1 to {CACHE_KEY_VERSION}). "
+            f"Upgrade mylonite or re-record. {hint}"
+        )
+    if mode == "record" and version != CACHE_KEY_VERSION:
+        raise FixtureVersionError(
+            f"refusing to record into {fixtures_dir}: its _meta.json declares "
+            f"{CACHE_KEY_VERSION_FIELD}={version}, the format from before recorded "
+            f"fixtures were redacted (current: {CACHE_KEY_VERSION}). Delete that "
+            "fixtures directory (its *.json files and _meta.json) and record again."
+        )
 
 
 #: How many leading hex digits of a cache key name a NEWLY recorded fixture
@@ -509,23 +667,11 @@ class LiteLLMRecorder:
         # per fixtures_dir/run, so a `_meta.json` written mid-run (e.g. by a
         # sibling recorder) is not expected to change an already-live instance.
         self._key_version: int = _resolve_key_version(self.fixtures_dir, self.mode)
-        if self._key_version not in _KEY_ALGORITHMS:
-            raise FixtureVersionError(
-                f"{self.fixtures_dir} declares cache_key_version={self._key_version}, which "
-                f"this mylonite does not support (it reads 1 to {CACHE_KEY_VERSION}). "
-                f"Upgrade mylonite or re-record. {self.missing_fixture_hint}"
-            )
-        if self.mode == "record" and self._key_version != CACHE_KEY_VERSION:
-            raise FixtureVersionError(
-                f"refusing to record into {self.fixtures_dir}: its _meta.json declares "
-                f"cache_key_version={self._key_version}, the format from before recorded "
-                f"fixtures were redacted (current: {CACHE_KEY_VERSION}). Delete that "
-                "fixtures directory (its *.json files and _meta.json) and record again."
-            )
+        _check_version(self.fixtures_dir, self._key_version, self.mode, self.missing_fixture_hint)
 
     @property
     def key_version(self) -> int:
-        """The cache-key algorithm (1 or 2) this instance resolved at construction.
+        """The cache-key algorithm (1 to 3) this instance resolved at construction.
 
         Callers that stamp a ``_meta.json`` sidecar for a fixtures_dir they
         just recorded into should write THIS value as
@@ -656,4 +802,5 @@ __all__ = [
     "FixtureVersionError",
     "LiteLLMRecorder",
     "MissingFixtureError",
+    "check_recordable",
 ]

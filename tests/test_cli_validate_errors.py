@@ -154,3 +154,40 @@ def test_gate_reports_a_target_that_did_not_come_up_in_one_line(
     assert len(lines) == 1, result.output
     assert "later findings were not validated" in lines[0]
     assert "gate_out" in lines[0]
+
+
+def test_an_unrecordable_fixtures_folder_exits_2_before_any_model_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fixtures folder recorded in an older replay-key format is refused
+    before the provider pre-flight, so no paid call is spent on a run that
+    could not record."""
+    out_dir = _generated_dir(tmp_path)
+    fixtures = out_dir / "fixtures"
+    fixtures.mkdir(exist_ok=True)
+    (fixtures / "_meta.json").write_text('{"cache_key_version": 2}', encoding="utf-8")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")  # pragma: allowlist secret
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "mylonite.cli._provider_preflight", lambda *_, **__: calls.append("preflight") or True
+    )
+    _raising_validator(monkeypatch, AssertionError("the validator must not run"))
+
+    result = runner.invoke(app, ["validate", str(out_dir)])
+
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert calls == []
+    assert "Traceback" not in result.output
+    assert "cache_key_version=2" in result.output
+
+
+def test_a_fixture_error_mid_run_exits_2_with_one_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mylonite._replay import FixtureConflictError
+
+    result = _invoke(tmp_path, monkeypatch, FixtureConflictError("key collided"))
+
+    assert result.exit_code == EXIT_CONFIG, result.output
+    assert "Traceback" not in result.output
+    assert "recording the replay fixtures failed" in result.output
