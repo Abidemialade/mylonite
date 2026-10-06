@@ -42,6 +42,25 @@ def test_refuses_to_clobber_an_existing_result_set(tmp_path: Path) -> None:
     assert campaign.prepare_results_dir(tmp_path, "0.9.0", force=True) == existing
 
 
+def test_another_result_set_in_the_version_directory_is_not_this_campaigns(
+    tmp_path: Path,
+) -> None:
+    """A sibling result set (its own subdirectory) never blocks the campaign."""
+    other = tmp_path / "0.9.0" / "third-party"
+    other.mkdir(parents=True)
+    (other / "README.md").write_text("other campaign", encoding="utf-8")
+    assert campaign.prepare_results_dir(tmp_path, "0.9.0", force=False).exists()
+    assert (other / "README.md").read_text(encoding="utf-8") == "other campaign"
+
+
+def test_a_layer_file_alone_still_counts_as_an_existing_set(tmp_path: Path) -> None:
+    existing = tmp_path / "0.9.0"
+    existing.mkdir(parents=True)
+    (existing / campaign.LAYER_FILES["layer2-agentdojo"]).write_text("{}", encoding="utf-8")
+    with pytest.raises(campaign.CampaignError, match="already holds a result set"):
+        campaign.prepare_results_dir(tmp_path, "0.9.0", force=False)
+
+
 def test_an_empty_directory_is_not_treated_as_an_existing_set(tmp_path: Path) -> None:
     (tmp_path / "0.9.0").mkdir(parents=True)
     assert campaign.prepare_results_dir(tmp_path, "0.9.0", force=False).exists()
