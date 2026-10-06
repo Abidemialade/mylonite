@@ -15,7 +15,7 @@
 # Needs, on THIS repository:
 #   - variable MYLONITE_SCRATCH_REPO ("owner/repo")
 #   - secret MYLONITE_SCRATCH_REPO_TOKEN (fine-grained, scoped only to that
-#     repo: contents:write, pull-requests:write, actions:read/write)
+#     repo: Contents read/write, Pull requests read/write, Actions read)
 #   - secret MYLONITE_OPENAI_KEY (OpenAI) -- drives the live gate run below
 # ...and, already set on the SCRATCH repo itself:
 #   - secret MYLONITE_API_KEY (OpenAI) -- drives the generated per-PR gate
@@ -218,31 +218,36 @@ jobs:
           PR_NUMBER: ${{ steps.find_pr.outputs.pr_number }}
         run: |
           set -u
+          # Workflow runs, not check runs: a fine-grained token has no
+          # "Checks" permission, so the PR's statusCheckRollup is out of its
+          # reach. Its Actions runs need only "Actions: read".
+          HEAD_SHA=$(gh pr view "$PR_NUMBER" --repo "$REH_SCRATCH_REPO" --json headRefOid --jq .headRefOid)
           DEADLINE=$(( $(date +%s) + 1200 ))
           GATE_NAME="Mylonite gate"
-          ROLLUP="[]"
+          RUNS="[]"
           while :; do
-            ROLLUP=$(gh pr view "$PR_NUMBER" --repo "$REH_SCRATCH_REPO" --json statusCheckRollup --jq '.statusCheckRollup')
-            HAS_GATE=$(echo "$ROLLUP" | jq --arg n "$GATE_NAME" '[.[] | select(.workflowName == $n or .name == $n)] | length')
-            PENDING=$(echo "$ROLLUP" | jq '[.[] | select(.status != "COMPLETED")] | length')
+            RUNS=$(gh run list --repo "$REH_SCRATCH_REPO" --commit "$HEAD_SHA"               --json databaseId,name,status,conclusion,attempt,event)
+            HAS_GATE=$(echo "$RUNS" | jq --arg n "$GATE_NAME" '[.[] | select(.name == $n)] | length')
+            PENDING=$(echo "$RUNS" | jq '[.[] | select(.status != "completed")] | length')
             if [ "$HAS_GATE" -gt 0 ] && [ "$PENDING" -eq 0 ]; then
               break
             fi
             if [ "$(date +%s)" -ge "$DEADLINE" ]; then
-              echo "::error::timed out after 20 minutes waiting for the generated '$GATE_NAME' check on PR #$PR_NUMBER to complete" >&2
+              echo "::error::timed out after 20 minutes waiting for the generated '$GATE_NAME' run on PR #$PR_NUMBER to complete" >&2
               exit 1
             fi
             sleep 20
           done
-          echo "$ROLLUP" > "$RUNNER_TEMP/pr-checks.json"
-          echo "Checks on PR #$PR_NUMBER:"
-          echo "$ROLLUP" | jq -r '.[] | "  \(.workflowName // .context // .name): \(.conclusion // .state)"'
-          FAILED=$(echo "$ROLLUP" | jq '[.[] | select((.conclusion // "") != "SUCCESS")] | length')
+          echo "$RUNS" > "$RUNNER_TEMP/pr-checks.json"
+          echo "Workflow runs on PR #$PR_NUMBER (head $HEAD_SHA):"
+          echo "$RUNS" | jq -r '.[] | "  \(.name) (attempt \(.attempt)): \(.conclusion)"'
+          # First run only: a run that needed a re-attempt is not a clean first run.
+          FAILED=$(echo "$RUNS" | jq '[.[] | select(.conclusion != "success" or .attempt != 1)] | length')
           if [ "$FAILED" -gt 0 ]; then
-            echo "::error::not every check on PR #$PR_NUMBER passed on its first run -- see the list printed above" >&2
+            echo "::error::not every workflow run on PR #$PR_NUMBER passed on its first attempt -- see the list printed above" >&2
             exit 1
           fi
-          echo "Every check on PR #$PR_NUMBER passed on its first run."
+          echo "Every workflow run on PR #$PR_NUMBER passed on its first attempt."
           # Never merged from here -- the scratch PR stays open as the record.
 
       - name: Upload the run log, PR URL and gate output
