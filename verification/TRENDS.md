@@ -8,6 +8,7 @@
 | 0.9.0 | 2026-08-29 | anthropic/claude-haiku-4-5-20251001 (layer1/3); ollama/llama3.2:3b (injecagent) | unmeasured (harness defect, see FINDINGS.md) | 41.2% (label inverted; corrected 81.1%, see FINDINGS.md) | 100.0% | 40.0% | 0.0% |
 | 0.10.0 | 2026-09-14 | anthropic/claude-haiku-4-5-20251001 (agentdojo judge, layer3); ollama/llama3.2:3b (injecagent record) | not run | 41.2% (label inverted; corrected 81.1%, see FINDINGS.md) | 100.0% | 83.3% | 0.0% |
 | 0.11.0 | 2026-10-02 | anthropic/claude-haiku-4-5-20251001 (agentdojo judge, injecagent record) | not run | 41.2% (label inverted; corrected 81.1%, see FINDINGS.md) | vacuous | vacuous | not run |
+| 0.12.0 | 2026-10-06 | openai/gpt-4o-mini (agentdojo judge, injecagent record) | not run | 82.3% | 100.0% | 100.0% | not run |
 
 ## Third-party verification campaigns
 
