@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The scaffolded nightly discovery workflow no longer leaves a
+  write-capable credential sitting in `.git/config` while your target
+  runs.** `mylonite-discovery.yml`'s checkout kept `actions/checkout`'s
+  default persisted credential (`contents: write`) for the whole job,
+  including while your target process — often an `npx`/`uvx` MCP server —
+  ran alongside it. The checkout now sets `persist-credentials: false`,
+  like the per-PR gate workflow already did; the step that pushes the gate
+  branch authenticates with `gh auth setup-git` instead, which reads the
+  already step-scoped `GH_TOKEN` only at push time rather than storing a
+  token on disk (#306). Re-run `mylonite gate --workflows` to pick up the
+  fix in an already-scaffolded repository.
 - **A server notification during session close no longer costs an attempt.**
   When a tool call turned on a server's timed notifications (log messages,
   resource-updated pushes), a notification arriving while Mylonite closed the

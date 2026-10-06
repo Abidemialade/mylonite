@@ -540,6 +540,48 @@ def test_emitted_workflows_pin_actions_by_sha(tmp_path, name):
     assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0" in text
 
 
+@pytest.mark.parametrize("name", list(_TEMPLATES))
+def test_emitted_workflows_never_persist_a_write_credential_past_checkout(tmp_path, name):
+    """#306: a job whose steps later launch the target (an `npx`/`uvx` MCP
+    server, via `mylonite gate`) must not leave a write-capable credential
+    sitting in `.git/config`, readable by that target process, for the rest
+    of the job. Every emitted template's checkout turns off
+    `actions/checkout`'s default persisted credential -- a later push (if
+    any) authenticates itself instead, scoped to the one step that needs it.
+    """
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
+    doc = yaml.safe_load(next(p for p in written if p.name == name).read_text(encoding="utf-8"))
+    for job in doc["jobs"].values():
+        checkout_step = next(
+            s for s in job["steps"] if s.get("uses", "").startswith("actions/checkout@")
+        )
+        assert checkout_step.get("with", {}).get("persist-credentials") is False, (
+            f"{name}: actions/checkout keeps its default persisted credential"
+        )
+
+
+def test_discovery_workflow_authenticates_its_push_with_gh_instead_of_a_persisted_credential(
+    tmp_path,
+):
+    """#306: `mylonite-discovery.yml`'s single job both runs the target (via
+    `mylonite gate`) and pushes the gate branch. With no persisted checkout
+    credential, the push step must authenticate some other way -- `gh auth
+    setup-git`, which fetches a token from `gh` (reading the already
+    step-scoped `GH_TOKEN`) only when git actually needs one, rather than a
+    static credential sitting on disk for the step's whole duration."""
+    written = write_workflows(
+        tmp_path, runs_on="ubuntu-latest", model="anthropic/claude-haiku-4-5-20251001"
+    )
+    discovery = next(p for p in written if p.name == "mylonite-discovery.yml")
+    doc = yaml.safe_load(discovery.read_text(encoding="utf-8"))
+    last_step = doc["jobs"]["discover"]["steps"][-1]
+    assert "gh auth setup-git" in last_step["run"]
+    assert last_step["run"].index("gh auth setup-git") < last_step["run"].index("mylonite gate")
+    assert last_step["env"]["GH_TOKEN"] == "${{ secrets.GITHUB_TOKEN }}"
+
+
 @pytest.mark.parametrize(
     ("name", "job"), [("mylonite-gate.yml", "gate"), ("mylonite-discovery.yml", "discover")]
 )
