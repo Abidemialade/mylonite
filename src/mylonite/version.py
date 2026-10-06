@@ -8,4 +8,4 @@ and ``mylonite.__version__`` cannot disagree. Bump it here and nowhere else --
 
 from __future__ import annotations
 
-__version__ = "0.11.0"
+__version__ = "0.12.0"
