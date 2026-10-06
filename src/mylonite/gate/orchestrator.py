@@ -18,7 +18,8 @@ from typing import Any
 
 from mylonite import reason_codes
 from mylonite._cli_io import echo
-from mylonite._redaction import redact_value
+from mylonite._redaction import redact, redact_value
+from mylonite._replay import FixtureError
 from mylonite._verdict import (
     STABLE_NOT_PROVEN,
     is_black_box_keep,
@@ -512,6 +513,15 @@ def _put_back_earlier(this_out: Path, rejected_dir: Path, earlier: _EarlierFiles
     first, so this run's recordings never mix into a kept test's fixtures.
     Then the earlier files are written back byte for byte.
     """
+    _put_back_fixtures(this_out, rejected_dir, earlier)
+    for path, data in earlier.files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+
+def _put_back_fixtures(this_out: Path, rejected_dir: Path, earlier: _EarlierFiles) -> None:
+    """Move this run's ``fixtures/`` to the evidence folder, then write the
+    earlier run's fixtures back byte for byte."""
     fixtures_dir = this_out / "fixtures"
     if fixtures_dir.is_dir():
         rejected_dir.mkdir(parents=True, exist_ok=True)
@@ -519,9 +529,6 @@ def _put_back_earlier(this_out: Path, rejected_dir: Path, earlier: _EarlierFiles
         if dest.exists():
             shutil.rmtree(dest)
         shutil.move(str(fixtures_dir), str(dest))
-    for path, data in earlier.files.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(data)
     for rel, data in (earlier.fixtures or {}).items():
         target = fixtures_dir / rel
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -687,6 +694,12 @@ def _process_one_finding(
     # An earlier run may have kept a test under this same id. Read it first,
     # so a run that does not keep can put it back untouched.
     earlier = _snapshot_earlier(this_out, written)
+    # This finding's own `fixtures/` folder is re-recorded from scratch: an
+    # earlier run's recordings (possibly in an older replay-key format) would
+    # otherwise mix with this run's. The snapshot above holds their bytes, so
+    # a run that does not keep, or raises, puts them back.
+    if earlier.fixtures is not None:
+        shutil.rmtree(this_out / "fixtures")
     test_path.write_text(generated.source, encoding="utf-8")
     _write_redacted_exploit(exploit_path, exploit)
 
@@ -694,16 +707,32 @@ def _process_one_finding(
     # untagged record so it never reaches the payloads it builds.
     generated = generated.model_copy(update={"exploit": exploit})
     try:
-        # The validator gets this finding's own directory: a route that records
-        # replay fixtures writes them to `this_out/fixtures`, where this
-        # finding's test reads them, never to a directory shared by findings.
-        report = validate_fn(generated, this_out)
-    finally:
-        # The validator may write its own copy of the exploit next to the test
-        # (the reference route records fixtures there). Write the redacted
-        # record again, even if validation raised, so whatever ends up
-        # committed or kept for debugging is redacted.
-        _write_redacted_exploit(exploit_path, exploit)
+        try:
+            # The validator gets this finding's own directory: a route that
+            # records replay fixtures writes them to `this_out/fixtures`, where
+            # this finding's test reads them, never to a directory shared by
+            # findings.
+            report = validate_fn(generated, this_out)
+        finally:
+            # The validator may write its own copy of the exploit next to the
+            # test (the reference route records fixtures there). Write the
+            # redacted record again, even if validation raised, so whatever
+            # ends up committed or kept for debugging is redacted.
+            _write_redacted_exploit(exploit_path, exploit)
+    except FixtureError as exc:
+        # A recording problem is this finding's failure, not the run's: say
+        # so, put the earlier files back, and go on to the next finding.
+        reason = f"its replay fixtures could not be recorded ({redact(str(exc))})"
+        message = f"{prefix}{reason} — skipping." if multi else f"{prefix}{reason} — cannot gate."
+        _finish_unkept(this_out, out_dir, finding_id, message, written, earlier)
+        return _FindingOutcome(exploit=exploit, stage="validate_failed", reason=reason)
+    except BaseException:
+        # Any other stop (budget, interrupt, a target that went down) leaves
+        # the run's partial recording as evidence and restores the earlier
+        # fixtures this run removed, before the error propagates.
+        if earlier.fixtures is not None:
+            _put_back_fixtures(this_out, _rejected_evidence_dir(out_dir, finding_id), earlier)
+        raise
     if report is None:
         reason = "the validator returned nothing"
         message = f"{prefix}{reason} — skipping." if multi else f"{prefix}{reason} — cannot gate."

@@ -38,6 +38,7 @@ async def test_replay_raises_on_cache_miss(tmp_path: Path) -> None:
 async def test_replay_returns_fixture(tmp_path: Path) -> None:
     msgs = [{"role": "user", "content": "hi"}]
     key = _stable_key("claude-x", msgs)
+    (tmp_path / "_meta.json").write_text('{"cache_key_version": 3}', encoding="utf-8")
     (tmp_path / f"{key}.json").write_text(
         json.dumps(
             {

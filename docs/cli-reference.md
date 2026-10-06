@@ -462,6 +462,16 @@ results were discarded. Neither is reported as a rejected test. `gate` reports a
 target that does not come up the same way, and says later findings were not
 validated.
 
+Against the bundled reference app, `validate` records replay fixtures into the
+test's `fixtures/` folder. It checks that folder before the provider check's
+first call and exits `2` with one line if it cannot record there: the folder was
+recorded in an older format (`cache_key_version` 1 or 2), names a version this
+release does not know, has a damaged `_meta.json`, or holds recordings with no
+`_meta.json`. Delete the folder and run again. A recording error later in the
+run exits `2` the same way. `gate` re-records each finding's own `fixtures/`
+folder instead, and puts the earlier one back if the run does not keep (see
+[CI gating](ci-gating.md)).
+
 When it finishes, `validate` prints an `llm:` line with the calls it made (by role), the
 tokens the provider reported, and the wall-clock time. The metamorphic stage runs under
 its own call budget; if that budget is reached before every perturbation has run, the

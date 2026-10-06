@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import typer
@@ -52,9 +53,31 @@ def target_launch_line(exc: TargetLaunchError, *, gate_out: str | None = None) -
     return reason_codes.tag(reason_codes.ABT_DESCRIBE_FAILED, line)
 
 
+def fixtures_line(exc: Exception) -> str:
+    """The one line for replay fixtures that cannot be recorded or read."""
+    return (
+        f"error: {redact(str(exc))} No verdict was reached and no model call was "
+        "made for it; fix the fixtures folder, then re-run."
+    )
+
+
+def check_fixtures_recordable_or_exit(fixtures_dir: Path) -> None:
+    """Exit with a config error, before any live call, when record mode
+    would refuse ``fixtures_dir`` (an older or unknown replay-key version, a
+    damaged ``_meta.json``, or recordings with no sidecar)."""
+    from mylonite._replay import FixtureError, check_recordable
+
+    try:
+        check_recordable(fixtures_dir)
+    except FixtureError as exc:
+        echo_err(fixtures_line(exc))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+
+
 @contextmanager
 def validate_run_errors() -> Iterator[None]:
     """Turn a budget stop or a launch failure inside ``validate`` into an exit."""
+    from mylonite._replay import FixtureError
     from mylonite.plugins._reference.reference_validator import TargetLaunchError
     from mylonite.scan._llm import BudgetExceededError, LLMRequestCeilingError
 
@@ -73,4 +96,10 @@ def validate_run_errors() -> Iterator[None]:
         raise typer.Exit(code=EXIT_BUDGET) from exc
     except TargetLaunchError as exc:
         echo_err(target_launch_line(exc))
+        raise typer.Exit(code=EXIT_CONFIG) from exc
+    except FixtureError as exc:
+        echo_err(
+            f"error: recording the replay fixtures failed: {redact(str(exc))} "
+            "No verdict was reached; fix the fixtures folder, then re-run."
+        )
         raise typer.Exit(code=EXIT_CONFIG) from exc

@@ -21,8 +21,9 @@ Cache-key format (T8 / close-the-loop)
 There are no legacy fixtures left to accommodate. The v1-key set that shipped
 through 0.7.8 was deleted along with the demo command in 0.8.0, so every
 directory this script writes is a FRESH record and gets ``CACHE_KEY_VERSION``
-(currently v2 — folds ``tools``/``tool_choice``/``response_format``/``api_base``
-into the key alongside ``(model, messages)``). The script stamps ``_meta.json``
+(currently v3 — folds ``tools``/``tool_choice``/``response_format``/``api_base``
+into the key alongside ``(model, messages)``, with secret-shaped spans handled
+as :func:`mylonite._replay._stable_key_v3` describes). The script stamps ``_meta.json``
 with the matching ``cache_key_version`` BEFORE recording begins (not after — see
 :func:`_stamp_meta`'s docstring for why), so a later replay resolves the same
 key explicitly rather than depending on any implicit default.
@@ -200,12 +201,11 @@ def _check_dir_safe_to_record(variant_dir: Path, expected_version: int) -> None:
     file untouched AND write a NEW, differently-keyed v2 file alongside it —
     a genuinely mixed directory — and if the run were interrupted before the
     post-run stamp, the directory would have a v1/v2 mix with NO sidecar at
-    all: the next replay now resolves ``CACHE_KEY_VERSION`` (v2) by default
-    (the old implicit "no sidecar means v1" fallback was retired), so it
-    would silently MISS the leftover v1-keyed file for any tools-bearing
-    call it still matched — a confusing "fixture missing" failure for a
-    directory that visibly has fixtures in it, rather than the loud, explicit
-    refusal below.
+    all. The recorder now refuses such a directory outright (recordings
+    with no sidecar declare no key version); before that it silently MISSED
+    the leftover v1-keyed file for any tools-bearing call — a confusing
+    "fixture missing" failure for a directory that visibly has fixtures in
+    it. The refusal below stops the mix from being written at all.
 
     An EMPTY (or not-yet-existing) ``variant_dir`` is always safe. A
     NON-EMPTY one is safe only if its ``_meta.json`` already declares the

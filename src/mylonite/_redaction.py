@@ -4,14 +4,13 @@ This module implements the control that ``LoggingConfig.redact_secrets`` (defaul
 on) promises and that ``SECURITY.md`` documents: secret-shaped strings are masked
 before they reach a log record or a rendered CLI report.
 
-Scope is deliberately narrow. Redaction applies to **runtime log records and
-console-rendered strings ONLY**. It is *never* applied to persisted data that is
-later parsed or replayed — recorded demo fixtures, persisted ``exploit_*.json`` /
-``scan_report.json`` artefacts, or the generated test source — because masking
-those would corrupt loadable/replayable data and break the
-generate -> validate -> replay pipeline. By construction those persisted artefacts
-are deterministic and contain no raw provider secrets; this filter is
-defense-in-depth so that a future or accidental secret-shaped log line is masked.
+The log filter applies to **runtime log records and console-rendered strings**.
+Persisted artefacts that can carry target output are redacted by their writers
+with :func:`redact` / :func:`redact_value`: the gate's exploit record,
+validation report and ``PR_BODY.md``, and recorded replay fixtures
+(``mylonite._replay``, whose v3 cache key uses :func:`secret_spans` so a
+redacted recording still replays). The generated test source is not redacted;
+it is loaded as code.
 
 The patterns are conservative on purpose: they match genuinely secret-shaped
 tokens (provider key prefixes, AWS access-key ids, bearer tokens, PEM private-key
@@ -47,6 +46,7 @@ __all__ = [
     "redact_url_query",
     "redact_value",
     "register_masked_value",
+    "secret_spans",
     "target_env_refs",
     "target_file_var_names",
     "target_masked_fields",
@@ -328,6 +328,32 @@ def redact(text: str) -> str:
     redacted = _KV_PATTERN.sub(_mask_kv, redacted)
     redacted = _BARE_KEY_PATTERN.sub(_mask_kv, redacted)
     return redacted
+
+
+def secret_spans(text: str) -> list[str]:
+    """The substrings of ``text`` that :func:`redact` would mask, in order.
+
+    Each rule runs on the original text: a registered value, a whole-token
+    pattern, the password span of a URL that carries an inline credential, and the
+    value of a ``key=value`` credential assignment. Spans found by two rules
+    are listed twice; callers that hash the list only need it deterministic.
+    Non-``str`` input yields an empty list.
+    """
+    if not isinstance(text, str):
+        return []
+    found: list[tuple[int, str]] = []
+    for value in _MASKED_VALUES:
+        start = text.find(value)
+        while start != -1:
+            found.append((start, value))
+            start = text.find(value, start + len(value))
+    for pattern in _FULL_PATTERNS:
+        found.extend((m.start(), m.group(0)) for m in pattern.finditer(text))
+    found.extend((m.start("secret"), m.group("secret")) for m in _URL_CRED_PATTERN.finditer(text))
+    for pattern in (_KV_PATTERN, _BARE_KEY_PATTERN):
+        found.extend((m.start("val"), m.group("val")) for m in pattern.finditer(text))
+    found.sort()
+    return [span for _start, span in found]
 
 
 def redact_value(value: object) -> object:

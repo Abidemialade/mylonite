@@ -21,16 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token on disk (#306). Re-run `mylonite gate --workflows` to pick up the
   fix in an already-scaffolded repository.
 - **Recorded replay fixtures no longer keep a secret the target echoed.**
-  `gate` and `validate` record each model reply under `fixtures/`, and `gate
-  --open-pr` commits that folder. A reply that carried a live key, bearer token
-  or `password=` value was written verbatim; it is now redacted before it is
-  written, with the same rules as the exploit record and `PR_BODY.md`. The
-  recording still replays offline: the replay key (`cache_key_version: 3`) is
-  computed over the redacted conversation, so a later turn that carries the
-  redacted reply finds its recording. Fixtures folders from earlier versions
-  still replay; recording into one is refused with a message that says to
-  delete the folder and run again, and an unknown `cache_key_version` fails
-  clearly in either mode. The committed demo and example fixtures are unchanged.
+  Against the bundled reference agent, `gate` and `validate` record each model
+  reply under `fixtures/`, and `gate --open-pr` commits that folder. A reply
+  that carried a secret-shaped value (a provider key, a bearer token, a
+  credential assignment of 12 or more characters) was written verbatim; it is
+  now redacted before it is written, with the same rules as the exploit record
+  and `PR_BODY.md`. The recording still replays offline. The replay key
+  (`cache_key_version: 3`) keys a stored reply, and the target's echo of it, in
+  redacted form, and keys any other secret-shaped value by its content through
+  a slow salted hash, so two runs whose tool output differs only inside a
+  secret never share a recording, and no secret or fast hash of one is written.
+  A re-run of `gate` replaces the finding's own `fixtures/` folder, and puts
+  the earlier one back if the run does not keep. `validate` checks its
+  fixtures folder before the first model call and exits 2 with one line if it
+  holds an older or unknown key version, a damaged `_meta.json`, or recordings
+  with no `_meta.json`. Older folders still replay. Fixtures recorded before
+  this release were not redacted: re-gate them, or review them before you
+  share them. The committed demo and example fixtures are unchanged.
 
 - **A server notification during session close no longer costs an attempt.**
   When a tool call turned on a server's timed notifications (log messages,

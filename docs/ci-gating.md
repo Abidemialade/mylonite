@@ -338,14 +338,23 @@ their 64-digit names and still replay.
 and `PR_BODY.md` (its evidence lines and the optional LLM suggestion) before it
 writes them. A key the target echoed into its reply, a tool result or a
 validator error shows up there as `***REDACTED***`. The recorded replay files
-under `fixtures/` are redacted the same way before they are written, and they
-still replay offline: the replay key is computed over the redacted
-conversation, so a later turn that carries a redacted reply finds its
-recording. These files use `cache_key_version: 3` in `fixtures/_meta.json`.
-A fixtures folder from an earlier version (`cache_key_version` 1 or 2) still
-replays, but `gate` and `validate` refuse to record into it; delete that
-`fixtures/` folder and run again. A version Mylonite does not know fails with
-a message naming it, never a silent cache miss.
+under `fixtures/` (written for the bundled reference agent) are redacted the
+same way before they are written, and they still replay offline. These files
+use `cache_key_version: 3` in `fixtures/_meta.json`: a stored reply, and the
+target's echo of it, are keyed in redacted form, and any other secret-shaped
+value in the conversation is keyed by its content through a slow salted hash.
+Two runs whose tool output differs only inside a secret never share a
+recording, and neither the files nor their names hold a secret or a fast hash
+of one.
+
+A re-run of `gate` replaces the finding's own `fixtures/` folder and puts the
+earlier folder back if the run does not keep or stops on an error. `validate`
+checks its `fixtures/` folder before the first model call and exits 2 with one
+line when the folder was recorded in an older format (`cache_key_version` 1
+or 2), names a version Mylonite does not know, has a damaged `_meta.json`, or
+holds recordings with no `_meta.json`; delete that folder and run again. An
+older folder still replays. Fixtures recorded before this release were not
+redacted; re-gate them, or review them before you share them.
 
 Two flags opt in to the rest, independently:
 
