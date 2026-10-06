@@ -120,8 +120,10 @@ Published for the same reason the positive ones are.
 - **Finding nothing is the normal outcome** for a well-built app on a robust model. See
   [below](#finding-nothing-is-also-a-result).
 <!-- claim:readme-single-model-evidence -->
-- **The evidence rests largely on one model** — Claude Haiku 4.5 — at small, deliberately
-  cost-capped sample sizes.
+- **The evidence now spans four models, unevenly.** Claude Haiku 4.5 still carries most of
+  it, including every benchmark figure above. The third-party campaign adds `gpt-4o-mini`;
+  a breadth check adds Claude Sonnet 5 and `gpt-5.1` against one weakness class. Every
+  sample size stays small and deliberately cost-capped.
 <!-- claim:readme-measurement-window -->
 - **The published figures were measured between 25 June and 14 September 2026.** The
   benchmark results carry the version they were measured against
@@ -160,7 +162,7 @@ then hold the model constant and switch only your safeguard. The result is evide
 
 <!-- claim:readme-project-status -->
 **Beta, and essentially a single maintainer** — one outside contribution to date, the rest
-of the history from the maintainer and Dependabot. Over 2,300 tests, with CI (ruff, mypy,
+of the history from the maintainer and Dependabot. Over 5,400 tests, with CI (ruff, mypy,
 pytest, pre-commit) enforced on every pull request. The extension points are versioned
 public API, but nobody outside the project has built against them yet. If you are weighing
 this as a dependency in a security pipeline, pin a version — and read
