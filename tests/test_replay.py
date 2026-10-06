@@ -29,16 +29,19 @@ from typing import Any
 import pytest
 
 from mylonite._replay import (
+    CACHE_KEY_VERSION,
     CACHE_KEY_VERSION_FIELD,
     FIXTURE_NAME_LENGTH,
     CorruptFixtureError,
     FixtureConflictError,
+    FixtureVersionError,
     LiteLLMRecorder,
     MissingFixtureError,
     _resolve_key_version,
     _stable_key,
     _stable_key_v1,
     _stable_key_v2,
+    _stable_key_v3,
 )
 
 _MSGS = [{"role": "user", "content": "hi"}]
@@ -327,8 +330,8 @@ def test_no_sidecar_defaults_to_cache_key_version_in_either_mode(tmp_path: Path)
     ``test_format_version_honours_explicit_sidecar_in_either_mode`` below)
     still resolves to it.
     """
-    assert _resolve_key_version(tmp_path, "replay") == 2
-    assert _resolve_key_version(tmp_path, "record") == 2
+    assert _resolve_key_version(tmp_path, "replay") == CACHE_KEY_VERSION == 3
+    assert _resolve_key_version(tmp_path, "record") == CACHE_KEY_VERSION
 
 
 def test_format_version_honours_explicit_sidecar_in_either_mode(tmp_path: Path) -> None:
@@ -348,8 +351,8 @@ def test_format_version_field_alone_is_ignored_by_cache_key_dispatch(tmp_path: P
     independent fields exist to rule out. With no cache_key_version signal,
     both modes fall through to the same unified no-sidecar default."""
     (tmp_path / "_meta.json").write_text(json.dumps({"format_version": 2}), encoding="utf-8")
-    assert _resolve_key_version(tmp_path, "replay") == 2
-    assert _resolve_key_version(tmp_path, "record") == 2
+    assert _resolve_key_version(tmp_path, "replay") == CACHE_KEY_VERSION
+    assert _resolve_key_version(tmp_path, "record") == CACHE_KEY_VERSION
 
 
 # --- (close-the-loop) proof the implicit v1 fallback is actually gone ---------
@@ -379,7 +382,7 @@ async def test_fresh_sidecar_less_dir_no_longer_silently_assumes_v1(tmp_path: Pa
     )
 
     recorder = LiteLLMRecorder(fixtures_dir=tmp_path)  # no _meta.json anywhere
-    assert recorder.key_version == 2  # the unified default, not the old v1 fallback
+    assert recorder.key_version == CACHE_KEY_VERSION  # the unified default, not the old v1 fallback
     with pytest.raises(MissingFixtureError):
         await recorder(model="claude-x", messages=_MSGS, tools=tools)
 
@@ -439,35 +442,18 @@ async def test_usage_roundtrips(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.asyncio
-async def test_v2_recording_with_tools_replays_when_sidecar_declares_v2(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The actual regression scenario: a call WITH tools, recorded + replayed v2."""
+async def test_v2_recording_with_tools_replays_when_sidecar_declares_v2(tmp_path: Path) -> None:
+    """A directory recorded under v2 (before redaction) still replays with v2,
+    tools included. Record mode no longer writes v2 (see the refusal test)."""
     tools = [{"type": "function", "function": {"name": "read_note", "parameters": {}}}]
-
-    async def fake_acompletion(**_: Any) -> SimpleNamespace:
-        return SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content="", tool_calls=None), finish_reason="stop"
-                )
-            ],
-            usage=None,
-        )
-
-    import litellm
-
-    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
-    # Explicit v2 sidecar written up front, mirroring how a caller that wants
-    # v2 dispatch on a fresh directory would stamp it (reference_validator.py /
-    # record_reference_example.py stamp it right after recording).
     (tmp_path / "_meta.json").write_text(
         json.dumps({CACHE_KEY_VERSION_FIELD: 2, "model": "claude-x"}), encoding="utf-8"
     )
-    recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
-    await recorder(model="claude-x", messages=_MSGS, tools=tools)
+    key = _stable_key_v2("claude-x", _MSGS, tools=tools)
+    (tmp_path / f"{key}.json").write_text(_fixture_payload(""), encoding="utf-8")
 
     replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    assert replay.key_version == 2
     response = await replay(model="claude-x", messages=_MSGS, tools=tools)
     assert response.choices[0].message.content == ""
     assert replay.cache_hits == 1
@@ -568,3 +554,153 @@ async def test_a_short_name_holding_another_keys_recording_is_a_miss(tmp_path: P
     with pytest.raises(MissingFixtureError):
         await replay(model="claude-x", messages=_MSGS)
     assert replay.cache_hits == 0
+
+
+# --- recorded fixtures are redacted (#273) ------------------------------------
+#
+# A gate commits its fixtures to the user's repository, and a target can echo a
+# live secret into a model reply. Record mode writes the redacted reply; the v3
+# key hashes the redacted conversation, so the redacted recording still replays.
+
+# Built at runtime so no secret-shaped literal sits in the source.
+_SECRET = "sk-" + "live" + "A1b2C3d4E5f6G7h8I9j0K1L2"  # pragma: allowlist secret
+
+
+def _tool_call_response(arguments: str, content: str = "") -> SimpleNamespace:
+    call = SimpleNamespace(
+        id="call_1", function=SimpleNamespace(name="send_email", arguments=arguments)
+    )
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=content, tool_calls=[call]),
+                finish_reason="tool_calls",
+            )
+        ],
+        usage={"prompt_tokens": 7, "completion_tokens": 3, "total_tokens": 10},
+    )
+
+
+def _conversation(reply_args: str, tool_result: str) -> list[dict[str, Any]]:
+    """Turn two of an agent loop: the user turn, the tool call as the agent
+    copies it back, and the target's tool result."""
+    return [
+        {"role": "user", "content": "summarise my inbox"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "send_email", "arguments": reply_args},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "call_1", "content": tool_result},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_record_writes_a_secret_in_the_reply_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw_args = json.dumps({"to": "x@example.com", "body": f"key is {_SECRET}"})
+    live = _tool_call_response(raw_args, content=f"Authorization: Bearer {_SECRET}")
+
+    async def fake_acompletion(**_: Any) -> SimpleNamespace:
+        return live
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
+    returned = await recorder(model="claude-x", messages=_MSGS)
+
+    # The record-time caller still sees the live reply.
+    assert returned is live
+    files = [p for p in tmp_path.glob("*.json") if p.name != "_meta.json"]
+    assert len(files) == 1
+    text = files[0].read_text(encoding="utf-8")
+    assert _SECRET not in text
+    data = json.loads(text)
+    message = data["choices"][0]["message"]
+    assert "***REDACTED***" in message["content"]
+    assert "***REDACTED***" in message["tool_calls"][0]["function"]["arguments"]
+    # Arguments stay valid JSON; other fields and the token counts survive.
+    assert json.loads(message["tool_calls"][0]["function"]["arguments"])["to"] == "x@example.com"
+    assert data["usage"]["total_tokens"] == 10
+    assert data["_key"] == _stable_key_v3("claude-x", _MSGS)
+
+
+@pytest.mark.asyncio
+async def test_a_redacted_multi_turn_recording_replays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Turn two carries turn one's reply back into the request. At record time
+    that reply holds the raw secret; at replay time it holds the redacted one.
+    Both must reach the same recording."""
+    raw_args = json.dumps({"body": f"key is {_SECRET}"})
+    replies = iter([_tool_call_response(raw_args), _fake_response("done")])
+
+    async def fake_acompletion(**_: Any) -> SimpleNamespace:
+        return next(replies)
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
+    first = await recorder(model="claude-x", messages=_MSGS)
+    live_args = first.choices[0].message.tool_calls[0].function.arguments
+    # The target echoes what it was sent (here: the raw secret).
+    await recorder(model="claude-x", messages=_conversation(live_args, f"sent: {live_args}"))
+    for path in tmp_path.glob("*.json"):
+        assert _SECRET not in path.read_text(encoding="utf-8")
+
+    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    replayed = await replay(model="claude-x", messages=_MSGS)
+    replayed_args = replayed.choices[0].message.tool_calls[0].function.arguments
+    assert _SECRET not in replayed_args
+    # The same agent, offline: it copies the redacted call back, and the target
+    # echoes the redacted value it was sent.
+    second = await replay(
+        model="claude-x", messages=_conversation(replayed_args, f"sent: {replayed_args}")
+    )
+    assert second.choices[0].message.content == "done"
+    assert replay.cache_hits == 2
+    assert replay.cache_misses == 0
+
+
+def test_v3_key_matches_v2_when_nothing_is_secret_shaped() -> None:
+    tools = [{"type": "function", "function": {"name": "read_note", "parameters": {}}}]
+    assert _stable_key_v3("claude-x", _MSGS, tools=tools) == _stable_key_v2(
+        "claude-x", _MSGS, tools=tools
+    )
+    secret_msgs = [{"role": "user", "content": f"use {_SECRET}"}]
+    assert _stable_key_v3("claude-x", secret_msgs) != _stable_key_v2("claude-x", secret_msgs)
+
+
+@pytest.mark.parametrize("old", [1, 2])
+def test_record_refuses_a_directory_of_an_older_cache_key_version(tmp_path: Path, old: int) -> None:
+    (tmp_path / "_meta.json").write_text(
+        json.dumps({CACHE_KEY_VERSION_FIELD: old}), encoding="utf-8"
+    )
+    with pytest.raises(FixtureVersionError, match=f"cache_key_version={old}"):
+        LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
+
+
+@pytest.mark.parametrize("mode", ["record", "replay"])
+def test_an_unknown_cache_key_version_fails_clearly(tmp_path: Path, mode: str) -> None:
+    (tmp_path / "_meta.json").write_text(
+        json.dumps({CACHE_KEY_VERSION_FIELD: CACHE_KEY_VERSION + 1}), encoding="utf-8"
+    )
+    with pytest.raises(FixtureVersionError, match="does not support"):
+        LiteLLMRecorder(fixtures_dir=tmp_path, mode=mode)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_a_miss_in_an_older_directory_names_its_version(tmp_path: Path) -> None:
+    (tmp_path / "_meta.json").write_text(json.dumps({CACHE_KEY_VERSION_FIELD: 2}), encoding="utf-8")
+    replay = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    with pytest.raises(MissingFixtureError, match="cache_key_version=2"):
+        await replay(model="claude-x", messages=_MSGS)

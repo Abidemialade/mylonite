@@ -124,10 +124,12 @@ The project enforces the following non-negotiables:
    `scheme://user:pass@host` URL credentials, and `key=value` credential
    assignments) out of every log record, and every human-facing CLI string is
    redacted before it is printed (see "What Mylonite does with your
-   credentials" below). Redaction is intentionally NOT applied to persisted
-   replay fixtures or generated test source — those are deterministic and
-   contain no raw provider secrets by construction, and masking them would
-   corrupt loadable/replayable data.
+   credentials" below). Recorded replay fixtures (the `fixtures/` folder a
+   gate commits) are redacted before they are written, because a target can
+   echo a live secret into a model reply; their replay key is computed over
+   the redacted conversation, so a redacted recording still replays offline.
+   Redaction is not applied to generated test source, which is loaded as
+   code and must stay byte-for-byte as generated.
 4. **No evasion features.** The project does not accept contributions that add
    detection-evasion, anti-forensics, or rate-limit-bypass capabilities. Any
    such PR will be closed.

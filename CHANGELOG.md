@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already step-scoped `GH_TOKEN` only at push time rather than storing a
   token on disk (#306). Re-run `mylonite gate --workflows` to pick up the
   fix in an already-scaffolded repository.
+- **Recorded replay fixtures no longer keep a secret the target echoed.**
+  `gate` and `validate` record each model reply under `fixtures/`, and `gate
+  --open-pr` commits that folder. A reply that carried a live key, bearer token
+  or `password=` value was written verbatim; it is now redacted before it is
+  written, with the same rules as the exploit record and `PR_BODY.md`. The
+  recording still replays offline: the replay key (`cache_key_version: 3`) is
+  computed over the redacted conversation, so a later turn that carries the
+  redacted reply finds its recording. Fixtures folders from earlier versions
+  still replay; recording into one is refused with a message that says to
+  delete the folder and run again, and an unknown `cache_key_version` fails
+  clearly in either mode. The committed demo and example fixtures are unchanged.
+
 - **A server notification during session close no longer costs an attempt.**
   When a tool call turned on a server's timed notifications (log messages,
   resource-updated pushes), a notification arriving while Mylonite closed the

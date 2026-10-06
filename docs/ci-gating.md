@@ -338,7 +338,14 @@ their 64-digit names and still replay.
 and `PR_BODY.md` (its evidence lines and the optional LLM suggestion) before it
 writes them. A key the target echoed into its reply, a tool result or a
 validator error shows up there as `***REDACTED***`. The recorded replay files
-under `fixtures/` are not redacted; review them before you commit.
+under `fixtures/` are redacted the same way before they are written, and they
+still replay offline: the replay key is computed over the redacted
+conversation, so a later turn that carries a redacted reply finds its
+recording. These files use `cache_key_version: 3` in `fixtures/_meta.json`.
+A fixtures folder from an earlier version (`cache_key_version` 1 or 2) still
+replays, but `gate` and `validate` refuse to record into it; delete that
+`fixtures/` folder and run again. A version Mylonite does not know fails with
+a message naming it, never a silent cache miss.
 
 Two flags opt in to the rest, independently:
 
