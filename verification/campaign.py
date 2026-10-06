@@ -155,11 +155,16 @@ def prepare_results_dir(results_root: Path, version: str, *, force: bool) -> Pat
     stamp covering two different measurements.
     """
     results_dir = results_root / version
-    if results_dir.exists() and any(results_dir.iterdir()) and not force:
+    # Only this campaign's own files count as an existing set. The version
+    # directory is shared with other result sets (for example a third-party
+    # campaign's own subdirectory), which this run never reads or writes.
+    owned = ["meta.json", *LAYER_FILES.values()]
+    existing = [name for name in owned if (results_dir / name).exists()]
+    if existing and not force:
         raise CampaignError(
-            f"{results_dir} already holds a result set. Re-running would mix two "
-            "measurements under one version stamp. Pass --force to replace it, or "
-            "delete the directory first."
+            f"{results_dir} already holds a result set ({', '.join(existing)}). "
+            "Re-running would mix two measurements under one version stamp. Pass "
+            "--force to replace it, or delete those files first."
         )
     results_dir.mkdir(parents=True, exist_ok=True)
     return results_dir
