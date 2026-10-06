@@ -414,3 +414,5 @@ target saw as confirmable from the repository, and rotate it.
 
 If you hit a limitation that is not on this page, that is worth an issue: an undocumented
 gap is a bug in this page, independent of whether it is a bug in the code.
+
+Two cases replay as a clear miss rather than a pass, and need a fresh recording: a target that acts on the exact secret the model sends it (for example a guard that blocks one specific forwarded key), and a secret that appears only in the tool schema the target advertises rather than in a tool reply. A miss never produces a verdict.
