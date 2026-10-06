@@ -191,7 +191,7 @@ external users yet that the maintainer is aware of.
 
 Concretely, what that does and does not mean:
 
-- The test suite (over 2,300 collected tests), CI (ruff, mypy, pytest, pre-commit), semantic versioning,
+- The test suite (over 5,400 collected tests), CI (ruff, mypy, pytest, pre-commit), semantic versioning,
   and the versioned extension contracts are real and enforced on every PR.
 - Bus factor is one. There is no second reviewer, no on-call, and no SLA on a security
   report beyond what [SECURITY.md](https://github.com/Abidemialade/mylonite/blob/main/SECURITY.md)

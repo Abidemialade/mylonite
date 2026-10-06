@@ -201,6 +201,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   placeholders), and the numbered `pytest` exit code at each of the three
   re-prove stages.
 
+- **The README's evidence-base and test-count claims catch up with the
+  merged verification campaigns.** "The evidence rests largely on one
+  model" undersold what's now measured: the third-party campaign adds
+  `gpt-4o-mini` alongside Claude Haiku 4.5, and a breadth check adds Claude
+  Sonnet 5 and `gpt-5.1` against the flagship weakness class, so the README
+  and `docs/claims.md` now say four models, unevenly, not one. The project
+  status line's "over 2,300 tests" is also replaced with the current
+  collected count, over 5,400, in both the README and `docs/limitations.md`.
+
 ### Added
 
 - **A W4 delete can now be proven at `effect-confirmed` on a third-party
