@@ -488,6 +488,18 @@ conclusive bound) and `3` on `mylonite-discovery.yml` (the nightly job,
 where the fuller signal is worth the extra re-drives). See [What a live
 gate costs](#what-a-live-gate-costs) for the trade-off either number makes.
 
+**Neither workflow leaves a write-capable credential on disk while your
+target runs.** Both checkouts set `persist-credentials: false`, so
+`actions/checkout`'s default token never lands in `.git/config` where your
+target's own process (an `npx`/`uvx` MCP server, started by `mylonite gate`
+in the same job) could read it. `mylonite-gate.yml` never pushes, so it
+needs nothing further. `mylonite-discovery.yml` does push the gate branch
+and open the PR, in the same step that runs the target — right before that
+push, it runs `gh auth setup-git`, which points git's credential helper at
+`gh` rather than writing a token to disk; `gh` itself reads `GH_TOKEN` (the
+built-in `secrets.GITHUB_TOKEN`), already scoped to that one step, only at
+the moment a push actually needs it.
+
 **If your target launches with `npx`/`node` or `uvx`/`uv`,** the scaffolded
 workflow adds a Node or `uv` setup step automatically — read from the
 target file's own `command:` at the time `gate --workflows` ran. A hosted

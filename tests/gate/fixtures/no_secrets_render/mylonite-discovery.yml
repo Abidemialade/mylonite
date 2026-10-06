@@ -25,10 +25,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      # This job pushes the gate branch and opens the PR itself (the last
-      # step's `mylonite gate --open-pr`), so -- unlike the per-PR gate job
-      # -- it keeps actions/checkout's persisted credential (the default).
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked] this job pushes/opens the PR itself with it
+      # This job pushes the gate branch and opens the PR itself, but the
+      # target process runs (via `mylonite gate`, below) BEFORE that push --
+      # so the checkout must not leave a write-capable credential sitting in
+      # .git/config for the target to read while it runs. `gh auth
+      # setup-git`, right before the one step that pushes, configures git to
+      # fetch a token from `gh` (which reads GH_TOKEN, already scoped to that
+      # step) at push time instead -- no credential value is ever written to
+      # disk.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -58,6 +65,14 @@ jobs:
           # NAME=VALUE pairs. Empty when the repository secret isn't set.
           MYLONITE_LLM_HEADERS: ${{ secrets.MYLONITE_LLM_HEADERS }}
         run: |
+          # No credential is persisted by the checkout (persist-credentials:
+          # false, above). This configures git's credential helper to ask
+          # `gh` for a token (which reads GH_TOKEN from this step's own env)
+          # -- it writes no credential value to disk itself; git only
+          # invokes the helper when it actually pushes, inside `mylonite
+          # gate` below, by which point the target it ran has already
+          # stopped.
+          gh auth setup-git
           set +e
           mylonite gate --target-file .mylonite/gate/target.yaml \
             --authorize "$MYLONITE_AUTHORIZE" --open-pr
