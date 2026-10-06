@@ -820,7 +820,7 @@ def test_a_secret_span_enters_the_key_only_through_scrypt(
         return real(password, **kwargs)
 
     monkeypatch.setattr(_replay.hashlib, "scrypt", spy)
-    _replay._span_digest.cache_clear()
+    _replay._spans_digest.cache_clear()
     _stable_key_v3("claude-x", _tool_turn(f"api_key: {_OTHER_SECRET}"))
     assert calls
     assert calls[0]["n"] >= 2**15
@@ -863,3 +863,98 @@ async def test_a_key_name_only_secret_echoed_back_replays(
     )
     assert second.choices[0].message.content == "done"
     assert replay.cache_misses == 0
+
+
+def _exfil_turn(tool_secret: str, forwarded_args: str, sink_result: str) -> list[dict[str, Any]]:
+    """The exfiltration shape: the target leaks a secret in a tool output, the
+    model forwards it to a sink, and the sink answers."""
+    return [
+        {"role": "user", "content": "summarise my inbox"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "read_inbox", "arguments": "{}"},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": f"deploy key is {tool_secret}"},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c2",
+                    "type": "function",
+                    "function": {"name": "send_email", "arguments": forwarded_args},
+                }
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c2", "content": sink_result},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_target_secret_the_model_forwards_records_and_replays(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw_args = json.dumps({"body": f"key is {_SECRET}"})
+    replies = iter([_tool_call_response(raw_args), _fake_response("done")])
+
+    async def fake_acompletion(**_: Any) -> SimpleNamespace:
+        return next(replies)
+
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", fake_acompletion)
+    head = _exfil_turn(_SECRET, "", "")[:3]
+    recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="record")
+    first = await recorder(model="claude-x", messages=head)
+    live_args = first.choices[0].message.tool_calls[0].function.arguments
+    await recorder(model="claude-x", messages=_exfil_turn(_SECRET, live_args, "blocked by policy"))
+    for path in tmp_path.glob("*.json"):
+        assert _SECRET not in path.read_text(encoding="utf-8")
+
+    replay = LiteLLMRecorder(fixtures_dir=_stamped(tmp_path), mode="replay")
+    replayed = await replay(model="claude-x", messages=head)
+    replayed_args = replayed.choices[0].message.tool_calls[0].function.arguments
+    second = await replay(
+        model="claude-x", messages=_exfil_turn(_SECRET, replayed_args, "blocked by policy")
+    )
+    assert second.choices[0].message.content == "done"
+    assert (replay.cache_hits, replay.cache_misses) == (2, 0)
+
+
+def test_a_forwarded_target_secret_still_tells_two_secrets_apart() -> None:
+    """The secret the target leaked is keyed by content even after the model
+    forwards it, so a different leaked secret is a different recording."""
+    args_a = json.dumps({"body": f"key is {_SECRET}"})
+    args_b = json.dumps({"body": f"key is {_OTHER_SECRET}"})
+    a = _stable_key_v3("claude-x", _exfil_turn(_SECRET, args_a, "sent"))
+    b = _stable_key_v3("claude-x", _exfil_turn(_OTHER_SECRET, args_b, "sent"))
+    assert a != b
+
+
+def test_many_spans_in_one_string_cost_one_scrypt(monkeypatch: pytest.MonkeyPatch) -> None:
+    import hashlib
+
+    from mylonite import _replay
+
+    calls: list[int] = []
+    real = hashlib.scrypt
+
+    def spy(password: bytes, **kwargs: Any) -> bytes:
+        calls.append(1)
+        return real(password, **kwargs)
+
+    monkeypatch.setattr(_replay.hashlib, "scrypt", spy)
+    _replay._spans_digest.cache_clear()
+    listing = "\n".join(f'{{"Key": "photos/2026/img_{i:04d}.jpg"}}' for i in range(500))
+    messages = _tool_turn(listing)
+    _stable_key_v3("claude-x", messages)
+    assert calls == [1]
+    _stable_key_v3("claude-x", messages)  # a later turn repeats it: cached
+    assert calls == [1]

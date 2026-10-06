@@ -505,6 +505,21 @@ def _snapshot_earlier(this_out: Path, paths: list[Path]) -> _EarlierFiles:
     return _EarlierFiles(files=files, fixtures=fixtures)
 
 
+def _is_link(path: Path) -> bool:
+    """True for a symlink, or a Windows junction (which ``is_symlink`` misses
+    before Python 3.12)."""
+    if path.is_symlink():
+        return True
+    isjunction = getattr(os.path, "isjunction", None)
+    if isjunction is not None:
+        return bool(isjunction(path))
+    try:
+        attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+    except OSError:
+        return False
+    return bool(attributes & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
+
+
 def _put_back_earlier(this_out: Path, rejected_dir: Path, earlier: _EarlierFiles) -> None:
     """Restore what this finding's folder held before the run.
 
@@ -691,6 +706,16 @@ def _process_one_finding(
     test_path = this_out / generated.filename
     exploit_path = this_out / expected_exploit
     written = [test_path, exploit_path]
+    fixtures_dir = this_out / "fixtures"
+    if _is_link(fixtures_dir):
+        # Gate replaces this folder before it records; a link would point
+        # that at somewhere else. Never follow it, never delete through it.
+        reason = (
+            f"its fixtures folder {fixtures_dir} is a symlink or junction, which gate "
+            "will not follow or replace; make it a plain folder, then re-run"
+        )
+        echo(f"{prefix}{reason} — skipping." if multi else f"{prefix}{reason} — cannot gate.")
+        return _FindingOutcome(exploit=exploit, stage="validate_failed", reason=reason)
     # An earlier run may have kept a test under this same id. Read it first,
     # so a run that does not keep can put it back untouched.
     earlier = _snapshot_earlier(this_out, written)
@@ -728,10 +753,11 @@ def _process_one_finding(
         return _FindingOutcome(exploit=exploit, stage="validate_failed", reason=reason)
     except BaseException:
         # Any other stop (budget, interrupt, a target that went down) leaves
-        # the run's partial recording as evidence and restores the earlier
-        # fixtures this run removed, before the error propagates.
-        if earlier.fixtures is not None:
-            _put_back_fixtures(this_out, _rejected_evidence_dir(out_dir, finding_id), earlier)
+        # the run's partial recording as evidence and restores what an earlier
+        # run kept under this id (test, exploit and fixtures), before the error
+        # propagates.
+        if earlier.files or earlier.fixtures is not None:
+            _put_back_earlier(this_out, _rejected_evidence_dir(out_dir, finding_id), earlier)
         raise
     if report is None:
         reason = "the validator returned nothing"

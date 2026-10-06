@@ -396,6 +396,20 @@ rewording them to force a finding would teach to the test. One W1 vector needs n
 cooperation, a tool list that changes mid-session; the scanner detects it, but the
 reference app does not seed it.
 
+## 13. Recorded fixtures and guessable secrets
+
+The replay fixtures `gate` commits never hold a secret-shaped value (a provider
+key, a bearer token, a credential assignment of 12 or more characters) or a fast
+hash of one. Such a value still has to tell two recordings apart, so it enters
+the replay key through scrypt, salted with the text around it. Anyone holding
+the repository can rebuild that text by replaying the fixtures, so a guess
+costs one scrypt (about 0.1 s and 32 MiB on one CPU core). That puts a random
+key out of reach, but it only slows guessing a dictionary-word password or a
+passphrase built from a known pattern. A short or unshaped credential
+(`password: hunter2`) is not secret-shaped at all: it is hashed into the key
+like any other text and can be guessed quickly. Treat any credential a recorded
+target saw as confirmable from the repository, and rotate it.
+
 ## Reporting something missing
 
 If you hit a limitation that is not on this page, that is worth an issue: an undocumented

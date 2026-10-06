@@ -36,12 +36,13 @@ Two cache-key algorithms exist, selected PER ``fixtures_dir`` (see
   (e.g. ``timeout``). v2 is kept for replay of directories recorded before
   v3; nothing records NEW fixtures with it.
 * **v3** (:func:`_stable_key_v3`, the current :data:`CACHE_KEY_VERSION`)
-  hashes the same fields as v2, but over their REDACTED form: every string
-  goes through :func:`mylonite._redaction.redact` first. A v3 recording also
-  stores only the redacted response (see "Redaction" below), so a later turn
-  that carries a recorded reply back into the conversation hashes the same
-  at replay time as it did at record time. A call with nothing secret-shaped
-  in it hashes identically under v2 and v3.
+  hashes the same fields as v2 with secret-shaped spans handled by origin: a
+  recorded reply, and the target's echo of a span the model introduced, are
+  hashed in redacted form (a v3 recording stores only the redacted response,
+  see "Redaction" below), and every other secret-shaped span enters the key
+  only through a slow salted digest, so two conversations that differ inside
+  a secret never share a key. A call with nothing secret-shaped in it hashes
+  identically under v2 and v3.
 
 Redaction
 ---------
@@ -193,65 +194,74 @@ def _stable_key_v2(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
 def _stable_key_v3(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
     """v3 cache-key algorithm: the v2 fields, with secret-shaped spans handled.
 
-    Three rules, applied to the payload after it is canonicalised to plain
-    JSON (``default=str``, as v2 does):
+    The payload is canonicalised to plain JSON (``default=str``, as v2 does),
+    then the messages are walked IN ORDER, tracking where each secret-shaped
+    span (:func:`mylonite._redaction.secret_spans`) first appeared:
 
     1. **Recorded replies are keyed redacted.** An ``assistant`` message is
        a reply this recorder stored redacted, so every string in it goes
        through :func:`mylonite._redaction.redact`. At replay time the agent
        copies the redacted reply back; at record time it copied the raw one;
        both redact to the same text (:func:`redact` is idempotent).
-    2. **Echoes of a reply are keyed as the redacted echo.** In every other
-       message, each secret span that an earlier assistant message carried is
-       replaced by the placeholder first, because at replay time the target
-       is sent the redacted value and echoes that instead.
-    3. **Everything else that is secret-shaped is keyed by content, slowly.**
-       A secret-shaped span left in a tool, user or system message came from
-       the target or the caller, not from a stored reply, so it is the same at
-       record and replay time and must tell two recordings apart: a guard
-       that masks a credential and one that leaks it must never share a key.
-       The span is replaced by the placeholder in the hashed payload, and its
-       content enters the key only through :func:`_span_digest` (scrypt,
-       salted with its own redacted context), so the stored key and file name
-       are not a fast hash of the secret.
+    2. **A span the model introduced is keyed as its redacted echo.** A span
+       in an assistant message that no EARLIER non-assistant message carried
+       came from the model. At replay time the target is sent the redacted
+       value, so in every LATER non-assistant message that span is replaced
+       by the placeholder before keying.
+    3. **Every other secret-shaped span is keyed by content, slowly.** A
+       span that the target, the user or the system prompt emitted (including
+       one the model later forwards: the exfiltration case) is the same at
+       record and replay time and must tell two recordings apart, so a guard
+       that masks a credential and one that leaks it never share a key. It is
+       replaced by the placeholder in the hashed payload, and the string's
+       spans enter the key only through :func:`_spans_digest` (one scrypt
+       per string, salted with the string's redacted form), so the stored key
+       and file name are not a fast hash of a secret-shaped value.
 
+    Origin is decided from the conversation alone, the same way at record and
+    replay time. One case still differs, loudly (a miss): a target that
+    emitted a span, then later echoes the model's copy of that same span.
     With nothing secret-shaped in a call, the hashed body is exactly v2's.
     """
     canonical = json.loads(
         json.dumps(_identity_payload(model, messages, **kwargs), sort_keys=True, default=str)
     )
-    echoes: set[str] = set()
-    for message in canonical.get("messages", []):
-        if isinstance(message, dict) and message.get("role") == "assistant":
-            for leaf in _string_leaves(message):
-                echoes.update(secret_spans(leaf))
-    ordered_echoes = sorted(echoes, key=len, reverse=True)
     digests: list[str] = []
 
-    def keyed(value: Any) -> Any:
+    def keyed(value: Any, echoes: list[str]) -> Any:
         if isinstance(value, str):
-            for echo in ordered_echoes:
+            for echo in echoes:
                 value = value.replace(echo, REDACTION_PLACEHOLDER)
             masked = redact(value)
-            digests.extend(_span_digest(span, masked) for span in secret_spans(value))
+            spans = secret_spans(value)
+            if spans:
+                digests.append(_spans_digest(tuple(spans), masked))
             return masked
         if isinstance(value, dict):
-            return {k: keyed(v) for k, v in sorted(value.items())}
+            return {k: keyed(v, echoes) for k, v in sorted(value.items())}
         if isinstance(value, list):
-            return [keyed(v) for v in value]
+            return [keyed(v, echoes) for v in value]
         return value
 
     hashed: dict[str, Any] = {}
     for name, value in sorted(canonical.items()):
-        if name == "messages" and isinstance(value, list):
-            hashed[name] = [
-                _redact_strings(m)
-                if isinstance(m, dict) and m.get("role") == "assistant"
-                else keyed(m)
-                for m in value
-            ]
-        else:
-            hashed[name] = keyed(value)
+        if name != "messages" or not isinstance(value, list):
+            hashed[name] = keyed(value, [])
+            continue
+        emitted: set[str] = set()  # spans a non-assistant message carried so far
+        model_spans: set[str] = set()  # spans the model introduced so far
+        keyed_messages: list[Any] = []
+        for message in value:
+            if isinstance(message, dict) and message.get("role") == "assistant":
+                for leaf in _string_leaves(message):
+                    model_spans.update(span for span in secret_spans(leaf) if span not in emitted)
+                keyed_messages.append(_redact_strings(message))
+                continue
+            for leaf in _string_leaves(message):
+                emitted.update(secret_spans(leaf))
+            echoes = sorted(model_spans, key=len, reverse=True)
+            keyed_messages.append(keyed(message, echoes))
+        hashed[name] = keyed_messages
     if digests:
         hashed[_SPAN_DIGESTS_FIELD] = digests
     body = json.dumps(hashed, sort_keys=True)
@@ -261,11 +271,12 @@ def _stable_key_v3(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
 #: Hashed-payload field (never stored) that carries the span digests.
 _SPAN_DIGESTS_FIELD = "_secret_span_digests"
 
-#: scrypt cost for :func:`_span_digest`: 2**15 x 8 x 128 bytes = 32 MiB of
-#: memory and on the order of 0.1 s per span on one core. A guess at a span
-#: costs the same, so recovering a random 12-character credential-alphabet
-#: value (64**12, about 4.7e21 candidates) from a stored key is out of reach,
-#: and a dictionary attack pays this per guess per context.
+#: scrypt cost for :func:`_spans_digest`: 2**15 x 8 x 128 bytes = 32 MiB of
+#: memory and on the order of 0.1 s per string on one core. A guess at a
+#: span costs the same, so recovering a random 12-character
+#: credential-alphabet value (64**12, about 4.7e21 candidates) from a stored
+#: key is out of reach, and a dictionary attack pays this per guess per
+#: context. It slows, but does not prevent, guessing a weak password.
 _SCRYPT_N = 2**15
 _SCRYPT_R = 8
 _SCRYPT_P = 1
@@ -273,17 +284,18 @@ _SCRYPT_MAXMEM = 2**26
 
 
 @functools.lru_cache(maxsize=4096)
-def _span_digest(span: str, context: str) -> str:
-    """A slow, context-salted digest of one secret-shaped span.
+def _spans_digest(spans: tuple[str, ...], context: str) -> str:
+    """A slow, context-salted digest of the secret-shaped spans of one string.
 
-    The salt is the redacted string the span sits in, so a table built for
-    one context does not carry over to another. Cached, because the same
-    span in the same context (a secret in a system prompt) recurs on every
-    call of a run.
+    One scrypt per string, whatever its span count, so a tool output that
+    lists hundreds of path-like ``key: ...`` values costs one call, not one
+    per value. The salt is the string's redacted form, so a table built for
+    one context does not carry over to another. Cached, because a
+    conversation repeats its earlier messages on every later turn.
     """
     salt = hashlib.sha256(("mylonite-fixture-span-v3\0" + context).encode("utf-8")).digest()
     return hashlib.scrypt(
-        span.encode("utf-8"),
+        json.dumps(list(spans)).encode("utf-8"),
         salt=salt,
         n=_SCRYPT_N,
         r=_SCRYPT_R,

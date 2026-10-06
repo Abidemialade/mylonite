@@ -129,7 +129,9 @@ The project enforces the following non-negotiables:
    redacted before they are written, because a target can echo a live secret
    into a model reply. Their replay key keys a stored reply in redacted form,
    and any other secret-shaped value only through a slow salted hash (scrypt),
-   so no fixture holds a secret or a fast hash of one.
+   so no fixture holds a secret-shaped value or a fast hash of one. The slow
+   hash slows, but does not prevent, guessing a weak password; see
+   [`docs/limitations.md`](docs/limitations.md#13-recorded-fixtures-and-guessable-secrets).
    Redaction is not applied to generated test source, which is loaded as
    code and must stay byte-for-byte as generated.
 4. **No evasion features.** The project does not accept contributions that add

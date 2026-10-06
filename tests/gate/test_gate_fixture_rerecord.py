@@ -31,12 +31,14 @@ from mylonite.gate.orchestrator import ScanOutcomeBundle, _finding_ids, run_gate
 _OLD_META = '{"cache_key_version": 2}'
 
 
-def _run(out_dir: Path, exploits: list[ExploitRecord], validate) -> object:  # type: ignore[no-untyped-def]
+def _run(  # type: ignore[no-untyped-def]
+    out_dir: Path, exploits: list[ExploitRecord], validate, source: str = "# new\n"
+) -> object:
     return run_gate(
         out_dir=out_dir,
         scan_fn=lambda: ScanOutcomeBundle(outcome=_outcome(), exploits=exploits),
         generate_fn=lambda e: GeneratedTest(
-            framework="pytest", filename="t.py", source="# new\n", exploit=e
+            framework="pytest", filename="t.py", source=source, exploit=e
         ),
         validate_fn=validate,
         open_pr_fn=_Recorder(),
@@ -119,3 +121,47 @@ def test_any_other_stop_restores_the_older_fixtures_and_propagates(tmp_path: Pat
     fixtures = out_dir / "fixtures"
     assert sorted(p.name for p in fixtures.iterdir()) == ["_meta.json", "old.json"]
     assert (fixtures / "_meta.json").read_text(encoding="utf-8") == _OLD_META
+
+
+def test_any_other_stop_also_restores_the_earlier_test_and_exploit(tmp_path: Path) -> None:
+    out_dir = tmp_path / "gate"
+    _run(out_dir, [_exploit(PROVEN)], _first_kept)
+    before = _snapshot(out_dir)
+
+    def validate(test: GeneratedTest, finding_dir: Path) -> ValidationReport:
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        _run(out_dir, [_exploit(PROVEN)], validate, source="# second\n")
+    assert _snapshot(out_dir) == before
+
+
+def _first_kept(test: GeneratedTest, finding_dir: Path) -> ValidationReport:
+    fixtures = finding_dir / "fixtures"
+    fixtures.mkdir(parents=True, exist_ok=True)
+    (fixtures / "_meta.json").write_text('{"cache_key_version": 3}', encoding="utf-8")
+    (fixtures / "first.json").write_text('{"run": "first"}', encoding="utf-8")
+    return _report(proven=True)
+
+
+def test_a_linked_fixtures_folder_fails_its_finding_in_one_line(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    out_dir = tmp_path / "gate"
+    out_dir.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "keep.json").write_text("{}", encoding="utf-8")
+    try:
+        (out_dir / "fixtures").symlink_to(elsewhere, target_is_directory=True)
+    except OSError:
+        pytest.skip("this machine cannot create a directory symlink")
+
+    def validate(test: GeneratedTest, finding_dir: Path) -> ValidationReport:
+        raise AssertionError("validation must not run")
+
+    result = _run(out_dir, [_exploit(PROVEN)], validate)
+
+    assert result.kept_count == 0  # type: ignore[attr-defined]
+    assert (elsewhere / "keep.json").is_file()
+    out = capsys.readouterr().out
+    assert "symlink or junction" in out
+    assert "Traceback" not in out

@@ -341,20 +341,30 @@ validator error shows up there as `***REDACTED***`. The recorded replay files
 under `fixtures/` (written for the bundled reference agent) are redacted the
 same way before they are written, and they still replay offline. These files
 use `cache_key_version: 3` in `fixtures/_meta.json`: a stored reply, and the
-target's echo of it, are keyed in redacted form, and any other secret-shaped
-value in the conversation is keyed by its content through a slow salted hash.
-Two runs whose tool output differs only inside a secret never share a
-recording, and neither the files nor their names hold a secret or a fast hash
-of one.
+target's echo of a value the model introduced, are keyed in redacted form, and
+every other secret-shaped value in the conversation (including a key the target
+leaked and the model then forwarded) is keyed by its content through a slow
+salted hash. Two runs whose tool output differs only inside a secret-shaped
+value never share a recording, and neither the files nor their names hold a
+secret-shaped value or a fast hash of one. A short or unshaped credential is
+hashed into the key like any other text; see
+[Limitations](limitations.md#13-recorded-fixtures-and-guessable-secrets).
 
 A re-run of `gate` replaces the finding's own `fixtures/` folder and puts the
-earlier folder back if the run does not keep or stops on an error. `validate`
-checks its `fixtures/` folder before the first model call and exits 2 with one
-line when the folder was recorded in an older format (`cache_key_version` 1
-or 2), names a version Mylonite does not know, has a damaged `_meta.json`, or
-holds recordings with no `_meta.json`; delete that folder and run again. An
-older folder still replays. Fixtures recorded before this release were not
-redacted; re-gate them, or review them before you share them.
+earlier folder, test and exploit back if the run does not keep or stops on an
+error. A `fixtures/` that is a symlink or junction fails that finding with one
+line; gate never follows or deletes it. `validate` checks its `fixtures/`
+folder before the first model call and exits 2 with one line when the folder
+was recorded in an older format (`cache_key_version` 1 or 2), names a version
+Mylonite does not know, has a damaged `_meta.json`, or holds recordings with
+no `_meta.json`; delete that folder and run again.
+
+An older folder replays when its `_meta.json` names its `cache_key_version`.
+One that holds recordings and no `_meta.json` fails replay with a message
+rather than guessing how it was keyed: add `{"cache_key_version": 2}` (`1`
+for the oldest sets) as its `_meta.json`, or re-record it. Fixtures recorded
+before this release were not redacted; re-gate them, or review them before
+you share them.
 
 Two flags opt in to the rest, independently:
 

@@ -26,18 +26,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that carried a secret-shaped value (a provider key, a bearer token, a
   credential assignment of 12 or more characters) was written verbatim; it is
   now redacted before it is written, with the same rules as the exploit record
-  and `PR_BODY.md`. The recording still replays offline. The replay key
-  (`cache_key_version: 3`) keys a stored reply, and the target's echo of it, in
-  redacted form, and keys any other secret-shaped value by its content through
-  a slow salted hash, so two runs whose tool output differs only inside a
-  secret never share a recording, and no secret or fast hash of one is written.
-  A re-run of `gate` replaces the finding's own `fixtures/` folder, and puts
-  the earlier one back if the run does not keep. `validate` checks its
-  fixtures folder before the first model call and exits 2 with one line if it
-  holds an older or unknown key version, a damaged `_meta.json`, or recordings
-  with no `_meta.json`. Older folders still replay. Fixtures recorded before
-  this release were not redacted: re-gate them, or review them before you
-  share them. The committed demo and example fixtures are unchanged.
+  and `PR_BODY.md`. The recording still replays offline, including the
+  exfiltration shape where the target leaks a key and the model forwards it.
+  The replay key (`cache_key_version: 3`) keys a stored reply, and the target's
+  echo of a value the model introduced, in redacted form, and keys every other
+  secret-shaped value by its content through a slow salted hash (one scrypt
+  per string). Two runs whose tool output differs only inside a secret-shaped
+  value never share a recording, and no secret-shaped value, or fast hash of
+  one, is written. A short or unshaped credential is not covered; see
+  [Limitations](docs/limitations.md). A re-run of `gate` replaces the
+  finding's own `fixtures/` folder, and puts the earlier folder, test and
+  exploit back if the run does not keep or stops; a `fixtures/` that is a
+  symlink or junction fails that finding with one line and is never followed.
+  `validate` checks its fixtures folder before the first model call and exits
+  2 with one line if it holds an older or unknown key version, a damaged
+  `_meta.json`, or recordings with no `_meta.json`. A folder from an earlier
+  release with a `_meta.json` that names its `cache_key_version` still
+  replays; one with recordings and no `_meta.json` now fails replay with a
+  message instead of guessing: add `{"cache_key_version": 2}` (or `1` for
+  the oldest sets) as its `_meta.json`, or re-record it. Fixtures recorded
+  before this release were not redacted: re-gate them, or review them before
+  you share them. The committed demo and example fixtures are unchanged.
 
 - **A server notification during session close no longer costs an attempt.**
   When a tool call turned on a server's timed notifications (log messages,
