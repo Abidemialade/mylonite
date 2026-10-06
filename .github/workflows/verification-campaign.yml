@@ -8,7 +8,7 @@
 #     score with the deterministic judge.
 # Layers 1 and 3 are recorded as not-run (the gate treats them as best-effort).
 #
-# Manual dispatch only: it spends tokens and needs the MYLONITE_LLM_KEY repo
+# Manual dispatch only: it spends tokens and needs the matching provider repo
 # secret. A dispatch with no key skips with a notice instead of failing.
 # The sanitised result directory is uploaded as an artifact; a maintainer
 # reviews and commits it. This workflow never writes to the repository.
@@ -35,13 +35,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
+      # Each provider's key comes from its own repo secret; the model id's
+      # prefix decides which one this run needs (the guard below).
       ANTHROPIC_API_KEY: ${{ secrets.MYLONITE_LLM_KEY }}
+      OPENAI_API_KEY: ${{ secrets.MYLONITE_OPENAI_KEY }}  # pragma: allowlist secret
     steps:
-      - name: Guard -- skip (not fail) a dispatch with no key configured
+      - name: Guard -- skip (not fail) a dispatch with no key for its model
         id: guard
+        env:
+          MODEL: ${{ inputs.model }}
         run: |
-          if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::notice::MYLONITE_LLM_KEY is not set; skipping the verification campaign."
+          case "$MODEL" in
+            anthropic/*) val="$ANTHROPIC_API_KEY"; src=MYLONITE_LLM_KEY ;;
+            openai/*) val="$OPENAI_API_KEY"; src=MYLONITE_OPENAI_KEY ;;
+            *) echo "::error::model must start with anthropic/ or openai/, got '$MODEL'"; exit 1 ;;
+          esac
+          if [ -z "$val" ]; then
+            echo "::notice::$src is not set; skipping the verification campaign."
             echo "run=false" >> "$GITHUB_OUTPUT"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
