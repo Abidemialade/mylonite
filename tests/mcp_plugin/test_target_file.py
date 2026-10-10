@@ -1091,3 +1091,43 @@ def test_reserved_set_covers_every_provider_credential() -> None:
     from mylonite.plugins._mcp.target_file import RESERVED_CREDENTIAL_ENV_VARS
 
     assert set(_reserved_names()) <= RESERVED_CREDENTIAL_ENV_VARS
+
+
+def test_remote_target_refusal_names_every_reserved_variable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Several reserved references across ``headers`` and ``request.headers``
+    are reported together: the error names each variable and field, and no
+    value appears anywhere."""
+    values = {
+        "GH_TOKEN": "fake-gh-value-not-a-real-secret",  # pragma: allowlist secret
+        "OPENAI_API_KEY": "fake-openai-value-not-a-real-secret",  # pragma: allowlist secret
+        "MYLONITE_LLM_KEY": "fake-llm-value-not-a-real-secret",  # pragma: allowlist secret
+    }
+    for name, value in values.items():
+        monkeypatch.setenv(name, value)
+    path = tmp_path / "target.yaml"
+    path.write_text(
+        "family: acme\ntransport: rest\n"
+        "headers:\n  X-Gh: ${GH_TOKEN}\n"
+        "request:\n  url: https://agent.example.com/chat\n"
+        '  body: \'{"p": "{prompt}"}\'\n'
+        "  headers:\n"
+        "    Authorization: Bearer ${OPENAI_API_KEY}\n"
+        "    X-Llm: ${MYLONITE_LLM_KEY}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        load_target_file(path)
+    msg = str(excinfo.value)
+    for field, name in (
+        ("headers.X-Gh", "GH_TOKEN"),
+        ("request.headers.Authorization", "OPENAI_API_KEY"),
+        ("request.headers.X-Llm", "MYLONITE_LLM_KEY"),
+    ):
+        assert f"{field} -> ${{{name}}}" in msg
+    captured = capsys.readouterr()
+    for value in values.values():
+        assert value not in msg
+        assert value not in captured.err + captured.out
