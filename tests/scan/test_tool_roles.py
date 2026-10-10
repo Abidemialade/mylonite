@@ -247,3 +247,14 @@ def test_content_slot_template_skips_a_nested_id_shaped_integer_sibling() -> Non
         },
     )
     assert _content_slot_template(tool) is None
+
+
+def test_the_verify_tool_pick_matches_whole_words_only() -> None:
+    """A read word inside a longer word (``forget``, ``catalog``) does not make
+    a verify tool (#303)."""
+    from mylonite.scan.tool_roles import _classify_tools
+
+    tools = [_tool("forget_memories", {}, []), _tool("catalog_items", {}, [])]
+    assert _classify_tools(tools).verify_tool is None
+    tools.append(_tool("list_sent", {}, []))
+    assert _classify_tools(tools).verify_tool == "list_sent"

@@ -1594,3 +1594,78 @@ async def test_an_uncalibrated_target_is_not_confirm_capable() -> None:
     meta = await _invoke(_Store(), _Script([_send()]))
     assert meta["confirm_capable"] == "false"
     assert meta["calibrated"] == "false"
+
+
+# --- an uncertified verify tool is not a read (#303) ----------------------------
+
+
+class _QueueSession(_StoreSession):
+    """``mail_queue`` is the probe's verify tool. Called bare it lists the
+    outbox; called with ``to`` it sends, so an attack can land through it."""
+
+    _TOOL_NAMES = (*_StoreSession._TOOL_NAMES, "mail_queue")
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        if name == "mail_queue":
+            self.calls.append((name, dict(arguments)))
+            if arguments.get("to"):
+                self.store.outbox.append(f"to={arguments['to']} body=queued")
+                return _text("sent")
+            return _text("\n".join(self.store.outbox) or "outbox empty")
+        return await super().call_tool(name, arguments)
+
+
+def _queue_spec() -> target_registry.TargetSpec:
+    spec = build_target_spec(
+        TargetFile(
+            family=FAMILY,
+            command="python",
+            args=["-m", "srv"],
+            weakness_classes=["W4"],
+            effect_probe=EffectProbeSpec(verify_tool="mail_queue", expect_marker=MARKER),
+        )
+    )
+    target_registry.register_target(spec)
+    return spec
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fresh_annotation_notices")
+@pytest.mark.parametrize("status", [None, "failed", "no_probe", "not_authorized"])
+async def test_an_uncertified_verify_tool_call_is_a_dispatch(status: str | None) -> None:
+    """Nothing has shown the probe's ``mail_queue`` only reads, and its name
+    does not read as a read. A call the agent makes through it is a dispatch,
+    never a clean "not called" (#303)."""
+    from mylonite.plugins._mcp import calibration
+
+    spec = _queue_spec()
+    if status is not None:
+        _recorded(spec, status)
+    try:
+        meta = await _invoke_annotated(
+            [("mail_queue", {"to": "someone@example.test"})], session_cls=_QueueSession
+        )
+    finally:
+        calibration.clear_calibrations()
+    assert meta["trace_outcome"] == "dispatched-ok"
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fresh_annotation_notices")
+@pytest.mark.parametrize(
+    ("status", "certified"), [("certified", ("send_email",)), ("confirm_only", ())]
+)
+async def test_a_calibrated_verify_tool_call_stays_a_read(
+    status: str, certified: tuple[str, ...]
+) -> None:
+    """Once calibration has shown the probe reads what a write leaves behind,
+    the agent reading through the verify tool is a read, as before."""
+    from mylonite.plugins._mcp import calibration
+
+    spec = _queue_spec()
+    _recorded(spec, status, *certified)
+    try:
+        meta = await _invoke_annotated([("mail_queue", {})], session_cls=_QueueSession)
+    finally:
+        calibration.clear_calibrations()
+    assert meta["trace_outcome"] == "not-called"
