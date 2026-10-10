@@ -32,6 +32,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back. [Reading the results](docs/reading-results.md#the-per-class-summary)
   links to the same explanation from the per-class summary. No behaviour
   changed.
+- **A target's tool name or argument value can no longer break out of its
+  Markdown code span in the gate PR body.** `PR_BODY.md`'s evidence lines,
+  "Located at" locus, and recommendation headlines quote target-controlled
+  text — a tool name, an argument, a quoted value — as a Markdown inline code
+  span. The span was previously a fixed single backtick, so a value
+  containing its own backtick closed the span early and let the rest of the
+  value render as real Markdown (a link, an image, bold text) instead of
+  literal text. A new `code_span()` helper (`src/mylonite/_markdown.py`)
+  always fences a value with one more backtick than the longest backtick run
+  already inside it, pads a value that starts or ends with a backtick, and
+  strips control characters first; it's used everywhere target text reaches
+  the PR body, so the same fix carries through to the SARIF message and the
+  JSON bundle's `label` field. A plain tool name or value renders exactly as
+  before.
+- **A target's text can no longer write raw terminal escape sequences to
+  your console or CI log.** `mylonite`'s console-output boundary
+  (`echo`/`console_print` in `src/mylonite/_cli_io.py`) already redacted
+  secret-shaped tokens; it now also strips ANSI escape sequences (CSI, OSC,
+  and other `ESC`-led sequences) and other C0/C1 control bytes from anything
+  it prints, keeping `\n` and `\t`. Previously, a tool result, error message
+  or description containing raw control bytes reached the terminal unchanged
+  and could clear the screen, move the cursor, or rewrite the window title.
 
 ## [0.12.0] - 2026-10-06
 

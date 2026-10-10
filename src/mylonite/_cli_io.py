@@ -12,6 +12,7 @@ Enforced by ``tests/test_cli_output_boundary.py``.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -31,10 +32,46 @@ __all__ = [
     "missing_target_file_message",
 ]
 
+# 7-bit ESC-led escape sequences (F3): a CSI (`ESC [ ... final-byte`), an OSC
+# (`ESC ] ... BEL` or `... ESC \`), and any other Fe-class escape (`ESC` +
+# one byte in 0x40-0x5F) -- the shapes a target's own text could smuggle to
+# move the cursor, clear the screen, or rewrite a terminal title in a scan
+# log/CI console a human is reading. ``re.DOTALL`` lets an OSC's `.*?` cross
+# embedded newlines, matching how real terminals treat OSC.
+_ESC_SEQUENCE_RE = re.compile(
+    r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[@-Z\\\]^_])", re.DOTALL
+)
+# Remaining raw C0/C1 control bytes -- including CR (itself a
+# cursor-manipulation primitive, overwriting the current line) and the
+# single-byte 8-bit equivalents of the CSI (0x9b) and OSC (0x9d) introducers,
+# which some terminals/targets emit directly instead of the 2-byte ESC form.
+# Deliberately NOT matched as a full 8-bit sequence (introducer + params +
+# final byte): the 8-bit CSI/OSC grammar's "final byte" range overlaps
+# ordinary ASCII letters, so attempting to consume a whole sequence risks
+# eating the start of unrelated following text; stripping just the
+# introducer byte already breaks the sequence. ``\n``/``\t`` are kept, since
+# they are the only two a human-facing CLI line legitimately needs.
+_CONTROL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _strip_terminal_controls(text: str) -> str:
+    """Remove ANSI escape sequences and C0/C1 control bytes from ``text``.
+
+    A target's tool output, description, or error message can contain raw
+    control bytes; printed as-is, they reach a real terminal (or a CI log
+    viewer that renders them) and can clear the screen, move the cursor, or
+    rewrite the window/tab title (F3) -- the terminal analogue of F9's
+    Markdown-injection gap. ``\\n`` and ``\\t`` are kept so ordinary
+    multi-line/tab-formatted output is unaffected.
+    """
+    text = _ESC_SEQUENCE_RE.sub("", text)
+    return _CONTROL_RE.sub("", text)
+
 
 def echo(message: str = "", *, err: bool = False) -> None:
-    """Print ``message`` with secret-shaped tokens masked."""
-    typer.echo(redact(message), err=err)
+    """Print ``message`` with secret-shaped tokens masked and terminal
+    control sequences stripped."""
+    typer.echo(_strip_terminal_controls(redact(message)), err=err)
 
 
 def echo_err(message: str = "") -> None:
@@ -71,7 +108,7 @@ def console_print(console: Console, renderable: object = "", **kwargs: Any) -> N
     defense for the plain-string case, not the only one.
     """
     if isinstance(renderable, str):
-        renderable = redact(renderable)
+        renderable = _strip_terminal_controls(redact(renderable))
     console.print(renderable, **kwargs)
 
 

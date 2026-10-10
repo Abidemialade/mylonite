@@ -779,3 +779,49 @@ def test_pr_body_at_the_default_three_iterations_is_unchanged():
     assert "- **flakiness**: pass — gap +100%" in body
     assert "flakiness ✓" in body
     assert "not measured" not in body
+
+
+# --- F9: Markdown injection via target-controlled text -----------------------
+
+#: A tool name the target's own `tools/list` could supply: a backtick (to
+#: close a naive single-backtick code span early) followed by a Markdown
+#: image and link. `https://example.invalid` is reserved for documentation/
+#: examples (RFC 2606-style) -- never a live host.
+_EVIL_TOOL_NAME = (
+    "lookup` ![pwned](https://example.invalid/x.png) [click](https://example.invalid/y) `tail"
+)
+
+
+def test_pr_body_markdown_injection_via_tool_name_renders_as_plain_text():
+    """F9: before the fix, `loc.label` and the recommendation's evidence/
+    headline quoted the tool name with a bare, fixed-width backtick span. A
+    tool name containing its own backtick closed that span early, letting
+    the rest of the attacker/target-controlled string render as a real
+    Markdown image and link in the committed, GitHub-rendered gate PR body.
+    """
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed", target_id="mcp:custom")
+    ex = ex.model_copy(
+        update={
+            "payload": ex.payload.model_copy(
+                update={"metadata": {"consequential_tool": _EVIL_TOOL_NAME}}
+            )
+        }
+    )
+    body = build_pr_body(ex, _reference_report(3))
+
+    # The literal attacker-supplied text is still present (nothing is
+    # dropped)...
+    assert "![pwned](https://example.invalid/x.png)" in body
+    assert "[click](https://example.invalid/y)" in body
+
+    # ...but it never parses as a real Markdown image or link: rendering the
+    # whole PR body must produce no <img>/<a> element pointing at the
+    # attacker-controlled host (a legitimate citation link to Mylonite's own
+    # MCP-spec source is expected elsewhere in the body and is not what this
+    # test is about).
+    from markdown_it import MarkdownIt
+
+    html = MarkdownIt().render(body)
+    assert "<img" not in html
+    assert 'href="https://example.invalid' not in html
+    assert 'src="https://example.invalid' not in html
