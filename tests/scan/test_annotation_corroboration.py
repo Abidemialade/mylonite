@@ -22,6 +22,7 @@ from mylonite.contracts._types import AdapterResponse, Payload
 from mylonite.scan.control_shim import DEFAULT_FETCH_ALLOWLIST
 from mylonite.scan.effect_verdict import (
     EffectEvidence,
+    LinkResult,
     classify_trace,
     decide,
     dispatched_tools,
@@ -113,9 +114,19 @@ def test_an_errored_annotation_only_call_stays_dispatched_error() -> None:
 
 
 def test_link_for_is_unchanged_so_no_new_finding_appears() -> None:
-    """``link_for`` still reads the hint, so the call can never token-link."""
-    trace = [_call()]
-    assert link_for(trace, seed_tool_name=SEED_TOOL, tool_annotations=READ_ONLY).kind == "unlinked"
+    """``link_for`` still reads the hint, so the call can never token-link.
+
+    The call carries the attempt's token. Without the hint it token-links;
+    with it, ``link_for`` skips the call as a read and links nothing, which is
+    what keeps an annotation-only call from becoming a new finding."""
+    token = "dummy-token@example.test"
+    trace = [{**_call(), "args": {"payment_id": "dummy-p1", "note": token}}]
+    unannotated = link_for(trace, exfil_tokens=(token,), seed_tool_name=SEED_TOOL)
+    annotated = link_for(
+        trace, exfil_tokens=(token,), seed_tool_name=SEED_TOOL, tool_annotations=READ_ONLY
+    )
+    assert unannotated.kind == "token-linked"
+    assert annotated == LinkResult("unlinked")
 
 
 # --- decide ---------------------------------------------------------------------------

@@ -1423,6 +1423,85 @@ async def test_an_uncalibrated_probe_never_logs_a_mismatch(
     assert not [r for r in caplog.records if "readOnlyHint=true" in r.getMessage()]
 
 
+class _WritingLogSession(_AnnotatedSession):
+    """``log_event`` (annotated ``readOnlyHint=False``) writes the marker to the outbox."""
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        if name == "log_event":
+            self.calls.append((name, dict(arguments)))
+            self.store.outbox.append(f"to={MARKER} body=logged")
+            return _text("logged")
+        return await super().call_tool(name, arguments)
+
+
+async def _mismatch_logs(
+    caplog: pytest.LogCaptureFixture,
+    turns: list[tuple[str, dict[str, Any]]],
+    session_cls: type[_StoreSession],
+    *certified: str,
+) -> tuple[dict[str, str], list[Any]]:
+    from mylonite.plugins._mcp import calibration
+
+    spec = _outbox_spec()
+    _certified_through(spec, *certified)
+    try:
+        with caplog.at_level("WARNING", logger="mylonite.plugins._mcp._session_adapter"):
+            meta = await _invoke_annotated(turns, session_cls=session_cls)
+    finally:
+        calibration.clear_calibrations()
+    # Every warning the adapter logged, not only mismatch-worded ones, so a
+    # log line written for a tool with no mismatch would show up here too.
+    adapter_logger = "mylonite.plugins._mcp._session_adapter"
+    return meta, [r for r in caplog.records if r.name == adapter_logger]
+
+
+class _TwoReadOnlySession(_WritingAnnotatedSession):
+    """A second tool, ``open_edges``, is also annotated read-only with no read verb."""
+
+    _TOOL_NAMES = (*_WritingAnnotatedSession._TOOL_NAMES, "open_edges")
+
+    async def list_tools(self) -> Any:
+        from mcp.types import ToolAnnotations
+
+        listed = await super().list_tools()
+        for tool in listed.tools:
+            if tool.name == "open_edges":
+                tool.annotations = ToolAnnotations(readOnlyHint=True)
+        return listed
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fresh_annotation_notices")
+async def test_no_mismatch_is_logged_when_two_consequential_tools_were_dispatched(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Two read-only-annotated tools went through in the same attempt, so the
+    write cannot be pinned on either one: nothing is logged."""
+    meta, mismatches = await _mismatch_logs(
+        caplog,
+        [("open_nodes", {"names": [MARKER]}), ("open_edges", {"names": ["x"]})],
+        _TwoReadOnlySession,
+        "open_nodes",
+        "open_edges",
+    )
+    assert (meta["effect_confirmed"], meta["calibrated"]) == ("true", "true")
+    assert mismatches == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fresh_annotation_notices")
+async def test_no_mismatch_is_logged_for_a_tool_not_annotated_read_only(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``log_event`` is annotated ``readOnlyHint=False``, so its write
+    contradicts nothing."""
+    meta, mismatches = await _mismatch_logs(
+        caplog, [("log_event", {"text": MARKER})], _WritingLogSession, "log_event"
+    )
+    assert (meta["effect_confirmed"], meta["calibrated"]) == ("true", "true")
+    assert mismatches == []
+
+
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("_fresh_annotation_notices")
 async def test_a_mixed_trace_keeps_the_real_finding() -> None:
