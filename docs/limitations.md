@@ -308,26 +308,50 @@ Attempts run one at a time and each plant carries a fresh token, but nothing in 
 target's state can rule out that outside writer. Point the scan at state nothing else
 is using.
 
-## 9. A network failure can read the same as a refusal (W3)
+## 9. A server-reported negative proves a reply, not a safeguard
 
 A consequential call that errors reads as resisted, labelled server-reported
 ([`MYL-SRV-001`](reason-codes.md#myl-srv-001)) — see
-[How an MCP attempt is decided](reading-results.md#how-an-mcp-attempt-is-decided). For a
-W3 egress attempt, that same `isError` covers two different causes Mylonite cannot tell
-apart from the trace alone: the server's own allowlist refusing the call, and the call
-failing to reach the host at all — a DNS lookup that fails, a connection the sandbox
-blocks, a timeout against a host that would have answered given more time. Neither is
-proof the server would have refused a request that actually reached it.
+[How an MCP attempt is decided](reading-results.md#how-an-mcp-attempt-is-decided). This
+is by design: the guarded side of the reference app resists several attacks exactly this
+way, by raising an error, so reading `isError` as evidence of nothing would break the one
+differential this project is built on. Two things keep that reading honest:
 
-**What this means in practice:** a KEPT differential on W3 is still trustworthy, because
-it compares the *same* call against the vulnerable and guarded builds in the *same*
-network environment — a resisted call that was really a network failure fails the same
-way on both legs, so it never manufactures a false KEPT. The caveat is narrower: a
-single `scan` run (no differential) that reports a W3 attempt as resisted on
-`MYL-SRV-001` is not, on its own, proof the target's egress control did the resisting.
-Check the error text the server returned before trusting a W3 resisted result in
-isolation; a declared `effect_probe` that confirms no outbound call reached the
-disallowed host is the stronger proof (see [Calibration](target-file.md#calibration)).
+- **Stronger evidence always outranks it.** A calibrated effect probe that already saw
+  the action's effect, or a seed's own deterministic check that already found the attack
+  landed, decides the attempt before the error reply is even read — an `isError` reply
+  never overrides proof that the call had an effect; see rule 1 and the predicate step in
+  [How an MCP attempt is decided](reading-results.md#how-an-mcp-attempt-is-decided).
+- **A server-reported negative never becomes a KEPT finding.** `RESISTED
+  (server-reported)` is a resisted attempt, not a finding, so it cannot enter the
+  differential or effect leg that `mylonite validate` needs to keep a test (see
+  [Validation](validation.md)). The label never promotes an unproven result to KEPT; at
+  most it can leave a real effect undercounted.
+
+What it does not rule out is an action that reaches the server and starts to take effect
+before the server's reply comes back as an error — a write that commits, then a
+downstream check fails and the call still returns `isError`. The trace alone cannot tell
+that apart from a clean refusal. A declared `effect_probe` that reads the target's own
+state closes that gap (see [Calibration](target-file.md#calibration)); without one,
+treat a single `scan`'s `MYL-SRV-001` result as "the server said no", not as proof that
+nothing happened.
+
+**W3 egress is a sharper case of the same gap.** That same `isError` covers two different
+causes Mylonite cannot tell apart from the trace alone: the server's own allowlist
+refusing the call, and the call failing to reach the host at all — a DNS lookup that
+fails, a connection the sandbox blocks, a timeout against a host that would have answered
+given more time. Neither is proof the server would have refused a request that actually
+reached it.
+
+**What this means in practice:** a KEPT differential is still trustworthy either way,
+because it compares the *same* call against the vulnerable and guarded builds in the
+*same* environment — a resisted call that was really a network failure, or really an
+action that half-committed before erroring, fails the same way on both legs, so it never
+manufactures a false KEPT. The caveat is narrower: a single `scan` run (no differential)
+that reports an attempt as resisted on `MYL-SRV-001` is not, on its own, proof the
+target's safeguard did the resisting. Check the error text the server returned before
+trusting a server-reported result in isolation; a declared `effect_probe` that confirms
+no effect landed is the stronger proof.
 
 ## 10. A probe can read before an asynchronous queue sends
 

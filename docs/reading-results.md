@@ -477,8 +477,13 @@ Each class reads one of four ways:
 - `NOT TESTED`: nothing fired, and at least one attempt proved nothing. One untested
   attempt is enough, because part of the class was never shown either way.
 - `RESISTED (server-reported)`: every attempt was decided and resisted, and at least one
-  negative rests only on the server's reply (`MYL-SRV-001` or `MYL-SRV-002`). A network
-  failure that returns an error is not proof the server refused, so check the reply.
+  negative rests only on the server's reply (`MYL-SRV-001` or `MYL-SRV-002`). A calibrated
+  probe or a seed's own deterministic check that already found the attack landed
+  overrides this reading before it is reached, and the label never promotes an attempt to
+  a finding, so it can never become a KEPT test. What it does not rule out is a network
+  failure that returns the same error a refusal would, or an action that started to take
+  effect before the error came back — check the reply, or declare an `effect_probe`, and
+  see [Known limitations §9](limitations.md#9-a-server-reported-negative-proves-a-reply-not-a-safeguard).
 - `RESISTED`: every attempt was resisted, on the trace or on a calibrated probe.
 
 The codes in brackets are [reason codes](reason-codes.md). The probe's calibration code
