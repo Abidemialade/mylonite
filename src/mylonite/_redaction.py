@@ -62,7 +62,10 @@ _KV_VALUE = r"[A-Za-z0-9_\-./+]{12,}"
 _KV_KEYS = r"api[_-]?key|apikey|secret|token|password|passwd|pwd|credential"
 
 # Whole-token patterns: each match is replaced wholesale by the placeholder.
-_FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
+# This tuple is the 0.12.0 set, frozen: the replay cache key's fallback
+# (:func:`_redact_legacy`) must reproduce exactly what 0.12.0 masked so a
+# fixture recorded then still replays. Add new shapes to _ADDED_FULL_PATTERNS.
+_LEGACY_FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     # Anthropic-style keys: sk-ant-<...>. Listed before the generic sk- rule so
     # the longer, more specific form wins.
     re.compile(r"sk-ant-[A-Za-z0-9_-]{20,}"),
@@ -79,13 +82,6 @@ _FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     # unanchored so it also catches one embedded mid-string (e.g. inside a
     # provider error's message text, not just a bare standalone value).
     re.compile(r"AIza[A-Za-z0-9_-]{30,}"),
-    # GitHub tokens: classic (ghp_/gho_/ghu_/ghs_/ghr_) and fine-grained PATs.
-    re.compile(r"gh[pousr]_[A-Za-z0-9]{36}"),
-    re.compile(r"github_pat_[A-Za-z0-9_]{22,}"),
-    # Stripe secret and restricted keys, live and test.
-    re.compile(r"[sr]k_(?:live|test)_[A-Za-z0-9]{16,}"),
-    # Slack tokens (bot, user, app, ...).
-    re.compile(r"xox[abposr]-[A-Za-z0-9-]{10,}"),
     # Bearer tokens (Authorization header style).
     re.compile(r"Bearer [A-Za-z0-9._-]{20,}"),
     # PEM private-key blocks (any key type), across newlines.
@@ -95,16 +91,34 @@ _FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     ),
 )
 
+# Shapes added after 0.12.0. Masked everywhere :func:`redact` runs; left out
+# of :func:`_redact_legacy`.
+_ADDED_FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
+    # GitHub tokens: classic (ghp_/gho_/ghu_/ghs_/ghr_) and fine-grained PATs.
+    re.compile(r"(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{36}"),
+    re.compile(r"(?<![A-Za-z0-9])github_pat_[A-Za-z0-9_]{22,}"),
+    # Stripe secret and restricted keys, live and test. Not preceded by a
+    # letter or digit, so "risk_live_..." survives.
+    re.compile(r"(?<![A-Za-z0-9])[sr]k_(?:live|test)_[A-Za-z0-9]{16,}"),
+    # Slack tokens (bot, user, app, ...).
+    re.compile(r"(?<![A-Za-z0-9])xox[abposr]-[A-Za-z0-9-]{10,}"),
+)
+
+_FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
+    *_LEGACY_FULL_PATTERNS,
+    *_ADDED_FULL_PATTERNS,
+)
+
 # An ``Authorization`` or ``Proxy-Authorization`` header whose scheme is
 # ``Bearer``, ``token``, ``Basic`` or ``Digest``: the credential after the
 # scheme is masked whatever its length, and the header name and scheme stay
 # legible. Anchored to the header name, so prose such as "token based auth"
 # or a bare "Basic" is left alone.
 _AUTH_HEADER_PATTERN: Final = re.compile(
-    r"(?P<prefix>(?<![A-Za-z0-9-])(?:Proxy-)?Authorization['\"]?\s*[:=]\s*['\"]?"
-    r"(?:Bearer|token|Basic|Digest)\s+)"
-    r"(?P<val>(?<=Digest\s)[A-Za-z0-9_-]+=(?:\"[^\"\r\n]*\"|[^\s,\"']+)"
-    r"(?:\s*,\s*[A-Za-z0-9_-]+=(?:\"[^\"\r\n]*\"|[^\s,\"']+))*"
+    r"(?P<prefix>(?<![A-Za-z0-9-])(?:Proxy-)?Authorization['\"]?[ \t]*[:=][ \t]*['\"]?"
+    r"(?:Bearer|token|Basic|Digest)[ \t]+)"
+    r"(?P<val>(?<=Digest[ \t])[A-Za-z0-9_-]+=(?:\"[^\"\r\n]*\"|[^\s,\"']+)"
+    r"(?:[ \t]*,[ \t]*[A-Za-z0-9_-]+=(?:\"[^\"\r\n]*\"|[^\s,\"']+))*"
     r"|[A-Za-z0-9._~+/=-]{4,})",
     re.IGNORECASE,
 )
@@ -307,22 +321,39 @@ def redact_url_query(url: str) -> str:
 #: console line). Longest first, so a value containing another is masked whole.
 _MASKED_VALUES: list[str] = []
 
+#: The values :func:`register_masked_value` registered (what 0.12.0 masked by
+#: exact value), without the target credentials
+#: :func:`register_target_credentials` adds. The replay cache key's fallback
+#: (:func:`_redact_legacy`) uses only these.
+_LEGACY_MASKED_VALUES: list[str] = []
+
 #: Values shorter than this are not registered: masking every occurrence of a
 #: two-letter value would shred ordinary text.
 _MIN_MASKED_VALUE_LEN: Final = 4
 
+#: A target credential shorter than this is not registered: it is masked
+#: everywhere it appears, so a short value would mask ordinary words.
+_MIN_TARGET_VALUE_LEN: Final = 8
+
+
+def _add_masked(registry: list[str], value: str) -> None:
+    if value not in registry:
+        registry.append(value)
+        registry.sort(key=len, reverse=True)
+
 
 def register_masked_value(value: str) -> None:
     """Mask every exact occurrence of ``value`` in :func:`redact`'s output."""
-    if len(value) < _MIN_MASKED_VALUE_LEN or value in _MASKED_VALUES:
+    if len(value) < _MIN_MASKED_VALUE_LEN:
         return
-    _MASKED_VALUES.append(value)
-    _MASKED_VALUES.sort(key=len, reverse=True)
+    _add_masked(_MASKED_VALUES, value)
+    _add_masked(_LEGACY_MASKED_VALUES, value)
 
 
 def clear_masked_values() -> None:
-    """Forget every value registered with :func:`register_masked_value`."""
+    """Forget every registered value, target credentials included."""
     _MASKED_VALUES.clear()
+    _LEGACY_MASKED_VALUES.clear()
 
 
 def mask_registered_values(text: str) -> str:
@@ -332,7 +363,11 @@ def mask_registered_values(text: str) -> str:
     where the shape-based patterns of :func:`redact` are deliberately not
     applied, but a registered value must still never land on disk.
     """
-    for value in _MASKED_VALUES:
+    return _mask_values(text, _MASKED_VALUES)
+
+
+def _mask_values(text: str, values: list[str]) -> str:
+    for value in values:
         text = text.replace(value, REDACTION_PLACEHOLDER)
     return text
 
@@ -343,12 +378,14 @@ _CREDENTIAL_HEADER_PARTS: Final[frozenset[str]] = frozenset(
     {"auth", "authorization", "cookie", "key", "sig", "signature"}
 )
 
-#: Flag-like values a credential-named env entry can hold (``AUTH_TOKEN_REQUIRED:
-#: "false"``) that must never be masked everywhere they appear.
+#: Flag-like values a credential-named setting can hold
+#: (``AUTH_TOKEN_REQUIRED: "false"``) that are never registered.
 _NOT_A_CREDENTIAL: Final[frozenset[str]] = frozenset({"true", "false", "none", "null"})
 
 #: ``<scheme> <credential>``: the shape of an ``Authorization`` header value.
-_SCHEME_VALUE: Final = re.compile(r"^\s*(?:Bearer|token|Basic|Digest)\s+(?P<cred>\S.*?)\s*$", re.I)
+_SCHEME_VALUE: Final = re.compile(
+    r"^[ \t]*(?:Bearer|token|Basic|Digest)[ \t]+(?P<cred>\S.*?)[ \t]*$", re.IGNORECASE
+)
 
 
 def _header_name_looks_secret(name: str) -> bool:
@@ -359,47 +396,90 @@ def _header_name_looks_secret(name: str) -> bool:
     return any(part in _CREDENTIAL_HEADER_PARTS for part in re.split(r"[-_]", name.lower()))
 
 
+def _registrable(value: str) -> bool:
+    """Long enough, not a number and not a flag word."""
+    v = value.strip()
+    return (
+        len(v) >= _MIN_TARGET_VALUE_LEN
+        and v.lower() not in _NOT_A_CREDENTIAL
+        and re.fullmatch(r"[0-9.,_-]+", v) is None
+    )
+
+
+def _looks_opaque(value: str) -> bool:
+    """True when a value whose only credential signal is a NAME also looks
+    like a credential: :func:`_registrable`, no whitespace, and at least two
+    of lower-case letters, upper-case letters and digits. ``vault``,
+    ``hashicorp-vault``, ``4096`` and ``true`` are not; ``dummy123`` is."""
+    v = value.strip()
+    if not _registrable(v) or any(c.isspace() for c in v):
+        return False
+    classes = (
+        any(c.islower() for c in v),
+        any(c.isupper() for c in v),
+        any(c.isdigit() for c in v),
+    )
+    return sum(classes) >= 2
+
+
+def _register_target_value(value: str) -> None:
+    _add_masked(_MASKED_VALUES, value.strip())
+
+
 def register_target_credentials(
     *,
     headers: Mapping[str, object] | None = None,
     env: Mapping[str, object] | None = None,
     expanded: Iterable[str] = (),
 ) -> None:
-    """Register every credential a target is given for exact-value masking.
+    """Register the credentials a target is given for exact-value masking.
 
     A target that echoes its own credential (in a tool result, a reply, or an
     HTTP error's reason phrase) then has it masked by :func:`redact` and
-    :func:`mask_registered_values`, whatever the credential's shape. Covers:
+    :func:`mask_registered_values`, whatever the credential's shape. A
+    registered value is masked everywhere, so only values that look like a
+    credential are registered:
 
-    * ``expanded``: each value a ``${VAR}`` reference in a header resolved to;
-    * ``headers``: the whole value of a credential-named header
-      (:func:`_header_name_looks_secret`), and the credential after an auth
-      scheme (``Bearer``, ``token``, ``Basic``, ``Digest``) in any header;
-    * ``env``: each value :func:`_is_secret_env` flags.
+    * ``headers``, credential-named only (:func:`_header_name_looks_secret`):
+      a ``<scheme> <credential>`` value (``Bearer``, ``token``, ``Basic``,
+      ``Digest``) registers the whole value and the credential after the
+      scheme; any other value registers when :func:`_looks_opaque`;
+    * ``expanded``: each value a ``${VAR}`` reference in a header resolved
+      to, when :func:`_looks_opaque`;
+    * ``env``: a value whose SHAPE is credential-like (an API-key or token
+      shape) when :func:`_registrable`; a value :func:`_is_secret_env` flags
+      by its key NAME alone (``MAX_TOKENS``, ``SECRET_BACKEND``) only when
+      :func:`_looks_opaque`.
 
-    Ordinary headers (``Content-Type``) and plain env values (a path, a port)
-    are not registered, and :func:`register_masked_value`'s minimum length
-    still applies, so ordinary text is not shredded. A value that is still an
-    unexpanded ``${VAR}`` reference is skipped.
+    Nothing shorter than eight characters, no number and no flag word
+    (``true``, ``false``, ``none``, ``null``) is registered, nor a value that
+    is still an unexpanded ``${VAR}`` reference. These values are kept apart
+    from :func:`register_masked_value`'s, so the replay cache key's fallback
+    can leave them out (see :func:`_redact_legacy`).
     """
     for resolved in expanded:
-        if isinstance(resolved, str):
-            register_masked_value(resolved)
+        if isinstance(resolved, str) and _looks_opaque(resolved):
+            _register_target_value(resolved)
     for name, value in (headers or {}).items():
-        if not isinstance(value, str) or _is_pure_var_ref(value):
+        if (
+            not isinstance(value, str)
+            or _is_pure_var_ref(value)
+            or not _header_name_looks_secret(str(name))
+        ):
             continue
-        if _header_name_looks_secret(str(name)):
-            register_masked_value(value.strip())
         match = _SCHEME_VALUE.match(value)
         if match is not None:
-            register_masked_value(match.group("cred"))
+            if _registrable(match.group("cred")):
+                _register_target_value(value)
+                _register_target_value(match.group("cred"))
+        elif _looks_opaque(value):
+            _register_target_value(value)
     for key, value in (env or {}).items():
-        if (
-            isinstance(value, str)
-            and value.strip().lower() not in _NOT_A_CREDENTIAL
-            and _is_secret_env(str(key), value)
-        ):
-            register_masked_value(value)
+        if not isinstance(value, str) or not _is_secret_env(str(key), value):
+            continue
+        shaped = looks_like_api_key(value) or _redact_with(value, legacy=False) != value
+        if (shaped and _registrable(value)) or _looks_opaque(value):
+            _register_target_value(value)
 
 
 def redact(text: str) -> str:
@@ -412,11 +492,29 @@ def redact(text: str) -> str:
     """
     if not isinstance(text, str):
         return text
+    return _redact_with(text, legacy=False)
 
-    redacted = mask_registered_values(text)
-    for pattern in _FULL_PATTERNS:
+
+def _redact_legacy(text: str) -> str:
+    """:func:`redact` as 0.12.0 ran it: the 0.12.0 patterns and only the
+    values :func:`register_masked_value` registered, with no target
+    credentials and no ``Authorization``-scheme rule.
+
+    Used only by the replay cache key's fallback (``mylonite._replay``), so a
+    fixture recorded under 0.12.0 keeps replaying. Never use it to mask text
+    that is shown or written.
+    """
+    if not isinstance(text, str):
+        return text
+    return _redact_with(text, legacy=True)
+
+
+def _redact_with(text: str, *, legacy: bool) -> str:
+    redacted = _mask_values(text, _LEGACY_MASKED_VALUES if legacy else _MASKED_VALUES)
+    for pattern in _LEGACY_FULL_PATTERNS if legacy else _FULL_PATTERNS:
         redacted = pattern.sub(REDACTION_PLACEHOLDER, redacted)
-    redacted = _AUTH_HEADER_PATTERN.sub(_mask_auth_header, redacted)
+    if not legacy:
+        redacted = _AUTH_HEADER_PATTERN.sub(_mask_auth_header, redacted)
     redacted = _URL_CRED_PATTERN.sub(_mask_url_cred, redacted)
     redacted = _KV_PATTERN.sub(_mask_kv, redacted)
     redacted = _BARE_KEY_PATTERN.sub(_mask_kv, redacted)
@@ -434,16 +532,30 @@ def secret_spans(text: str) -> list[str]:
     """
     if not isinstance(text, str):
         return []
+    return _secret_spans_with(text, legacy=False)
+
+
+def _secret_spans_legacy(text: str) -> list[str]:
+    """:func:`secret_spans` as 0.12.0 computed it; see :func:`_redact_legacy`."""
+    if not isinstance(text, str):
+        return []
+    return _secret_spans_with(text, legacy=True)
+
+
+def _secret_spans_with(text: str, *, legacy: bool) -> list[str]:
     found: list[tuple[int, str]] = []
-    for value in _MASKED_VALUES:
+    for value in _LEGACY_MASKED_VALUES if legacy else _MASKED_VALUES:
         start = text.find(value)
         while start != -1:
             found.append((start, value))
             start = text.find(value, start + len(value))
-    for pattern in _FULL_PATTERNS:
+    for pattern in _LEGACY_FULL_PATTERNS if legacy else _FULL_PATTERNS:
         found.extend((m.start(), m.group(0)) for m in pattern.finditer(text))
     found.extend((m.start("secret"), m.group("secret")) for m in _URL_CRED_PATTERN.finditer(text))
-    for pattern in (_AUTH_HEADER_PATTERN, _KV_PATTERN, _BARE_KEY_PATTERN):
+    value_patterns: tuple[re.Pattern[str], ...] = (_KV_PATTERN, _BARE_KEY_PATTERN)
+    if not legacy:
+        value_patterns = (_AUTH_HEADER_PATTERN, *value_patterns)
+    for pattern in value_patterns:
         found.extend((m.start("val"), m.group("val")) for m in pattern.finditer(text))
     found.sort()
     return [span for _start, span in found]

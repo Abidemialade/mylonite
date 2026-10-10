@@ -663,15 +663,6 @@ variables, so a masked copy won't connect until you put the value back; the note
 writing command prints names each masked field, such as `request.url`. Keep copies
 runnable by sending the token in `headers:` as a `${VAR}` reference instead.
 
-The credentials a target file hands the target are also masked wherever the target
-repeats them: in a reply, a tool result, an HTTP error, the exploit JSON and the gate's
-`PR_BODY.md`. That covers each value a `${VAR}` reference in `headers` or
-`request.headers` resolves to, the whole value of a credential-named header
-(`Authorization`, `Cookie`, `X-Api-Key`, `X-Auth-Token`, ...), the token after a
-`Bearer`, `token`, `Basic` or `Digest` scheme, and each secret-looking `env` value. A
-header such as `Content-Type`, a plain `env` value such as `LOG_LEVEL: debug`, and any
-value shorter than four characters are not masked.
-
 ```yaml
 env:
   GITHUB_TOKEN: ${MYLONITE_TARGET_ENV_GITHUB_TOKEN}
@@ -746,6 +737,25 @@ the key it holds and the `export` line to run. Mylonite never starts your server
 empty credential. Placeholders are expanded only inside `env`, `headers` and
 `request.headers`, so `${...}` text elsewhere in the file, such as a template-injection
 payload in `system_prompt`, is left alone.
+
+### Credentials the target repeats are masked
+
+The credentials a target file hands the target are also masked wherever the target
+repeats them: in a reply, a tool result, an HTTP error, the exploit JSON and the gate's
+`PR_BODY.md`. That covers:
+
+- the value of a credential-named header (`Authorization`, `Cookie`, `X-Api-Key`,
+  `X-Auth-Token`, ...), and the token after its `Bearer`, `token`, `Basic` or `Digest`
+  scheme;
+- each value a `${VAR}` reference in `headers` or `request.headers` resolves to;
+- each secret-looking `env` value, such as a `GITHUB_TOKEN` or an API-key-shaped value.
+
+Each of these is masked everywhere it appears, so only values that look like a
+credential count. A value shorter than eight characters, a number, `true`/`false`/
+`none`/`null`, and a value with only one kind of character (`vault`,
+`hashicorp-vault`) under a credential-sounding name such as `MAX_TOKENS` or
+`SECRET_BACKEND` are not masked. Headers such as `Content-Type` and plain `env` values
+such as `LOG_LEVEL: debug` stay as written.
 
 ## The boundary controls fail closed
 
