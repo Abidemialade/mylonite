@@ -741,8 +741,8 @@ payload in `system_prompt`, is left alone.
 ### Credentials the target repeats are masked
 
 The credentials a target file hands the target are also masked wherever the target
-repeats them: in a reply, a tool result, an HTTP error, the exploit JSON and the gate's
-`PR_BODY.md`. That covers:
+repeats them: in a reply, a tool result, an HTTP error, the saved attempt record and
+the gate's `PR_BODY.md`. That covers:
 
 - the value of a credential-named header (`Authorization`, `Cookie`, `X-Api-Key`,
   `X-Auth-Token`, ...), and the token after its `Bearer`, `token`, `Basic` or `Digest`

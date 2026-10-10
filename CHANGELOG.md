@@ -125,13 +125,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ghu_`/`ghs_`/`ghr_` and `github_pat_` tokens, `sk_live_`/`sk_test_`/`rk_live_`
   keys, `xoxb-`-style Slack tokens, and the credential after `token`, `Basic`,
   `Bearer` or `Digest` in an `Authorization` or `Proxy-Authorization` header,
-  whatever its length. Every credential a target is handed is also masked by
+  from four characters up. Every credential a target is handed is also masked by
   exact value: header values filled from a `${VAR}` reference, credential-named
   headers such as `Authorization` or `X-Api-Key`, and secret-looking `env`
   values, including the bundled GitHub target's `GITHUB_PERSONAL_ACCESS_TOKEN`.
   A target that repeats one of these in a reply, a tool result or an HTTP error
-  no longer gets it into the exploit JSON, the gate's `PR_BODY.md` or a skipped
-  attempt's reason. Ordinary headers such as `Content-Type` and plain `env`
+  no longer gets it into the saved attempt record, the gate's `PR_BODY.md` or
+  a skipped attempt's reason. Ordinary headers such as `Content-Type` and plain `env`
   values such as `LOG_LEVEL: debug` stay as written.
 
 ## [0.12.0] - 2026-10-06
