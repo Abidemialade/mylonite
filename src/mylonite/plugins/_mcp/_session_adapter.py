@@ -38,7 +38,7 @@ from mcp import ClientSession
 
 # Import the package init so per-target predicates register.
 import mylonite.plugins._mcp  # noqa: F401
-from mylonite._redaction import redact, redact_value
+from mylonite._redaction import redact, redact_value, register_target_credentials
 from mylonite._stderr_warn import warn_stderr
 from mylonite.contracts import (
     AdapterResponse,
@@ -583,6 +583,12 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         #: The last successful ``describe()``, so the CLI's pre-spend run plan
         #: can name the tools without listing them a second time.
         self._last_descriptor: TargetDescriptor | None = None
+        # Mask the credentials this target is given (its headers and secret
+        # env values) wherever it echoes them, including a spec registered
+        # without a target file.
+        register_target_credentials(
+            headers=self._spec.headers, env={**self._spec.extra_env, **(launch_env or {})}
+        )
 
     # --- transport seam -------------------------------------------------------
     def _session(

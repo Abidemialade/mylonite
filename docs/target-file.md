@@ -663,6 +663,15 @@ variables, so a masked copy won't connect until you put the value back; the note
 writing command prints names each masked field, such as `request.url`. Keep copies
 runnable by sending the token in `headers:` as a `${VAR}` reference instead.
 
+The credentials a target file hands the target are also masked wherever the target
+repeats them: in a reply, a tool result, an HTTP error, the exploit JSON and the gate's
+`PR_BODY.md`. That covers each value a `${VAR}` reference in `headers` or
+`request.headers` resolves to, the whole value of a credential-named header
+(`Authorization`, `Cookie`, `X-Api-Key`, `X-Auth-Token`, ...), the token after a
+`Bearer`, `token`, `Basic` or `Digest` scheme, and each secret-looking `env` value. A
+header such as `Content-Type`, a plain `env` value such as `LOG_LEVEL: debug`, and any
+value shorter than four characters are not masked.
+
 ```yaml
 env:
   GITHUB_TOKEN: ${MYLONITE_TARGET_ENV_GITHUB_TOKEN}

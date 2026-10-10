@@ -1208,3 +1208,126 @@ def test_a_third_party_traceback_with_nothing_to_mask_is_left_untouched(
             flt.filter(record)
     assert record.exc_text is None
     assert record.exc_info is exc_info
+
+
+# --- GitHub, Stripe and Slack tokens; Authorization schemes (dummy values) ----
+FAKE_GH_CLASSIC = "ghp_" + "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8"  # pragma: allowlist secret
+FAKE_GH_FINE = "github_pat_" + "11ABCDEFG0dummydummy_" + "x" * 40  # pragma: allowlist secret
+FAKE_STRIPE = "sk_live_" + "dummy0dummy0dummy0dummy0"  # pragma: allowlist secret
+FAKE_SLACK = "xoxb-" + "0000000000-0000000000-dummydummydummy"  # pragma: allowlist secret
+FAKE_TOKEN_SCHEME_VALUE = "dummytoken0001"  # pragma: allowlist secret
+FAKE_BASIC_VALUE = "ZHVtbXk6ZHVtbXk="  # base64 "dummy:dummy"  # pragma: allowlist secret
+
+
+@pytest.mark.parametrize(
+    ("text", "secret"),
+    [
+        (f"tool returned {FAKE_GH_CLASSIC} here", FAKE_GH_CLASSIC),
+        (f"tool returned {FAKE_GH_FINE} here", FAKE_GH_FINE),
+        (f"tool returned {FAKE_STRIPE} here", FAKE_STRIPE),
+        (f"tool returned {FAKE_SLACK} here", FAKE_SLACK),
+        (f"Authorization: token {FAKE_TOKEN_SCHEME_VALUE}", FAKE_TOKEN_SCHEME_VALUE),
+        (f"Authorization: Basic {FAKE_BASIC_VALUE}", FAKE_BASIC_VALUE),
+        (f"proxy-authorization: Bearer {FAKE_TOKEN_SCHEME_VALUE}", FAKE_TOKEN_SCHEME_VALUE),
+        (
+            f'Authorization: Digest username="dummy", response="{FAKE_TOKEN_SCHEME_VALUE}"',
+            FAKE_TOKEN_SCHEME_VALUE,
+        ),
+        (f"{{'Authorization': 'token {FAKE_TOKEN_SCHEME_VALUE}'}}", FAKE_TOKEN_SCHEME_VALUE),
+    ],
+)
+def test_redact_masks_github_stripe_slack_and_authorization_schemes(text: str, secret: str) -> None:
+    out = redact(text)
+    assert secret not in out
+    assert REDACTION_PLACEHOLDER in out
+    nested = redact_value({"tool_result": text, "items": [text]})
+    assert isinstance(nested, dict)
+    assert secret not in repr(nested)
+
+
+def test_authorization_scheme_masking_keeps_the_header_name_and_scheme() -> None:
+    out = redact(f"Authorization: Basic {FAKE_BASIC_VALUE}")
+    assert out == f"Authorization: Basic {REDACTION_PLACEHOLDER}"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "we use token based auth for this endpoint",
+        "send ghp_abc as the prefix",
+        "the scheme is Basic",
+        "Authorization: Basic",
+        "Authorization: Bearer ${MY_TOKEN}",
+        "sk_live_short",
+        "xoxb-short",
+    ],
+)
+def test_new_token_rules_leave_prose_and_short_values_alone(text: str) -> None:
+    assert redact(text) == text
+
+
+def test_register_target_credentials_masks_credentials_but_not_ordinary_values() -> None:
+    from mylonite._redaction import mask_registered_values, register_target_credentials
+
+    register_target_credentials(
+        headers={
+            "Authorization": "Bearer dummy123",
+            "X-Api-Key": "dummy-key-0001",
+            "X-Upstream": "token dummy-upstream-1",
+            "Content-Type": "application/json",
+        },
+        env={
+            "GITHUB_PERSONAL_ACCESS_TOKEN": "dummy-pat-0001",
+            "DB_PATH": "/srv/data/app.db",
+            "AUTH_TOKEN_REQUIRED": "false",
+            "UNSET_REF_TOKEN": "${SOME_VAR}",
+        },
+        expanded=["dummy-expanded-0001"],
+    )
+    for secret in (
+        "Bearer dummy123",
+        "dummy123",
+        "dummy-key-0001",
+        "dummy-upstream-1",
+        "dummy-pat-0001",
+        "dummy-expanded-0001",
+    ):
+        assert secret not in mask_registered_values(f"echo {secret} back")
+        assert secret not in redact(f"echo {secret} back")
+    for ordinary in ("application/json", "/srv/data/app.db", "false", "${SOME_VAR}"):
+        assert mask_registered_values(f"echo {ordinary} back") == f"echo {ordinary} back"
+
+
+def test_load_target_file_registers_the_credentials_it_hands_the_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mylonite.plugins._mcp.target_file import load_target_file
+
+    monkeypatch.setenv("MY_DUMMY_TOKEN", "dummyvalue0001")
+    target = tmp_path / "target.yaml"
+    target.write_text(
+        "family: app\ncommand: python\n"
+        "headers:\n  Authorization: Bearer ${MY_DUMMY_TOKEN}\n  X-Session: s3ss10n-dummy\n"
+        "env:\n  SERVICE_PASSWORD: plain-dummy-pw\n  LOG_LEVEL: debug\n",
+        encoding="utf-8",
+    )
+    load_target_file(target)
+    out = redact("echo dummyvalue0001 / plain-dummy-pw / debug / s3ss10n-dummy")
+    assert "dummyvalue0001" not in out
+    assert "plain-dummy-pw" not in out
+    assert "debug" in out
+    assert "s3ss10n-dummy" in out  # not a credential-named header
+
+
+def test_expand_env_block_registers_the_bundled_github_pat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from mylonite.plugins._mcp.target_file import expand_env_block
+
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", "dummy-pat-not-shaped-0001")
+    expand_env_block(
+        {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"},
+        subject="the bundled mcp:github target",
+    )
+    out = redact_value({"tool_result": "your token is dummy-pat-not-shaped-0001"})
+    assert "dummy-pat-not-shaped-0001" not in repr(out)
