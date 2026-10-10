@@ -555,7 +555,9 @@ def _classify_tools(tools: list[Any]) -> _ToolRoles:
             retrieve_tool = name
         if (
             verify_tool is None
-            and any(h in low for h in _OBSERVE_NAME_HINTS)
+            # Whole words only, as the verdict matches them: "get" inside
+            # "forget" or "log" inside "catalog" is not a readback (#303).
+            and _hints_match(name, _OBSERVE_NAME_HINTS)
             and not _requires_id(tool)
             and not _names_a_write(name)
         ):

@@ -1766,12 +1766,34 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             if probe is not None
             else ""
         )
+        # Deferred import: `calibration` imports FROM this module at load time
+        # (``_render_seed_args`` et al.), so importing it back at module scope
+        # here would be a cycle. See `_effective_env` for the same pattern.
+        from mylonite.plugins._mcp import calibration
+
+        cal = calibration.lookup(self._spec, self._scope, launch=calibration.launch_of(self))
+        # Whether calibration showed the probe sees a write land in the record
+        # it reads. Independent of which tools this attempt dispatched: it lets
+        # a change the probe saw raise a dispatch to "effect-confirmed" under
+        # the verdict rule's own guard, and it never clears one.
+        confirm_capable = cal is not None and cal.status in (
+            calibration.STATUS_CERTIFIED,
+            calibration.STATUS_CONFIRM_ONLY,
+        )
+        # The negative readings exempt the probe's verify tool as a read only
+        # once calibration has shown the probe reads back what a write leaves
+        # (#303). Until then the tool is whatever the operator or the scaffold
+        # guessed, and a call through it can carry the attack: it counts as a
+        # read only on its name or a declaration, like any other tool.
+        # link_for keeps the verify tool: the probe's own readback never ties
+        # a call to the attempt, so no new finding comes from this.
+        read_verify_tool = verify_tool if confirm_capable else None
         trace_outcome: TraceOutcome = classify_trace(
             planner_calls,
             consequential_tool_names=consequential,
             read_tool_names=read_tool_names,
             tool_annotations=tool_annotations,
-            verify_tool=verify_tool,
+            verify_tool=read_verify_tool,
             # The target's own deferral wording counts as well as the defaults,
             # so a call it answers "job accepted" reads deferred, not carried out.
             deferred_markers=_reply_deferral_words(probe),
@@ -1784,7 +1806,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             consequential_tool_names=consequential,
             read_tool_names=read_tool_names,
             tool_annotations=tool_annotations,
-            verify_tool=verify_tool,
+            verify_tool=read_verify_tool,
             deferred_markers=_reply_deferral_words(probe),
             allowed_hosts=allowed_hosts,
         )
@@ -1830,12 +1852,6 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             == "token-linked"
         )
 
-        # Deferred import: `calibration` imports FROM this module at load time
-        # (``_render_seed_args`` et al.), so importing it back at module scope
-        # here would be a cycle. See `_effective_env` for the same pattern.
-        from mylonite.plugins._mcp import calibration
-
-        cal = calibration.lookup(self._spec, self._scope, launch=calibration.launch_of(self))
         # Calibrated for THIS attempt only when the probe was certified through
         # every consequential tool the attempt dispatched. Calibration proves
         # the probe sees a write through the tools it wrote through; a call
@@ -1845,7 +1861,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             consequential_tool_names=consequential,
             read_tool_names=read_tool_names,
             tool_annotations=tool_annotations,
-            verify_tool=verify_tool,
+            verify_tool=read_verify_tool,
             allowed_hosts=allowed_hosts,
         )
         calibrated = cal is not None and cal.calibrated and dispatched <= set(cal.certified_tools)
@@ -1857,16 +1873,8 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             consequential=consequential,
             read_tool_names=read_tool_names,
             tool_annotations=tool_annotations,
-            verify_tool=verify_tool,
+            verify_tool=read_verify_tool,
             allowed_hosts=allowed_hosts,
-        )
-        # Whether calibration showed the probe sees a write land in the record
-        # it reads. Independent of which tools this attempt dispatched: it lets
-        # a change the probe saw raise a dispatch to "effect-confirmed" under
-        # the verdict rule's own guard, and it never clears one.
-        confirm_capable = cal is not None and cal.status in (
-            calibration.STATUS_CERTIFIED,
-            calibration.STATUS_CONFIRM_ONLY,
         )
         seed_control_status = (
             cal.seed_control.status if cal is not None else calibration.SEED_NOT_RUN
