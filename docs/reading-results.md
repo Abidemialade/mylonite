@@ -400,6 +400,11 @@ per tool, with its role, where the role came from (`declared`, `annotation`, `sc
 `name` or `unknown`), and whether the gate treats it as consequential. When the trace
 would count the tool's calls as reads, the line says so.
 
+When a control falls back to its fail-closed default, the scan prints the
+`control_config` lines that would declare the tool. They are built from the tool name
+the target reports, with control characters and line breaks removed, so each one is a
+single line you can paste as is.
+
 A `schema`-sourced role also resolves a content argument typed as a JSON Schema union
 (`anyOf`/`oneOf`, the shape Pydantic and many OpenAPI generators emit for a field that
 accepts more than one type) or as a nullable type list (`"type": ["null", "array"]`, the
