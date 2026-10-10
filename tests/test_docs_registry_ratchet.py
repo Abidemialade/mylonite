@@ -341,8 +341,13 @@ _DIRECT_ENV_VAR_LITERALS: frozenset[str] = frozenset(
 #: `MYLONITE_AUTHORIZE` is a `vars`/shell variable inside the generated
 #: discovery workflow YAML (`gate/templates/mylonite-discovery.yml`) -- CI
 #: configuration, not something Mylonite's own Python ever reads from
-#: `os.environ`.
-_NOT_A_FIXED_ENV_VAR: frozenset[str] = frozenset({"MYLONITE_API_KEY", "MYLONITE_AUTHORIZE"})
+#: `os.environ`. `MYLONITE_LLM_KEY` is the same kind: the CI secret name for
+#: live model runs, which docs/target-file.md lists among the credentials a
+#: remote target file's headers may not reference
+#: (`RESERVED_CREDENTIAL_ENV_VARS` in `plugins/_mcp/target_file.py`).
+_NOT_A_FIXED_ENV_VAR: frozenset[str] = frozenset(
+    {"MYLONITE_API_KEY", "MYLONITE_AUTHORIZE", "MYLONITE_LLM_KEY"}
+)
 
 #: `${MYLONITE_TARGET_...}` is the dynamically-named placeholder
 #: `redact_target_yaml` mints for a masked secret (one per credential field,
