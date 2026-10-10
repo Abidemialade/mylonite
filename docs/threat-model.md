@@ -54,6 +54,7 @@ Someone sends you a target file, or a pull request edits yours.
 | Read a file outside its own directory | Every path field is resolved (symlinks included) and containment-checked | `_paths.py` (`resolve_contained`) |
 | Point the filesystem sandbox at your home directory or whole disk | The scope is validated before any process starts | `plugins/_mcp/target_registry.py` |
 | Run against a target you have not authorised | `--authorize` must equal the value derived from the target's own data (its `scope`, else its `family`) | `_authz.py` |
+| Send your provider key, `MYLONITE_*` key or GitHub token to its own URL through `${VAR}` in `headers` | A remote target's `headers` and `request.headers` may not reference Mylonite's own credentials; every other referenced variable is named on stderr with the host it goes to | `plugins/_mcp/target_file.py` |
 | Carry a secret into a file Mylonite writes | `headers`, `request.headers` and credential-shaped `env` values become `${VAR}` references in every copy | `_redaction.py` |
 | Send a key or proxy base URL to an attacker via the env file | `--env-file` loads only known provider-key names, and a credentialed `api_base` is refused | `cli.py`, `scan/llm_policy.py` |
 

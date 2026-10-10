@@ -25,6 +25,7 @@ import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final, Literal
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -48,6 +49,7 @@ from mylonite.plugins._mcp.target_registry import (
     TargetSpec,
     validate_seed_tool_ceiling,
 )
+from mylonite.providers.registry import PROVIDERS
 from mylonite.scan.weakness import EFFECTFUL_WEAKNESS_CLASSES, WEAKNESS_CLASSES
 
 if TYPE_CHECKING:
@@ -374,6 +376,103 @@ def build_target_spec(tf: TargetFile) -> TargetSpec:
 _VAR_REF_PATTERN: Final = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
 
+def _provider_credential_names() -> frozenset[str]:
+    names: set[str] = set()
+    for info in PROVIDERS.values():
+        names.update(info.key_env)
+        for alternative in info.key_env_alternatives:
+            names.update(alternative)
+    return frozenset(names)
+
+
+#: Mylonite's own credentials: every provider key in the registry, Mylonite's
+#: LLM key and headers, and the GitHub and Actions tokens a CI job holds. A
+#: remote target file (``sse``/``http``/``rest``) may not reference one of
+#: these in ``headers`` or ``request.headers``: those headers go to the URL the
+#: file names, and a target file is often shared or committed by someone other
+#: than the person running Mylonite. An operator who does want to send such a
+#: value copies it into a name of their own (``export MY_TOKEN=...``), which
+#: is the documented ``${MY_TOKEN}`` pattern. Compared case-insensitively,
+#: because Windows resolves ``${gh_token}`` to ``GH_TOKEN``.
+RESERVED_CREDENTIAL_ENV_VARS: Final[frozenset[str]] = _provider_credential_names() | frozenset(
+    {
+        "MYLONITE_API_KEY",
+        "MYLONITE_LLM_KEY",
+        "MYLONITE_LLM_HEADERS",
+        "GH_TOKEN",
+        "GITHUB_TOKEN",
+        "ACTIONS_RUNTIME_TOKEN",
+        "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+    }
+)
+
+#: Transports whose ``headers`` / ``request.headers`` leave this machine.
+_REMOTE_TRANSPORTS: Final = frozenset({"sse", "http", "rest"})
+
+
+def _url_host(url: object) -> str | None:
+    """The host part of ``url``, or ``None`` when there is no usable one."""
+    if not isinstance(url, str):
+        return None
+    try:
+        return urlsplit(url.strip()).hostname
+    except ValueError:
+        return None
+
+
+def _remote_header_blocks(data: dict[str, Any]) -> list[tuple[str, dict[str, Any], str | None]]:
+    """``(field_path, block, host)`` for each header block a remote target
+    file declares. ``host`` is where that block is sent, or ``None`` when the
+    file names no URL for it (top-level ``headers`` on a ``rest`` target are
+    not sent at all)."""
+    if data.get("transport") not in _REMOTE_TRANSPORTS:
+        return []
+    blocks: list[tuple[str, dict[str, Any], str | None]] = []
+    headers = data.get("headers")
+    if isinstance(headers, dict):
+        blocks.append(("headers", headers, _url_host(data.get("url"))))
+    request = data.get("request")
+    if isinstance(request, dict):
+        req_headers = request.get("headers")
+        if isinstance(req_headers, dict):
+            blocks.append(("request.headers", req_headers, _url_host(request.get("url"))))
+    return blocks
+
+
+def _check_remote_header_refs(data: dict[str, Any]) -> list[str]:
+    """Refuse a remote target file whose headers reference one of
+    :data:`RESERVED_CREDENTIAL_ENV_VARS`; return the notice lines for every
+    other referenced name. Runs BEFORE expansion, so the refusal can never
+    carry a value."""
+    refused: list[tuple[str, str]] = []
+    notices: list[str] = []
+    for path, block, host in _remote_header_blocks(data):
+        for key, value in block.items():
+            if not isinstance(value, str):
+                continue
+            for name in _VAR_REF_PATTERN.findall(value):
+                if name.upper() in RESERVED_CREDENTIAL_ENV_VARS:
+                    refused.append((f"{path}.{key}", name))
+                elif host is not None:
+                    notice = f"target file sends ${name} to {host}"
+                    if notice not in notices:
+                        notices.append(notice)
+    if refused:
+        fields = "; ".join(f"{p} -> ${{{n}}}" for p, n in refused)
+        names = ", ".join(dict.fromkeys(n for _, n in refused))
+        first = refused[0][1]
+        msg = (
+            f"target file references Mylonite's own credential(s) in its headers: {names} "
+            f"(fields: {fields}). A remote target file sends its headers to the URL it "
+            "names, so Mylonite does not fill them from its own provider, GitHub or "
+            "Actions credentials. If this target really needs that value, copy it into a "
+            f'name of your own and reference that instead: export MY_TOKEN="${first}", '
+            "then write ${MY_TOKEN} in the target file."
+        )
+        raise ValueError(msg)
+    return notices
+
+
 def _expand_dict_block(
     block: dict[str, Any], path: str, missing: list[tuple[str, str, str | None]]
 ) -> dict[str, Any]:
@@ -479,12 +578,20 @@ def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
     on a field that was never meant as an env reference at all. Every other
     field is returned completely untouched (same object, not even copied).
 
+    On a remote target (``sse``/``http``/``rest``), a header reference to one
+    of Mylonite's own credentials (:data:`RESERVED_CREDENTIAL_ENV_VARS`) is
+    refused before anything is expanded, and every other header reference
+    prints a notice naming the variable and the host it is sent to. A stdio
+    target's headers and every target's ``env`` block are not checked: they
+    are never sent to a URL the file names.
+
     A referenced variable that IS in a credential field but NOT set in the
     process environment is a hard error (collected across the whole document
     and reported together): this must never silently substitute an empty
     string, ``None``, or leave the literal unexpanded ``${VAR}`` text in place
     and let a broken credential reach the target launch.
     """
+    notices = _check_remote_header_refs(data)
     missing: list[tuple[str, str, str | None]] = []
 
     for section in CREDENTIAL_TOP_LEVEL_SECTIONS:
@@ -505,6 +612,8 @@ def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
 
     if missing:
         raise ValueError(_missing_env_message(missing))
+    for notice in notices:
+        warn_stderr(notice)
     return data
 
 
