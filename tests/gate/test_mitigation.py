@@ -456,7 +456,9 @@ def test_pr_body_evidence_lines_redact_validator_detail():
     ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")
     body = build_pr_body(ex, report)
     assert fake_key not in body
-    assert "- **effect**: pass — probe saw token=***REDACTED***" in body
+    # F9: the redacted detail is also quoted as a Markdown code span now, not
+    # rendered raw.
+    assert "- **effect**: pass — `probe saw token=***REDACTED***`" in body
 
 
 def test_llm_suggestion_and_its_prompt_are_redacted():
@@ -776,7 +778,8 @@ def test_pr_body_at_the_default_three_iterations_is_unchanged():
     ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")
     body = build_pr_body(ex, _reference_report(3))
 
-    assert "- **flakiness**: pass — gap +100%" in body
+    # F9: the redacted detail is also quoted as a Markdown code span now.
+    assert "- **flakiness**: pass — `gap +100%`" in body
     assert "flakiness ✓" in body
     assert "not measured" not in body
 
@@ -819,6 +822,49 @@ def test_pr_body_markdown_injection_via_tool_name_renders_as_plain_text():
     # attacker-controlled host (a legitimate citation link to Mylonite's own
     # MCP-spec source is expected elsewhere in the body and is not what this
     # test is about).
+    from markdown_it import MarkdownIt
+
+    html = MarkdownIt().render(body)
+    assert "<img" not in html
+    assert 'href="https://example.invalid' not in html
+    assert 'src="https://example.invalid' not in html
+
+
+#: A validator ``detail`` value (free text that can carry what a target's
+#: own tool echoed back, e.g. an error message quoted in
+#: ``calibration.py``): a bare newline that would otherwise split the PR
+#: body's list item, followed by a Markdown image and link, plus an embedded
+#: backtick.
+_EVIL_DETAIL = (
+    "probe saw a value\n"
+    "![pwned](https://example.invalid/x.png) [click](https://example.invalid/y) "
+    "`with a backtick`"
+)
+
+
+def test_pr_body_markdown_injection_via_validator_detail_renders_as_plain_text():
+    """F9 (review round 1): `_evidence_lines` rendered `redact(o.detail)` with
+    no Markdown quoting at all -- only secret masking. `detail` is
+    documented (see `test_pr_body_evidence_lines_redact_validator_detail`)
+    as able to carry text a target echoed back; a bare newline followed by a
+    Markdown link/image, or an embedded backtick, rendered as live Markdown
+    in the committed, GitHub-rendered gate PR body.
+    """
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        outcomes=[
+            ValidationOutcome(stage="build", passed=True, detail="collected"),
+            ValidationOutcome(stage="effect", passed=True, detail=_EVIL_DETAIL, metric=1.0),
+        ],
+        kept=True,
+    )
+    ex = _exploit_for("excessive-agency-send-email-direct-unconfirmed")
+    body = build_pr_body(ex, report)
+
+    # The literal text is still present...
+    assert "pwned" in body
+    assert "with a backtick" in body
+
     from markdown_it import MarkdownIt
 
     html = MarkdownIt().render(body)

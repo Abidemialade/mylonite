@@ -367,15 +367,23 @@ before this release were not redacted; re-gate them, or review them before
 you share them.
 
 Separately from redaction, any target-controlled text quoted in
-`PR_BODY.md` — a tool name, an argument, an evidence value, the "Located at"
-locus — is quoted as a Markdown inline code span the value's own content
-cannot break out of: the fence is always longer than the longest backtick
-run already in the value, a value starting or ending with a backtick gets a
-padding space, and control characters are stripped first. A value containing
-its own backtick can no longer close the span early and render the rest of
-the value as Markdown. The same quoting carries through to the SARIF message
-and the JSON bundle's `label` field, since both render from the same
-locus/evidence data `PR_BODY.md` does.
+`PR_BODY.md` — a tool name, an argument, an evidence value, a validator's
+evidence detail, the "Located at" locus — is quoted as a Markdown inline
+code span the value's own content cannot break out of: the fence is always
+longer than the longest backtick run already in the value, a value
+starting or ending with a backtick gets a padding space, and control
+characters are stripped first. A value containing its own backtick can no
+longer close the span early and render the rest of the value as Markdown.
+The same quoting carries through to the SARIF message and the JSON
+bundle's `label` field, since both render from the same locus/evidence
+data `PR_BODY.md` does. A few sites quote a target-controlled tool name
+inside an *existing* fence or indented block instead of giving it its own
+span — a recommendation's `invariant` line, and the W1 description-pin's
+YAML `config_snippet`, which a real control parses back out and must keep
+the tool name as a literal key — so those strip only control characters
+(in particular the newline, which could otherwise de-indent the line or
+start one that closes the surrounding fence) rather than adding a nested
+span.
 
 Two flags opt in to the rest, independently:
 

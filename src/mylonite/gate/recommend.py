@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any, Final, Literal
 
-from mylonite._markdown import code_span
+from mylonite._markdown import code_span, strip_controls
 from mylonite._redaction import redact, redact_value
 from mylonite._twin_fidelity import MARKER_SERVER_LAYER, MARKER_SYNTHETIC
 from mylonite._verdict import KEPT, verdict_label
@@ -524,7 +524,7 @@ def _w3_recommendation(
             "The allowlist check runs in code, before the socket opens. The model's "
             "request cannot force the fetch through a host that is not on the list."
         ),
-        invariant=f"{tool}(...) refuses unless the destination host is in ALLOWED_HOSTS",
+        invariant=f"{strip_controls(tool)}(...) refuses unless the destination host is in ALLOWED_HOSTS",
         config_snippet=config_snippet,
         code_sketch=_code_sketch(
             target,
@@ -585,7 +585,7 @@ def _w4_recommendation(
             "account) server-side against an authenticated identity, and require a "
             "server-minted, model-unforgeable token before dispatch."
         ),
-        invariant=f"{tool}(...) refuses unless called with a server-issued confirm_token",
+        invariant=f"{strip_controls(tool)}(...) refuses unless called with a server-issued confirm_token",
         config_snippet=config_snippet,
         code_sketch=_code_sketch(
             target,
@@ -671,7 +671,10 @@ def _w2_recommendation(
             "Microsoft's FIDES (agent_framework.security) ships as a production "
             "implementation."
         ),
-        invariant=f"{sink_name}(...) refuses while untrusted content from {read_name} is in scope",
+        invariant=(
+            f"{strip_controls(sink_name)}(...) refuses while untrusted content from "
+            f"{strip_controls(read_name)} is in scope"
+        ),
         config_snippet=config_snippet,
         code_sketch=_code_sketch(
             target,
@@ -766,9 +769,14 @@ def _w1_recommendation(
             "load is the only real answer to a 'rug pull' — a description that changes "
             "after a user already approved the tool."
         ),
-        invariant=f"{tool}(...) refuses if sha256(description) != {digest or '<pin-after-review>'}",
+        invariant=(
+            f"{strip_controls(tool)}(...) refuses if sha256(description) != "
+            f"{digest or '<pin-after-review>'}"
+        ),
         config_snippet=(
-            f"control_config:\n  description_pins:\n    {tool}: {digest!r}" if digest else None
+            f"control_config:\n  description_pins:\n    {strip_controls(tool)}: {digest!r}"
+            if digest
+            else None
         ),
         code_sketch=None,
         citations=("mcp-spec-2026-07-28-tool-safety",),

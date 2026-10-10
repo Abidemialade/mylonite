@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-__all__ = ["code_span"]
+__all__ = ["code_span", "strip_controls"]
 
 #: C0 controls (0x00-0x1F) and C1 controls / DEL (0x7F-0x9F) -- CR/LF
 #: included: a literal newline inside an inline code span ends the span's
@@ -36,6 +36,24 @@ __all__ = ["code_span"]
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
 
 _BACKTICK_RUN_RE = re.compile(r"`+")
+
+
+def strip_controls(value: Any) -> str:
+    """Strip CR/LF and C0/C1 control characters from ``value``.
+
+    The control-stripping half of :func:`code_span`, exposed on its own for
+    a target-derived value that must NOT be fenced as an inline code span
+    (e.g. it is interpolated into a YAML ``config_snippet`` as a literal
+    key, where wrapping it in backticks would change the key itself and
+    break a consumer that parses the snippet back out) but still must not
+    be able to inject a newline that de-indents an indented code block onto
+    the surrounding Markdown, or -- combined with a line of backticks of its
+    own -- closes a fenced code block early. Stripping the newline alone
+    closes both: neither failure mode is reachable without one, since a
+    single-line value can never BE a standalone fence-closing line or start
+    a new, unindented line.
+    """
+    return _CONTROL_RE.sub("", str(value))
 
 
 def code_span(value: Any, *, table: bool = False) -> str:
@@ -50,7 +68,7 @@ def code_span(value: Any, *, table: bool = False) -> str:
     table cell a bare pipe ends the cell early, the exact same failure mode
     as an unescaped backtick ending the code span.
     """
-    text = _CONTROL_RE.sub("", str(value))
+    text = strip_controls(value)
     if table:
         text = text.replace("|", "\\|")
     longest = max((len(run) for run in _BACKTICK_RUN_RE.findall(text)), default=0)
