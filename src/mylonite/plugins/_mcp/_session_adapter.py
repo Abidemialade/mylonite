@@ -1853,6 +1853,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             planner_calls,
             dispatched=dispatched,
             effect_confirmed=effect_confirmed,
+            calibrated=calibrated,
             consequential=consequential,
             read_tool_names=read_tool_names,
             tool_annotations=tool_annotations,
@@ -1894,6 +1895,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         *,
         dispatched: set[str],
         effect_confirmed: str,
+        calibrated: bool,
         consequential: tuple[str, ...],
         read_tool_names: tuple[str, ...],
         tool_annotations: Mapping[str, Mapping[str, object]] | None,
@@ -1907,9 +1909,9 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         call that only the hint called a read now reads as a dispatch, so an
         attempt with nothing else to go on reads NOT TESTED (``MYL-INC-001``).
         Stderr names each such tool once so the operator can declare its real
-        reads. When a probe saw a write after a call to a read-only-annotated
-        tool and that tool was the only one dispatched, the log also records
-        that the annotation misdescribes the tool.
+        reads. When a probe calibrated for this attempt saw a write, and the
+        only consequential tool the attempt dispatched is annotated read-only,
+        the log also records that the annotation misdescribes the tool.
         """
         from mylonite.scan.tool_classifier import annotation_behaviour_mismatch
 
@@ -1934,7 +1936,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 "server's annotation said so; if it is a read, list it under "
                 "control_config.verdict_read_tools."
             )
-        if effect_confirmed != "true" or len(dispatched) != 1:
+        if not calibrated or effect_confirmed != "true" or len(dispatched) != 1:
             return
         (tool,) = dispatched
         mismatch = annotation_behaviour_mismatch(

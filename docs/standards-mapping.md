@@ -41,10 +41,10 @@ Two deliberate deviations, so the claim stays accurate:
   call that went through into "resisted". It needs your
   `control_config.verdict_read_tools` entry, a read verb in the tool's name, or
   a calibrated effect probe certified through that tool (see
-  [Reading results](reading-results.md)). A tool annotated
-  `readOnlyHint: true` that a calibrated probe then sees writing is logged as an
-  **annotation/behaviour mismatch**, a defect in the target, not a
-  classification problem to route around.
+  [Reading results](reading-results.md)). When a calibrated effect probe sees a
+  write after an attempt whose only consequential call went to a tool annotated
+  `readOnlyHint: true`, the log records an **annotation/behaviour mismatch**, a
+  defect in the target, not a classification problem to route around.
 
 ## How tagging works
 
