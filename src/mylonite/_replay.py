@@ -43,6 +43,11 @@ Two cache-key algorithms exist, selected PER ``fixtures_dir`` (see
   only through a slow salted digest, so two conversations that differ inside
   a secret never share a key. A call with nothing secret-shaped in it hashes
   identically under v2 and v3.
+  The masking rules have grown since 0.12.0 (more token shapes, the
+  ``Authorization``-scheme rule, the target's own credentials), which changes
+  the key of a conversation holding such a span. A replay miss therefore
+  retries with the 0.12.0 rules (:func:`_stable_key_v3_legacy`) before it
+  reports a miss, so a fixture recorded under 0.12.0 keeps replaying.
 
 Redaction
 ---------
@@ -99,7 +104,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal
 
-from mylonite._redaction import REDACTION_PLACEHOLDER, redact, redact_value, secret_spans
+from mylonite._redaction import (
+    REDACTION_PLACEHOLDER,
+    _redact_legacy,
+    _secret_spans_legacy,
+    redact,
+    redact_value,
+    secret_spans,
+)
 
 #: Generic re-record guidance used when a construction site doesn't supply
 #: its own ``missing_fixture_hint`` (e.g. record-mode-only callers, where a
@@ -223,6 +235,30 @@ def _stable_key_v3(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
     emitted a span, then later echoes the model's copy of that same span.
     With nothing secret-shaped in a call, the hashed body is exactly v2's.
     """
+    return _v3_key(model, messages, redact, secret_spans, **kwargs)
+
+
+def _stable_key_v3_legacy(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
+    """The v3 key as 0.12.0 computed it, for replay only.
+
+    Same algorithm as :func:`_stable_key_v3`, with the 0.12.0 masking rules
+    (``mylonite._redaction._redact_legacy`` and ``_secret_spans_legacy``):
+    no token shapes added since, no ``Authorization``-scheme rule and no
+    registered target credentials. A conversation with none of those spans
+    keys the same both ways. :class:`LiteLLMRecorder` tries this key only
+    when the current one misses in replay mode, so a fixture recorded under
+    0.12.0 still replays; record mode always writes the current key.
+    """
+    return _v3_key(model, messages, _redact_legacy, _secret_spans_legacy, **kwargs)
+
+
+def _v3_key(
+    model: str,
+    messages: Sequence[Any],
+    redact_fn: Callable[[str], str],
+    spans_fn: Callable[[str], list[str]],
+    **kwargs: Any,
+) -> str:
     canonical = json.loads(
         json.dumps(_identity_payload(model, messages, **kwargs), sort_keys=True, default=str)
     )
@@ -232,8 +268,8 @@ def _stable_key_v3(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
         if isinstance(value, str):
             for echo in echoes:
                 value = value.replace(echo, REDACTION_PLACEHOLDER)
-            masked = redact(value)
-            spans = secret_spans(value)
+            masked = redact_fn(value)
+            spans = spans_fn(value)
             if spans:
                 digests.append(_spans_digest(tuple(spans), masked))
             return masked
@@ -254,11 +290,11 @@ def _stable_key_v3(model: str, messages: Sequence[Any], **kwargs: Any) -> str:
         for message in value:
             if isinstance(message, dict) and message.get("role") == "assistant":
                 for leaf in _string_leaves(message):
-                    model_spans.update(span for span in secret_spans(leaf) if span not in emitted)
-                keyed_messages.append(_redact_strings(message))
+                    model_spans.update(span for span in spans_fn(leaf) if span not in emitted)
+                keyed_messages.append(_redact_strings(message, redact_fn))
                 continue
             for leaf in _string_leaves(message):
-                emitted.update(secret_spans(leaf))
+                emitted.update(spans_fn(leaf))
             echoes = sorted(model_spans, key=len, reverse=True)
             keyed_messages.append(keyed(message, echoes))
         hashed[name] = keyed_messages
@@ -316,14 +352,15 @@ def _string_leaves(value: Any) -> list[str]:
     return []
 
 
-def _redact_strings(value: Any) -> Any:
-    """Apply :func:`mylonite._redaction.redact` to every string leaf of ``value``."""
+def _redact_strings(value: Any, redact_fn: Callable[[str], str] = redact) -> Any:
+    """Apply ``redact_fn`` (default :func:`mylonite._redaction.redact`) to every
+    string leaf of ``value``."""
     if isinstance(value, str):
-        return redact(value)
+        return redact_fn(value)
     if isinstance(value, dict):
-        return {k: _redact_strings(v) for k, v in value.items()}
+        return {k: _redact_strings(v, redact_fn) for k, v in value.items()}
     if isinstance(value, list):
-        return [_redact_strings(v) for v in value]
+        return [_redact_strings(v, redact_fn) for v in value]
     return value
 
 
@@ -712,8 +749,25 @@ class LiteLLMRecorder:
         if self.mode == "replay":
             if path is short and short.is_file() and not self._short_name_matches(short, key):
                 path = full  # another key's recording under the same prefix: a miss
+            if not path.is_file() and self._key_version == 3:
+                # A fixture recorded under 0.12.0 was keyed with that release's
+                # masking rules; a conversation holding a span masked only
+                # since then keys differently now. Try the 0.12.0 key before
+                # reporting a miss, so an existing fixture keeps replaying.
+                legacy = self._resolve_path(_stable_key_v3_legacy(model, msgs, **kwargs))
+                if legacy is not None:
+                    return self._load_fixture(key=key, model=model, path=legacy)
             return self._load_fixture(key=key, model=model, path=path)
         return await self._record(model=model, messages=messages, path=path, kwargs=kwargs, key=key)
+
+    def _resolve_path(self, key: str) -> Path | Traversable | None:
+        """The recorded file for ``key``, or ``None`` when there is none."""
+        short, full = _fixture_candidates(self.fixtures_dir, key)
+        if full.is_file():
+            return full
+        if short.is_file() and self._short_name_matches(short, key):
+            return short
+        return None
 
     @staticmethod
     def _short_name_matches(path: Path | Traversable, key: str) -> bool:

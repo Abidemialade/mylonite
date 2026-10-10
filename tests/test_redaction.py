@@ -1273,29 +1273,80 @@ def test_register_target_credentials_masks_credentials_but_not_ordinary_values()
         headers={
             "Authorization": "Bearer dummy123",
             "X-Api-Key": "dummy-key-0001",
-            "X-Upstream": "token dummy-upstream-1",
+            "Proxy-Authorization": "Basic ZHVtbXk6ZHVtbXk=",
+            "X-Upstream": "token based auth",
+            "X-Auth-Required": "true",
+            "X-Auth-Mode": "required",
             "Content-Type": "application/json",
         },
         env={
             "GITHUB_PERSONAL_ACCESS_TOKEN": "dummy-pat-0001",
+            "STRIPE_KEY": "sk_test_" + "dummy0dummy0dummy0",  # pragma: allowlist secret
             "DB_PATH": "/srv/data/app.db",
             "AUTH_TOKEN_REQUIRED": "false",
+            "MAX_TOKENS": "4096",  # pragma: allowlist secret
+            "MAX_TOKENS_LONG": "1000000000",  # pragma: allowlist secret
+            "SECRET_BACKEND": "vault",  # pragma: allowlist secret
+            "SECRET_PROVIDER": "hashicorp-vault",  # pragma: allowlist secret
             "UNSET_REF_TOKEN": "${SOME_VAR}",
         },
-        expanded=["dummy-expanded-0001"],
+        expanded=["dummy-expanded-0001", "acme-corp", "12345678"],
     )
     for secret in (
         "Bearer dummy123",
         "dummy123",
         "dummy-key-0001",
-        "dummy-upstream-1",
+        "ZHVtbXk6ZHVtbXk=",
         "dummy-pat-0001",
         "dummy-expanded-0001",
     ):
         assert secret not in mask_registered_values(f"echo {secret} back")
         assert secret not in redact(f"echo {secret} back")
-    for ordinary in ("application/json", "/srv/data/app.db", "false", "${SOME_VAR}"):
+    for ordinary in (
+        "application/json",
+        "/srv/data/app.db",
+        "false",
+        "true",
+        "required",
+        "based auth",
+        "4096",
+        "1000000000",
+        "vault",
+        "hashicorp-vault",
+        "acme-corp",
+        "12345678",
+        "${SOME_VAR}",
+    ):
         assert mask_registered_values(f"echo {ordinary} back") == f"echo {ordinary} back"
+
+
+def test_registered_target_credentials_never_rewrite_ordinary_json_values() -> None:
+    """A persisted exploit record must keep its ordinary values: registering a
+    target's settings must not turn "4096", "true" or "vault" into the
+    placeholder in what the generated test replays."""
+    from mylonite._redaction import register_target_credentials
+
+    register_target_credentials(
+        headers={"X-Auth-Required": "true", "X-Upstream": "token based auth"},
+        env={"MAX_TOKENS": "4096", "SECRET_BACKEND": "vault"},  # pragma: allowlist secret
+    )
+    record = {
+        "max_tokens": 4096,
+        "reply": "max 4096 tokens, auth true, backend vault, token based auth",
+    }
+    assert redact_value(record) == record
+
+
+def test_stripe_rule_needs_a_word_boundary() -> None:
+    text = "risk_live_" + "dummy0dummy0dummy0dummy0"
+    assert redact(text) == text
+
+
+def test_authorization_scheme_rule_does_not_cross_a_newline() -> None:
+    text = "Authorization: token\nrequired-for-every-call"
+    assert redact(text) == text
+    text = "Authorization:\nBasic is the scheme"
+    assert redact(text) == text
 
 
 def test_load_target_file_registers_the_credentials_it_hands_the_target(
@@ -1308,13 +1359,13 @@ def test_load_target_file_registers_the_credentials_it_hands_the_target(
     target.write_text(
         "family: app\ncommand: python\n"
         "headers:\n  Authorization: Bearer ${MY_DUMMY_TOKEN}\n  X-Session: s3ss10n-dummy\n"
-        "env:\n  SERVICE_PASSWORD: plain-dummy-pw\n  LOG_LEVEL: debug\n",
+        "env:\n  SERVICE_PASSWORD: plain-dummy-pw-01\n  LOG_LEVEL: debug\n",
         encoding="utf-8",
     )
     load_target_file(target)
-    out = redact("echo dummyvalue0001 / plain-dummy-pw / debug / s3ss10n-dummy")
+    out = redact("echo dummyvalue0001 / plain-dummy-pw-01 / debug / s3ss10n-dummy")
     assert "dummyvalue0001" not in out
-    assert "plain-dummy-pw" not in out
+    assert "plain-dummy-pw-01" not in out
     assert "debug" in out
     assert "s3ss10n-dummy" in out  # not a credential-named header
 

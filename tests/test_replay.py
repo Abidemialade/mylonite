@@ -958,3 +958,68 @@ def test_many_spans_in_one_string_cost_one_scrypt(monkeypatch: pytest.MonkeyPatc
     assert calls == [1]
     _stable_key_v3("claude-x", messages)  # a later turn repeats it: cached
     assert calls == [1]
+
+
+# --- fixtures recorded under 0.12.0 keep replaying -----------------------------
+#: A tool output holding spans 0.12.0 did not mask: a GitHub token, a short
+#: ``Authorization: token`` value and a credential the target was handed.
+_GH_DUMMY = "ghp_" + "D0mmyD0mmyD0mmyD0mmyD0mmyD0mmyD0mmy"  # pragma: allowlist secret
+_TARGET_CRED = "Dummy-Target-Cred-01"  # pragma: allowlist secret
+_NEW_SPAN_MSGS = [
+    {"role": "user", "content": "read my config"},
+    {
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "content": f"found {_GH_DUMMY}; Authorization: token d0mmytok; echo {_TARGET_CRED}",
+    },
+]
+#: ``_stable_key_v3("claude-x", _NEW_SPAN_MSGS)`` computed by the released
+#: 0.12.0 source (``git archive v0.12.0 src``). Pinned so the fallback key
+#: can never drift from what a 0.12.0 recording is named.
+_KEY_0_12_0 = (
+    "2ecf3ff1fb6b99373825ff68b9f1a5d821d4fd2593638cac1111df8de0e2e7ca"  # pragma: allowlist secret
+)
+
+
+def test_the_legacy_v3_key_is_the_0_12_0_key() -> None:
+    from mylonite._redaction import register_target_credentials
+    from mylonite._replay import _stable_key_v3_legacy
+
+    register_target_credentials(env={"SERVICE_TOKEN": _TARGET_CRED})
+    assert _stable_key_v3_legacy("claude-x", _NEW_SPAN_MSGS) == _KEY_0_12_0
+    # The current key masks the new spans, so it differs: without the
+    # fallback this recording would be a miss.
+    assert _stable_key_v3("claude-x", _NEW_SPAN_MSGS) != _KEY_0_12_0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("short_name", [True, False])
+async def test_a_fixture_recorded_under_0_12_0_still_replays(
+    tmp_path: Path, short_name: bool
+) -> None:
+    from mylonite._redaction import register_target_credentials
+
+    register_target_credentials(env={"SERVICE_TOKEN": _TARGET_CRED})
+    name = _KEY_0_12_0[:FIXTURE_NAME_LENGTH] if short_name else _KEY_0_12_0
+    payload = json.loads(_fixture_payload("recorded under 0.12.0"))
+    if short_name:
+        payload["_key"] = _KEY_0_12_0
+    (_stamped(tmp_path) / f"{name}.json").write_text(json.dumps(payload), encoding="utf-8")
+
+    recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    response = await recorder(model="claude-x", messages=_NEW_SPAN_MSGS)
+    assert response.choices[0].message.content == "recorded under 0.12.0"
+    assert recorder.cache_hits == 1
+    assert recorder.cache_misses == 0
+
+
+@pytest.mark.asyncio
+async def test_the_legacy_fallback_never_answers_for_another_conversation(
+    tmp_path: Path,
+) -> None:
+    (_stamped(tmp_path) / f"{_KEY_0_12_0}.json").write_text(_fixture_payload(), encoding="utf-8")
+    other = [dict(m) for m in _NEW_SPAN_MSGS]
+    other[1]["content"] = other[1]["content"].replace("d0mmytok", "d1fferent")
+    recorder = LiteLLMRecorder(fixtures_dir=tmp_path, mode="replay")
+    with pytest.raises(MissingFixtureError):
+        await recorder(model="claude-x", messages=other)
