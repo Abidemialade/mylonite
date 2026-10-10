@@ -39,6 +39,7 @@ from mcp import ClientSession
 # Import the package init so per-target predicates register.
 import mylonite.plugins._mcp  # noqa: F401
 from mylonite._redaction import redact, redact_value
+from mylonite._stderr_warn import warn_stderr
 from mylonite.contracts import (
     AdapterResponse,
     AsyncTargetAdapterBase,
@@ -62,6 +63,7 @@ from mylonite.scan.control_shim import DEFAULT_FETCH_ALLOWLIST, BoundaryControl,
 from mylonite.scan.effect_verdict import (
     LinkResult,
     TraceOutcome,
+    annotation_only_reads,
     classify_trace,
     dispatched_tools,
     has_deferred_dispatch,
@@ -78,6 +80,10 @@ from mylonite.scan.predicate_primitives import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: ``(kind, family, scope, tool)`` keys already reported this process, so a
+#: scan names each annotation-only tool once, not once per attempt.
+_ANNOTATION_ONLY_NOTICED: set[tuple[str, str, str, str]] = set()
 
 DEFAULT_PLANNER_TIMEOUT_S = 60.0
 
@@ -1196,6 +1202,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
                 payload.metadata.get("consequential_tool") or payload.metadata.get("egress_tool")
             ),
             tool_annotations=recording_shim.tool_annotations,
+            effect_confirmed=effect_confirmed,
         )
 
         return AdapterResponse(
@@ -1706,6 +1713,7 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
         seed_handle: str | None,
         seed_tool_name: str | None,
         tool_annotations: Mapping[str, Mapping[str, object]] | None = None,
+        effect_confirmed: str = "unprobed",
     ) -> dict[str, str]:
         """``trace_outcome`` / ``link`` / ``marker_kind`` / ``marker_linked`` /
         ``calibrated`` / ``confirm_capable`` / ``seed_control`` evidence, stamped by both ``invoke()`` and
@@ -1841,6 +1849,16 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             allowed_hosts=allowed_hosts,
         )
         calibrated = cal is not None and cal.calibrated and dispatched <= set(cal.certified_tools)
+        self._report_annotation_only_reads(
+            planner_calls,
+            dispatched=dispatched,
+            effect_confirmed=effect_confirmed,
+            consequential=consequential,
+            read_tool_names=read_tool_names,
+            tool_annotations=tool_annotations,
+            verify_tool=verify_tool,
+            allowed_hosts=allowed_hosts,
+        )
         # Whether calibration showed the probe sees a write land in the record
         # it reads. Independent of which tools this attempt dispatched: it lets
         # a change the probe saw raise a dispatch to "effect-confirmed" under
@@ -1869,6 +1887,64 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             "any_deferred": "true" if any_deferred else "false",
             "seed_control": seed_control_status,
         }
+
+    def _report_annotation_only_reads(
+        self,
+        planner_calls: Sequence[Mapping[str, Any]],
+        *,
+        dispatched: set[str],
+        effect_confirmed: str,
+        consequential: tuple[str, ...],
+        read_tool_names: tuple[str, ...],
+        tool_annotations: Mapping[str, Mapping[str, object]] | None,
+        verify_tool: str | None,
+        allowed_hosts: tuple[str, ...],
+    ) -> None:
+        """Name the tools the verdict no longer counts as reads, once per scan.
+
+        A tool's own ``readOnlyHint`` makes a read for the verdict only when
+        something else agrees (``effect_verdict.is_read_tool``, rule 9). A
+        call that only the hint called a read now reads as a dispatch, so an
+        attempt with nothing else to go on reads NOT TESTED (``MYL-INC-001``).
+        Stderr names each such tool once so the operator can declare its real
+        reads. When a probe saw a write after a call to a read-only-annotated
+        tool and that tool was the only one dispatched, the log also records
+        that the annotation misdescribes the tool.
+        """
+        from mylonite.scan.tool_classifier import annotation_behaviour_mismatch
+
+        family, scope = self._family, self._scope or ""
+        for tool in annotation_only_reads(
+            planner_calls,
+            consequential_tool_names=consequential,
+            read_tool_names=read_tool_names,
+            tool_annotations=tool_annotations,
+            verify_tool=verify_tool,
+            allowed_hosts=allowed_hosts,
+        ):
+            key = ("annotation-only", family, scope, tool)
+            if key in _ANNOTATION_ONLY_NOTICED:
+                continue
+            _ANNOTATION_ONLY_NOTICED.add(key)
+            # json.dumps quotes the server-supplied name and escapes any
+            # control character in it before it reaches the terminal.
+            shown = json.dumps(tool)
+            warn_stderr(
+                f"warning: calls to {shown} were not counted as reads because only the "
+                "server's annotation said so; if it is a read, list it under "
+                "control_config.verdict_read_tools."
+            )
+        if effect_confirmed != "true" or len(dispatched) != 1:
+            return
+        (tool,) = dispatched
+        mismatch = annotation_behaviour_mismatch(
+            (tool_annotations or {}).get(tool), observed_write=True
+        )
+        key = ("mismatch", family, scope, tool)
+        if mismatch is None or key in _ANNOTATION_ONLY_NOTICED:
+            return
+        _ANNOTATION_ONLY_NOTICED.add(key)
+        logger.warning("%s: %s", json.dumps(tool), mismatch)
 
     @staticmethod
     async def _snapshot_sandbox(scope: str) -> set[str]:
@@ -2294,6 +2370,7 @@ class _MCPAttackSession:
                 seed_handle=None,
                 seed_tool_name=None,
                 tool_annotations=recording.tool_annotations,
+                effect_confirmed=metadata.get("effect_confirmed", "unprobed"),
             )
         )
         return AdapterResponse(

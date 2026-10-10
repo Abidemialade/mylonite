@@ -361,6 +361,26 @@ actions (`post_and_read`). A name that joins a read to a state-changing word suc
 `get_email` and `issue_read` are reads, while `post_to_thread`, `upload_file`,
 `web_fetch` and `budget_report` are dispatches.
 
+The server's own `readOnlyHint` does not make a read on its own. It counts only when
+something else agrees: you list the tool under `verdict_read_tools` or `read_tool_names`,
+its name reads as a read by the rules above, or a calibrated effect probe certified
+through that tool settles the attempt. A server can mark a tool that charges a card as
+read-only, and the MCP spec says a client should not act on an untrusted server's
+annotations. So a call to `authorize_payment` marked read-only, with nothing else to go
+on, reads NOT TESTED ([`MYL-INC-001`](reason-codes.md#myl-inc-001)), the same as it
+would with no annotation. The scan names each such tool once on stderr:
+
+```text
+warning: calls to "authorize_payment" were not counted as reads because only the server's annotation said so; if it is a read, list it under control_config.verdict_read_tools.
+```
+
+If the tool really is a read, declare it:
+
+```yaml
+control_config:
+  verdict_read_tools: [authorize_payment]
+```
+
 A call's own arguments can also settle it, whatever the name says. A read-named tool
 that takes a destination, such as `get_page(url=...)`, can fetch an attacker-chosen
 address the same as a declared egress tool, so a call is never a read when its
