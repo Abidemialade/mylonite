@@ -40,6 +40,7 @@ import secrets
 from dataclasses import dataclass
 from typing import Any, ClassVar, Final, Protocol, runtime_checkable
 
+from mylonite._markdown import strip_controls
 from mylonite.scan._control_primitives import (
     host_allowed,
     quarantine,
@@ -91,7 +92,24 @@ def config_snippet_for(
     (``gate/recommend.py``), which additionally passes ``url_param``/
     ``allowlist`` when the trace identified them — the fail-closed warning
     path never has those, so it always gets exactly today's generic template.
+
+    ``tool``, ``url_param`` and every ``allowlist`` entry are all
+    target-controlled (a tool name, an argument key name, a hostname lifted
+    from a trace) and get interpolated straight into this snippet, which
+    ``gate/recommend.py``'s ``render_markdown`` embeds inside a fixed
+    ` ```yaml ` fence in the committed PR body (F9 follow-up: this is the
+    same choke point every caller -- the PR-body path and the fail-closed
+    stderr-warning path alike -- renders from, so fixing it once here fixes
+    both). ``strip_controls()`` removes CR/LF and other control characters
+    (never adds a fence of its own, since a value here is a YAML list
+    element or key, not getting its own inline code span) so a value
+    containing its own newline can no longer start a new, unindented line
+    that is itself a run of backticks closing that fence early. A plain
+    identifier is unaffected -- stripping is a no-op on one.
     """
+    tool = strip_controls(tool)
+    url_param = strip_controls(url_param) if url_param else url_param
+    allowlist = tuple(strip_controls(host) for host in allowlist)
     if weakness == "W2":
         if role == "sink":
             # The tool being REFUSED. Telling the operator to declare a sink as

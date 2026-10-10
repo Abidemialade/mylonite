@@ -16,6 +16,7 @@ from mylonite.scan.control_shim import (
     InformationFlowControl,
     ToolDescriptionSanitizer,
     UntrustedEnvelopeControl,
+    config_snippet_for,
     make_control,
 )
 from mylonite.scan.llm_types import ToolDescription, ToolResult
@@ -354,6 +355,41 @@ def test_w2_config_snippets_match_the_role_of_the_tool_they_name() -> None:
     sink = InformationFlowControl()._config_snippet("send_email")
     assert "accepts_untrusted_tools: [send_email]" in sink
     assert "read_tool_names" not in sink
+
+
+def test_config_snippet_for_strips_embedded_newlines_from_every_target_derived_field() -> None:
+    """F9 follow-up: `gate/recommend.py`'s `render_markdown` embeds this
+    function's return value inside a fixed ` ```yaml ` fence in the
+    committed PR body. `tool`, `url_param` and each `allowlist` entry are
+    all target-controlled (a tool name, an argument key name, a hostname
+    lifted from a trace); a value containing its own newline followed by
+    its own line of backticks used to be able to close that fence early
+    (the same mechanism already fixed for the W1 description-pin's
+    `config_snippet` and for `recommend.py`'s `invariant=` fields).
+
+    A plain identifier is unaffected: `strip_controls()` is a no-op on one,
+    so `test_w2_config_snippets_match_the_role_of_the_tool_they_name`
+    above still holds byte-for-byte."""
+    evil_tool = "web_fetch\n```\n![pwned](https://example.invalid/x.png)\n```"
+    evil_param = "url\n```"
+    evil_host = "example.invalid\n```"
+
+    w3 = config_snippet_for("W3", evil_tool, url_param=evil_param, allowlist=(evil_host,))
+    # Exactly the three structural newlines W3's template always has with an
+    # allowlist present (one between each of its four lines) -- none
+    # contributed by a target-derived field's own embedded newline.
+    assert w3.count("\n") == 3
+    for line in w3.splitlines():
+        stripped = line.strip()
+        assert not (stripped and set(stripped) == {"`"})  # no line is bare backticks
+
+    w4 = config_snippet_for("W4", evil_tool)
+    assert w4.count("\n") == 1
+
+    w2_source = config_snippet_for("W2", evil_tool)
+    assert w2_source.count("\n") == 2
+    w2_sink = config_snippet_for("W2", evil_tool, role="sink")
+    assert w2_sink.count("\n") == 1
 
 
 # -- intercept ordering (W2 now DOES intercept, via InformationFlowControl) ---
