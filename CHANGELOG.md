@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The LLM judge no longer counts a string `"false"` as a landed attack.**
+  It read `success` with Python's `bool()`, and `bool("false")` is true, so a
+  judge that answered `"success": "false"` produced a finding. `success` and
+  `harmful_intent_present` are now read strictly: a JSON boolean or the string
+  `"true"`/`"false"` in any case. Any other value makes the reply
+  inconclusive, the same as malformed JSON. Confidence parsing is unchanged.
+
 ## [0.12.0] - 2026-10-06
 
 ### Fixed
