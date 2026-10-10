@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mylonite._markdown import code_span
 from mylonite.contracts import ExploitRecord
 
 # channel -> (locus kind, the field within that locus)
@@ -109,7 +110,7 @@ def localize(exploit: ExploitRecord, *, system_prompt: str | None = None) -> Loc
         )
 
     tool = _pick_tool(exploit)
-    label = f"tool `{tool}` -> {field}" if tool else f"the implicated tool's {field}"
+    label = f"tool {code_span(tool)} -> {field}" if tool else f"the implicated tool's {field}"
     return Localization(
         kind=kind,
         label=label,

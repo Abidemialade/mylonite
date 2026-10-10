@@ -38,6 +38,7 @@ from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Any, Final, Literal
 
+from mylonite._markdown import code_span
 from mylonite._redaction import redact, redact_value
 from mylonite._twin_fidelity import MARKER_SERVER_LAYER, MARKER_SYNTHETIC
 from mylonite._verdict import KEPT, verdict_label
@@ -515,8 +516,8 @@ def _w3_recommendation(
         control_id="egress-allowlist",
         tier="deterministic",
         headline=(
-            f"`{tool}` reached an off-allowlist destination"
-            + (f" (`{evidence.value}`)" if evidence.value else "")
+            f"{code_span(tool)} reached an off-allowlist destination"
+            + (f" ({code_span(evidence.value)})" if evidence.value else "")
             + " — enforce a host allowlist in the handler before the request is issued."
         ),
         rationale=(
@@ -577,7 +578,7 @@ def _w4_recommendation(
     primary = Prescription(
         control_id="capability-attenuation",
         tier="deterministic",
-        headline=f"`{tool}` executed with no prior approval call — bind it to a server-minted capability.",
+        headline=f"{code_span(tool)} executed with no prior approval call — bind it to a server-minted capability.",
         rationale=(
             "The model should never be able to supply a raw, sufficient argument for a "
             "consequential action. Resolve sensitive fields (recipient, destination "
@@ -660,8 +661,8 @@ def _w2_recommendation(
         control_id="ifc-label",
         tier="deterministic",
         headline=(
-            f"`{sink_name}` acted on content `{read_name}` returned — label that content "
-            "untrusted and refuse the sink call while it is in scope."
+            f"{code_span(sink_name)} acted on content {code_span(read_name)} returned — label "
+            "that content untrusted and refuse the sink call while it is in scope."
         ),
         rationale=(
             "Information-flow control (label the data, not filter the text): the model "
@@ -731,7 +732,9 @@ def _w1_recommendation(
         occurrence=None,
         executed=bool(exploit.response.tool_calls),
         source="tool_surface" if description else "payload",
-        note=f"steered the planner into calling `{steered_into}`" if steered_into else None,
+        note=f"steered the planner into calling {code_span(steered_into)}"
+        if steered_into
+        else None,
     )
     confidence: Confidence
     reason: str
@@ -756,7 +759,7 @@ def _w1_recommendation(
     pin = Prescription(
         control_id="description-fingerprint",
         tier="detective",
-        headline=f"Pin `{tool}`'s description hash and fail CI on drift.",
+        headline=f"Pin {code_span(tool)}'s description hash and fail CI on drift.",
         rationale=(
             "A tool description is untrusted per the MCP spec unless it comes from a "
             "trusted server. Hashing the approved text and refusing a changed one at "
@@ -775,9 +778,9 @@ def _w1_recommendation(
         control_id="capability-attenuation",
         tier="deterministic",
         headline=(
-            f"`{tool}`'s description should not be able to authorize `{steered_into}`."
+            f"{code_span(tool)}'s description should not be able to authorize {code_span(steered_into)}."
             if steered_into
-            else f"`{tool}`'s description should not be able to authorize a consequential action."
+            else f"{code_span(tool)}'s description should not be able to authorize a consequential action."
         ),
         rationale=(
             "No description, however phrased, should be able to talk the planner into "
@@ -1085,11 +1088,11 @@ def recommend(
 
 
 def _render_evidence(ev: Evidence) -> str:
-    parts = [f"`{ev.tool}`"]
+    parts = [code_span(ev.tool)]
     if ev.argument:
-        parts.append(f"argument `{ev.argument}`")
+        parts.append(f"argument {code_span(ev.argument)}")
     if ev.value:
-        parts.append(f"value `{ev.value}`")
+        parts.append(f"value {code_span(ev.value)}")
     parts.append("executed" if ev.executed else "not confirmed executed")
     line = ", ".join(parts)
     if ev.note:

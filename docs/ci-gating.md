@@ -366,6 +366,17 @@ for the oldest sets) as its `_meta.json`, or re-record it. Fixtures recorded
 before this release were not redacted; re-gate them, or review them before
 you share them.
 
+Separately from redaction, any target-controlled text quoted in
+`PR_BODY.md` — a tool name, an argument, an evidence value, the "Located at"
+locus — is quoted as a Markdown inline code span the value's own content
+cannot break out of: the fence is always longer than the longest backtick
+run already in the value, a value starting or ending with a backtick gets a
+padding space, and control characters are stripped first. A value containing
+its own backtick can no longer close the span early and render the rest of
+the value as Markdown. The same quoting carries through to the SARIF message
+and the JSON bundle's `label` field, since both render from the same
+locus/evidence data `PR_BODY.md` does.
+
 Two flags opt in to the rest, independently:
 
 - **`--open-pr`** creates the branch, commits the gate directory, pushes, and

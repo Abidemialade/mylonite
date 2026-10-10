@@ -70,3 +70,23 @@ def test_localize_is_deterministic_and_always_has_a_why():
     ex = _exploit(channel="tool-result", tool_calls=["read_note"])
     assert localize(ex) == localize(ex)
     assert localize(ex).why
+
+
+def test_localize_label_escapes_a_backtick_in_the_tool_name():
+    """F9: the tool name is attacker/target-controlled (read from the
+    target's own tool list). Before the fix the label was built with a bare
+    f"tool `{tool}` -> {field}", so a backtick in the tool name closed the
+    code span early and let a following Markdown link/image render in the
+    gate PR body (``loc.label`` also reaches the SARIF message and the JSON
+    bundle's ``label`` field unchanged)."""
+    evil = (
+        "lookup` ![pwned](https://example.invalid/x.png) [click](https://example.invalid/y) `tail"
+    )
+    ex = _exploit(channel="user-message", metadata={"consequential_tool": evil})
+    loc = localize(ex)
+    assert loc.tool == evil  # the raw tool name is preserved on the dataclass
+    # The rendered label's fence must be longer than the value's own longest
+    # backtick run (1 here), so the value's backticks cannot close it early.
+    assert "``" in loc.label
+    assert "![pwned](https://example.invalid/x.png)" in loc.label
+    assert "[click](https://example.invalid/y)" in loc.label
