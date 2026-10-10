@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-10
+
 ### Fixed
 
 - **The LLM judge no longer counts a string `"false"` as a landed attack.**
@@ -7032,7 +7034,8 @@ changes and no contract-version bump (`TargetFile`/`TargetSpec` are not under
   for use as differential-oracle ground truth for the validator.
 - mkdocs-material docs scaffold.
 
-[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/Abidemialade/mylonite/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/Abidemialade/mylonite/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/Abidemialade/mylonite/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Abidemialade/mylonite/compare/v0.10.5...v0.11.0
 [0.10.5]: https://github.com/Abidemialade/mylonite/compare/v0.10.4...v0.10.5
