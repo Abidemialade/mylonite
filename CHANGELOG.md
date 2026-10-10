@@ -16,22 +16,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `"true"`/`"false"` in any case. Any other value makes the reply
   inconclusive, the same as malformed JSON. Confidence parsing is unchanged.
 
-### Documentation
-
-- **What `RESISTED (server-reported)` proves, and what it doesn't.** An error
-  from the server on a consequential call (`MYL-SRV-001`) is read as
-  resisted by design: the reference app's guarded side resists several
-  attacks exactly this way, by raising an error. [Known
-  limitations](docs/limitations.md#9-a-server-reported-negative-proves-a-reply-not-a-safeguard)
-  now spells out the two things that keep that reading honest — a
-  calibrated probe or a seed's own check that already found the attack
-  landed overrides it, and the label can never promote an attempt to a
-  finding, so it can never become a KEPT test — alongside what it still
-  doesn't rule out: a network failure that errors the same way a refusal
-  does, or an action that started to take effect before the error came
-  back. [Reading the results](docs/reading-results.md#the-per-class-summary)
-  links to the same explanation from the per-class summary. No behaviour
-  changed.
 - **A target's tool name or argument value can no longer break out of its
   Markdown code span in the gate PR body.** `PR_BODY.md`'s evidence lines,
   "Located at" locus, and recommendation headlines quote target-controlled
@@ -80,6 +64,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it prints, keeping `\n` and `\t`. Previously, a tool result, error message
   or description containing raw control bytes reached the terminal unchanged
   and could clear the screen, move the cursor, or rewrite the window title.
+
+### Documentation
+
+- **What `RESISTED (server-reported)` proves, and what it doesn't.** An error
+  from the server on a consequential call (`MYL-SRV-001`) is read as
+  resisted by design: the reference app's guarded side resists several
+  attacks exactly this way, by raising an error. [Known
+  limitations](docs/limitations.md#9-a-server-reported-negative-proves-a-reply-not-a-safeguard)
+  now spells out the two things that keep that reading honest — a
+  calibrated probe or a seed's own check that already found the attack
+  landed overrides it, and the label can never promote an attempt to a
+  finding, so it can never become a KEPT test — alongside what it still
+  doesn't rule out: a network failure that errors the same way a refusal
+  does, or an action that started to take effect before the error came
+  back. [Reading the results](docs/reading-results.md#the-per-class-summary)
+  links to the same explanation from the per-class summary. No behaviour
+  changed.
 
 ## [0.12.0] - 2026-10-06
 
