@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from typing import Final
 
 REDACTION_PLACEHOLDER: Final = "***REDACTED***"
@@ -46,6 +46,7 @@ __all__ = [
     "redact_url_query",
     "redact_value",
     "register_masked_value",
+    "register_target_credentials",
     "secret_spans",
     "target_env_refs",
     "target_file_var_names",
@@ -78,6 +79,13 @@ _FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
     # unanchored so it also catches one embedded mid-string (e.g. inside a
     # provider error's message text, not just a bare standalone value).
     re.compile(r"AIza[A-Za-z0-9_-]{30,}"),
+    # GitHub tokens: classic (ghp_/gho_/ghu_/ghs_/ghr_) and fine-grained PATs.
+    re.compile(r"gh[pousr]_[A-Za-z0-9]{36}"),
+    re.compile(r"github_pat_[A-Za-z0-9_]{22,}"),
+    # Stripe secret and restricted keys, live and test.
+    re.compile(r"[sr]k_(?:live|test)_[A-Za-z0-9]{16,}"),
+    # Slack tokens (bot, user, app, ...).
+    re.compile(r"xox[abposr]-[A-Za-z0-9-]{10,}"),
     # Bearer tokens (Authorization header style).
     re.compile(r"Bearer [A-Za-z0-9._-]{20,}"),
     # PEM private-key blocks (any key type), across newlines.
@@ -86,6 +94,25 @@ _FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
         re.DOTALL,
     ),
 )
+
+# An ``Authorization`` or ``Proxy-Authorization`` header whose scheme is
+# ``Bearer``, ``token``, ``Basic`` or ``Digest``: the credential after the
+# scheme is masked whatever its length, and the header name and scheme stay
+# legible. Anchored to the header name, so prose such as "token based auth"
+# or a bare "Basic" is left alone.
+_AUTH_HEADER_PATTERN: Final = re.compile(
+    r"(?P<prefix>(?<![A-Za-z0-9-])(?:Proxy-)?Authorization['\"]?\s*[:=]\s*['\"]?"
+    r"(?:Bearer|token|Basic|Digest)\s+)"
+    r"(?P<val>(?<=Digest\s)[A-Za-z0-9_-]+=(?:\"[^\"\r\n]*\"|[^\s,\"']+)"
+    r"(?:\s*,\s*[A-Za-z0-9_-]+=(?:\"[^\"\r\n]*\"|[^\s,\"']+))*"
+    r"|[A-Za-z0-9._~+/=-]{4,})",
+    re.IGNORECASE,
+)
+
+
+def _mask_auth_header(match: re.Match[str]) -> str:
+    return f"{match.group('prefix')}{REDACTION_PLACEHOLDER}"
+
 
 # key=value / key: value credential assignments. The key name is preserved; only
 # the value is masked. Case-insensitive on the key; the separator may be ``=`` or
@@ -310,6 +337,71 @@ def mask_registered_values(text: str) -> str:
     return text
 
 
+#: Header-name parts that mark a header's value as a credential, beyond the
+#: ``_KV_KEYS`` words (``token``, ``secret``, ``api_key``, ...).
+_CREDENTIAL_HEADER_PARTS: Final[frozenset[str]] = frozenset(
+    {"auth", "authorization", "cookie", "key", "sig", "signature"}
+)
+
+#: Flag-like values a credential-named env entry can hold (``AUTH_TOKEN_REQUIRED:
+#: "false"``) that must never be masked everywhere they appear.
+_NOT_A_CREDENTIAL: Final[frozenset[str]] = frozenset({"true", "false", "none", "null"})
+
+#: ``<scheme> <credential>``: the shape of an ``Authorization`` header value.
+_SCHEME_VALUE: Final = re.compile(r"^\s*(?:Bearer|token|Basic|Digest)\s+(?P<cred>\S.*?)\s*$", re.I)
+
+
+def _header_name_looks_secret(name: str) -> bool:
+    """True when a header NAME signals a credential: ``Authorization``,
+    ``Cookie``, ``X-Api-Key``, ``X-Auth-Token``, ... but not ``Content-Type``."""
+    if _key_looks_secret(name):
+        return True
+    return any(part in _CREDENTIAL_HEADER_PARTS for part in re.split(r"[-_]", name.lower()))
+
+
+def register_target_credentials(
+    *,
+    headers: Mapping[str, object] | None = None,
+    env: Mapping[str, object] | None = None,
+    expanded: Iterable[str] = (),
+) -> None:
+    """Register every credential a target is given for exact-value masking.
+
+    A target that echoes its own credential (in a tool result, a reply, or an
+    HTTP error's reason phrase) then has it masked by :func:`redact` and
+    :func:`mask_registered_values`, whatever the credential's shape. Covers:
+
+    * ``expanded``: each value a ``${VAR}`` reference in a header resolved to;
+    * ``headers``: the whole value of a credential-named header
+      (:func:`_header_name_looks_secret`), and the credential after an auth
+      scheme (``Bearer``, ``token``, ``Basic``, ``Digest``) in any header;
+    * ``env``: each value :func:`_is_secret_env` flags.
+
+    Ordinary headers (``Content-Type``) and plain env values (a path, a port)
+    are not registered, and :func:`register_masked_value`'s minimum length
+    still applies, so ordinary text is not shredded. A value that is still an
+    unexpanded ``${VAR}`` reference is skipped.
+    """
+    for resolved in expanded:
+        if isinstance(resolved, str):
+            register_masked_value(resolved)
+    for name, value in (headers or {}).items():
+        if not isinstance(value, str) or _is_pure_var_ref(value):
+            continue
+        if _header_name_looks_secret(str(name)):
+            register_masked_value(value.strip())
+        match = _SCHEME_VALUE.match(value)
+        if match is not None:
+            register_masked_value(match.group("cred"))
+    for key, value in (env or {}).items():
+        if (
+            isinstance(value, str)
+            and value.strip().lower() not in _NOT_A_CREDENTIAL
+            and _is_secret_env(str(key), value)
+        ):
+            register_masked_value(value)
+
+
 def redact(text: str) -> str:
     """Return ``text`` with secret-shaped tokens replaced by the placeholder.
 
@@ -324,6 +416,7 @@ def redact(text: str) -> str:
     redacted = mask_registered_values(text)
     for pattern in _FULL_PATTERNS:
         redacted = pattern.sub(REDACTION_PLACEHOLDER, redacted)
+    redacted = _AUTH_HEADER_PATTERN.sub(_mask_auth_header, redacted)
     redacted = _URL_CRED_PATTERN.sub(_mask_url_cred, redacted)
     redacted = _KV_PATTERN.sub(_mask_kv, redacted)
     redacted = _BARE_KEY_PATTERN.sub(_mask_kv, redacted)
@@ -350,7 +443,7 @@ def secret_spans(text: str) -> list[str]:
     for pattern in _FULL_PATTERNS:
         found.extend((m.start(), m.group(0)) for m in pattern.finditer(text))
     found.extend((m.start("secret"), m.group("secret")) for m in _URL_CRED_PATTERN.finditer(text))
-    for pattern in (_KV_PATTERN, _BARE_KEY_PATTERN):
+    for pattern in (_AUTH_HEADER_PATTERN, _KV_PATTERN, _BARE_KEY_PATTERN):
         found.extend((m.start("val"), m.group("val")) for m in pattern.finditer(text))
     found.sort()
     return [span for _start, span in found]

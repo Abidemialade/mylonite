@@ -36,6 +36,7 @@ from mylonite._redaction import (
     CREDENTIAL_ENV_FIELD,
     CREDENTIAL_NESTED_SECTIONS,
     CREDENTIAL_TOP_LEVEL_SECTIONS,
+    register_target_credentials,
 )
 from mylonite._stderr_warn import warn_stderr
 from mylonite.plugins._mcp.target_registry import (
@@ -474,13 +475,18 @@ def _check_remote_header_refs(data: dict[str, Any]) -> list[str]:
 
 
 def _expand_dict_block(
-    block: dict[str, Any], path: str, missing: list[tuple[str, str, str | None]]
+    block: dict[str, Any],
+    path: str,
+    missing: list[tuple[str, str, str | None]],
+    resolved_values: list[str] | None = None,
 ) -> dict[str, Any]:
     """Expand every ``${VAR}`` reference in the STRING values of one flat dict
     (a ``headers`` / ``request.headers`` / ``env`` block), appending any
     unresolved reference to ``missing`` as ``(field_path, var_name, key)``.
     ``key`` is the field's key when the reference is its whole value (so the
-    variable holds that key's value, e.g. ``GITHUB_TOKEN``), else ``None``."""
+    variable holds that key's value, e.g. ``GITHUB_TOKEN``), else ``None``.
+    Each value a reference resolved to is appended to ``resolved_values``
+    when given, so the caller can register it for masking."""
 
     def _expand(key: str, value: str) -> str:
         whole = _VAR_REF_PATTERN.fullmatch(value.strip()) is not None
@@ -491,6 +497,8 @@ def _expand_dict_block(
             if resolved is None:
                 missing.append((f"{path}.{key}", name, key if whole else None))
                 return match.group(0)
+            if resolved_values is not None:
+                resolved_values.append(resolved)
             return resolved
 
         return _VAR_REF_PATTERN.sub(_sub, value)
@@ -547,6 +555,9 @@ def expand_env_block(
     expanded = _expand_dict_block(block, path, missing)
     if missing:
         raise ValueError(_missing_env_message(missing, subject=subject))
+    # A credential handed to the launch (the bundled github target's
+    # GITHUB_PERSONAL_ACCESS_TOKEN) is masked wherever the target echoes it.
+    register_target_credentials(env=expanded)
     return expanded
 
 
@@ -593,18 +604,24 @@ def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
     """
     notices = _check_remote_header_refs(data)
     missing: list[tuple[str, str, str | None]] = []
+    header_values: list[str] = []
+    header_blocks: list[dict[str, Any]] = []
 
     for section in CREDENTIAL_TOP_LEVEL_SECTIONS:
         block = data.get(section)
         if isinstance(block, dict):
-            data[section] = _expand_dict_block(block, section, missing)
+            data[section] = _expand_dict_block(block, section, missing, header_values)
+            header_blocks.append(data[section])
 
     for parent_key, child_key in CREDENTIAL_NESTED_SECTIONS:
         parent = data.get(parent_key)
         if isinstance(parent, dict):
             block = parent.get(child_key)
             if isinstance(block, dict):
-                parent[child_key] = _expand_dict_block(block, f"{parent_key}.{child_key}", missing)
+                parent[child_key] = _expand_dict_block(
+                    block, f"{parent_key}.{child_key}", missing, header_values
+                )
+                header_blocks.append(parent[child_key])
 
     env = data.get(CREDENTIAL_ENV_FIELD)
     if isinstance(env, dict):
@@ -612,6 +629,14 @@ def _expand_env_refs(data: dict[str, Any]) -> dict[str, Any]:
 
     if missing:
         raise ValueError(_missing_env_message(missing))
+    # Every credential this file gives the target is masked wherever the
+    # target echoes it: header values a ${VAR} resolved to, credential-named
+    # headers and the token after an auth scheme, and secret-shaped env values.
+    register_target_credentials(expanded=header_values)
+    for block in header_blocks:
+        register_target_credentials(headers=block)
+    if isinstance(data.get(CREDENTIAL_ENV_FIELD), dict):
+        register_target_credentials(env=data[CREDENTIAL_ENV_FIELD])
     for notice in notices:
         warn_stderr(notice)
     return data

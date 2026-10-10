@@ -1451,6 +1451,65 @@ def test_gate_rewrites_a_redacted_exploit_even_when_the_validator_raises(tmp_pat
     assert "***REDACTED***" in text
 
 
+def test_gate_masks_an_echoed_github_pat_of_any_shape(tmp_path, monkeypatch):
+    """The bundled github target is handed GITHUB_PERSONAL_ACCESS_TOKEN. A
+    target that echoes it back must not push it into exploit_<id>.json or
+    PR_BODY.md, even when the value matches no known token shape."""
+    from mylonite.plugins._mcp.target_file import expand_env_block
+
+    pat = "dummy-pat-not-shaped-0001"  # pragma: allowlist secret
+    monkeypatch.setenv("GITHUB_PERSONAL_ACCESS_TOKEN", pat)
+    expand_env_block(
+        {"GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"},
+        subject="the bundled mcp:github target",
+    )
+    pattern_id = "indirect-injection-note-body-direct"
+    exploit = ExploitRecord(
+        target_id="mcp:github",
+        pattern_id=pattern_id,
+        payload=Payload(pattern_id=pattern_id, channel="user-message", body="read the issue"),
+        response=AdapterResponse(
+            payload_pattern_id=pattern_id,
+            raw_response=f"the token is {pat}",
+            tool_calls=["create_issue"],
+            metadata={"transcript": f"tool returned {pat}"},
+        ),
+        success_reason=f"agent posted {pat}",
+        compliance=ComplianceTags(owasp_asi=["ASI01"]),
+    )
+    report = ValidationReport(
+        test_filename="test_security_x.py",
+        kept=True,
+        outcomes=[
+            ValidationOutcome(
+                stage="stability", passed=True, detail=f"1/1 (target said {pat})", metric=1.0
+            ),
+            *_proven_legs("1/1")[::2],
+        ],
+    )
+    seen: dict = {}
+
+    def fake_open_pr(*, body, **_):
+        seen["body"] = body
+        return "printed"
+
+    run_gate(
+        out_dir=tmp_path / ".mylonite" / "gate",
+        scan_fn=lambda: ScanOutcomeBundle(outcome=_found_outcome(), exploits=[exploit]),
+        generate_fn=lambda e: GeneratedTest(
+            framework="pytest", filename="test_security_x.py", source="x", exploit=e
+        ),
+        validate_fn=lambda t, _finding_dir: report,
+        open_pr_fn=fake_open_pr,
+        open_pr=False,
+    )
+    text = (tmp_path / ".mylonite" / "gate" / _exploit_name()).read_text(encoding="utf-8")
+    assert pat not in text
+    assert "***REDACTED***" in text
+    assert pat not in seen["body"]
+    assert "***REDACTED***" in seen["body"]
+
+
 def _gate_once(tmp_path, exploit):
     """Run one finding through ``run_gate``; return the exploit ``generate_fn``
     saw and the exploit JSON ``gate`` left on disk."""

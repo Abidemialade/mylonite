@@ -588,3 +588,32 @@ async def test_describe_lets_an_import_error_through_unwrapped() -> None:
         mp.setattr(adapter, "_preflight_auth_status", _no_preflight)
         with pytest.raises(ImportError, match="optional_dep"):
             await adapter.describe()
+
+
+def test_an_http_error_echoing_the_configured_bearer_is_masked_in_the_attempt_detail() -> None:
+    """A remote server whose error reason phrase repeats the configured
+    Authorization value: the skipped attempt's detail, which may be persisted,
+    must not carry it, however short the token."""
+    import httpx
+
+    target_registry.clear_runtime_targets()
+    tf = TargetFile(
+        family="remote-echo",
+        transport="sse",  # type: ignore[arg-type]
+        url="https://remote.invalid/mcp",
+        headers={"Authorization": "Bearer dummy123"},
+        weakness_classes=["W4"],
+    )
+    target_registry.register_target(build_target_spec(tf))
+    adapter = MCPRemoteAdapter(family="remote-echo", scope=None)
+
+    request = httpx.Request("GET", "https://remote.invalid/mcp")
+    response = httpx.Response(
+        400, request=request, extensions={"reason_phrase": b"Bearer dummy123"}
+    )
+    with pytest.raises(httpx.HTTPStatusError) as excinfo:
+        response.raise_for_status()
+
+    detail = adapter._skip_exception_detail(excinfo.value)
+    assert "dummy123" not in detail
+    assert "400" in detail
