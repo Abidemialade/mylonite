@@ -36,10 +36,15 @@ Two deliberate deviations, so the claim stays accurate:
   FIDES's variable indirection and `quarantined_llm` are not implemented.
 - **MCP annotations are hints from a possibly-untrusted server**, and the spec
   says so explicitly. They therefore inform classification but never outrank an
-  operator's `control_config` declaration. A tool annotated `readOnlyHint: true`
-  that is then observed writing is reported as an **annotation/behaviour
-  mismatch** — a defect in the target, not a classification problem to route
-  around.
+  operator's `control_config` declaration. The verdict goes further: a
+  `readOnlyHint` alone never makes a call a read there, so it can never turn a
+  call that went through into "resisted". It needs your
+  `control_config.verdict_read_tools` entry, a read verb in the tool's name, or
+  a calibrated effect probe certified through that tool (see
+  [Reading results](reading-results.md)). A tool annotated
+  `readOnlyHint: true` that a calibrated probe then sees writing is logged as an
+  **annotation/behaviour mismatch**, a defect in the target, not a
+  classification problem to route around.
 
 ## How tagging works
 

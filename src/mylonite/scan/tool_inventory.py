@@ -185,6 +185,9 @@ def tool_inventory(tools: Sequence[Any], *, control_config: Any = None) -> list[
                     # attempt and cannot be known here; see treated_as_text.
                     consequential_tool_names=(declared_consequential or frozenset())
                     | (declared_egress or frozenset()),
+                    # As the verdict reads a call: the server's own
+                    # readOnlyHint needs a declaration or a read verb too.
+                    annotation_needs_corroboration=True,
                 ),
             )
         )

@@ -81,6 +81,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back. [Reading the results](docs/reading-results.md#the-per-class-summary)
   links to the same explanation from the per-class summary. No behaviour
   changed.
+- **A server's own `readOnlyHint` no longer makes a call that went through read
+  as resisted.** The verdict counted a call to any tool the server marked
+  read-only as a read, so an attempt whose only consequential call went to such
+  a tool read RESISTED even when the tool changed state. The annotation now
+  counts for the verdict only when something else agrees: the tool is listed
+  under `control_config.verdict_read_tools` or `read_tool_names`, its name
+  reads as a read (`get_notes`), or a calibrated effect probe certified through
+  that tool settles the attempt. Without one, the attempt reads NOT TESTED
+  (`MYL-INC-001`), the same as with no annotation, and the scan names each such
+  tool once on stderr so you can declare the real reads. The boundary
+  controls and seed discovery still read the annotation as before, and
+  `mylonite check`'s verdict-read flag now matches the verdict. A scan whose
+  only negatives rested on the annotation now exits as partial rather than
+  clean.
 
 ## [0.12.0] - 2026-10-06
 
