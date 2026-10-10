@@ -46,6 +46,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the PR body, so the same fix carries through to the SARIF message and the
   JSON bundle's `label` field. A plain tool name or value renders exactly as
   before.
+- **Target-controlled text can no longer break out of the Markdown it's
+  quoted in across the gate PR body.** `PR_BODY.md` quotes a tool name, an
+  argument, a quoted value, a validator's evidence detail, and a
+  recommendation's invariant/config snippet — all of it target-controlled —
+  in several different Markdown shapes: an inline code span, a fixed
+  ` ```yaml ` fence, and a 4-space-indented line. Each shape had the same
+  gap: a value containing its own backtick (closing an inline span or a
+  fence early) or its own newline (de-indenting the rest of an indented
+  line, or starting a new line that could itself close a fence) let the
+  rest of the value render as real Markdown — a link, an image, bold text —
+  instead of literal text. Two new helpers in `src/mylonite/_markdown.py`
+  close this: `code_span()` fences a value with one more backtick than the
+  longest backtick run already inside it (padding a value that starts or
+  ends with a backtick) and strips control characters, for every value
+  quoted as its own inline code span — including the validator evidence
+  line, which previously had no Markdown quoting at all, only secret
+  masking; `strip_controls()` removes just the control characters (in
+  particular the newline) for the handful of sites where the value is
+  embedded inside an *existing*, fixed fence or indented block instead of
+  getting its own span, where adding a nested code span would corrupt that
+  surrounding structure (a recommendation's `invariant` text, and the W1
+  description-pin's `config_snippet`, which is parsed back out as YAML by a
+  real control and must keep the tool name as a literal key). The same
+  `code_span()`-quoted label also carries through to the SARIF message and
+  the JSON bundle's `label` field. A plain tool name or value renders
+  exactly as before.
 - **A target's text can no longer write raw terminal escape sequences to
   your console or CI log.** `mylonite`'s console-output boundary
   (`echo`/`console_print` in `src/mylonite/_cli_io.py`) already redacted
