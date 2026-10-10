@@ -59,8 +59,13 @@ request:
   agent's reply (list indices are numbers, e.g. `choices.0.message.content`). Omit
   it to judge the whole response body.
 - **`headers`** — optional auth; values are never written to any log, report, or
-  test artifact. When the body is JSON and you set no `Content-Type`, Mylonite sends
-  `Content-Type: application/json`; a `Content-Type` you set always wins.
+  test artifact. Each `${VAR}` here prints one line naming the variable and the host
+  it is sent to (`target file sends $MY_TOKEN to my-agent.internal`). Mylonite's own
+  credentials, such as a provider key, `MYLONITE_API_KEY` or `GH_TOKEN`, are refused
+  here; copy the value into your own name first (`export MY_TOKEN="$GH_TOKEN"`). See
+  [Remote targets](target-file.md#remote-targets-sse-http). When the body is JSON and
+  you set no `Content-Type`, Mylonite sends `Content-Type: application/json`; a
+  `Content-Type` you set always wins.
 - **`timeout_s`** — the HTTP client timeout for every call to the agent, in
   seconds. Defaults to **30**. A local-model agent often takes longer than 30s per
   turn; raise this if a scan fails with a timeout. The error names `request.timeout_s`

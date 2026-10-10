@@ -109,6 +109,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   back. [Reading the results](docs/reading-results.md#the-per-class-summary)
   links to the same explanation from the per-class summary. No behaviour
   changed.
+- **A remote target file can no longer fill its headers from Mylonite's own
+  credentials.** On an `sse`, `http` or `rest` target, a `headers` or
+  `request.headers` value that references a provider key, `MYLONITE_API_KEY`,
+  `MYLONITE_LLM_KEY`, `MYLONITE_LLM_HEADERS`, `GH_TOKEN`, `GITHUB_TOKEN` or an
+  Actions runtime token is now refused at load time, before anything is
+  expanded. The error names the variable and the fix: copy the value into a
+  name of your own (`export MY_TOKEN="$GH_TOKEN"`) and write `${MY_TOKEN}` in
+  the file. Every other variable a remote target's headers reference prints
+  one line naming it and the host it goes to, such as
+  `target file sends $MY_TOKEN to app.example.com`. Stdio targets and `env`
+  blocks are unchanged.
 
 ## [0.12.0] - 2026-10-06
 

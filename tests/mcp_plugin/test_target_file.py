@@ -930,3 +930,164 @@ def test_seed_tool_ceiling_is_rejected_on_a_rest_transport() -> None:
             request=RequestSpec(url="https://agent.example/chat", body='{"p": "{prompt}"}'),
             seed_tool_ceiling=12,
         )
+
+
+# --- Mylonite's own credentials in a remote target file's headers -------------
+
+_FAKE_VALUE = "fake-value-not-a-real-secret"  # pragma: allowlist secret
+
+
+def _remote_yaml(transport: str, field: str, name: str) -> str:
+    """A minimal target file whose ``field`` header references ``${name}``."""
+    if field == "headers":
+        url = "" if transport == "rest" else "url: https://app.example.com/mcp\n"
+        req = (
+            'request:\n  url: https://agent.example.com/chat\n  body: \'{"p": "{prompt}"}\'\n'
+            if transport == "rest"
+            else ""
+        )
+        return (
+            f"family: acme\ntransport: {transport}\n{url}{req}"
+            f"headers:\n  Authorization: Bearer ${{{name}}}\n"
+        )
+    return (
+        "family: acme\ntransport: rest\nrequest:\n  url: https://agent.example.com/chat\n"
+        '  body: \'{"p": "{prompt}"}\'\n'
+        f"  headers:\n    Authorization: Bearer ${{{name}}}\n"
+    )
+
+
+_FIXED_RESERVED = (
+    "MYLONITE_API_KEY",
+    "MYLONITE_LLM_KEY",
+    "MYLONITE_LLM_HEADERS",
+    "GH_TOKEN",
+    "GITHUB_TOKEN",
+    "ACTIONS_RUNTIME_TOKEN",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
+)
+
+
+def _reserved_names() -> list[str]:
+    """Built independently of the module under test: every provider
+    credential in the registry plus Mylonite's and CI's own tokens."""
+    from mylonite.providers.registry import PROVIDERS
+
+    names = set(_FIXED_RESERVED)
+    for info in PROVIDERS.values():
+        names.update(info.key_env)
+        for alt in info.key_env_alternatives:
+            names.update(alt)
+    return sorted(names)
+
+
+@pytest.mark.parametrize("name", _reserved_names())
+@pytest.mark.parametrize(
+    ("transport", "field"),
+    [("sse", "headers"), ("http", "headers"), ("rest", "headers"), ("rest", "request.headers")],
+)
+def test_remote_target_refuses_mylonites_own_credential_in_headers(
+    name: str,
+    transport: str,
+    field: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A shared remote target file must not be able to send one of
+    Mylonite's own credentials to its URL. The error names the variable and
+    the alias fix, and never prints the value."""
+    monkeypatch.setenv(name, _FAKE_VALUE)
+    path = tmp_path / "target.yaml"
+    path.write_text(_remote_yaml(transport, field, name), encoding="utf-8")
+
+    with pytest.raises(ValueError) as excinfo:
+        load_target_file(path)
+    msg = str(excinfo.value)
+    assert f"${{{name}}}" in msg
+    assert field in msg
+    assert "export MY_TOKEN=" in msg
+    assert "${MY_TOKEN}" in msg
+    assert _FAKE_VALUE not in msg
+    captured = capsys.readouterr()
+    assert _FAKE_VALUE not in captured.err + captured.out
+
+
+def test_reserved_credential_check_ignores_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows reads env names case-insensitively, so ``${gh_token}`` would
+    resolve GH_TOKEN there; refuse it on every platform."""
+    monkeypatch.setenv("gh_token", _FAKE_VALUE)
+    path = tmp_path / "target.yaml"
+    path.write_text(_remote_yaml("sse", "headers", "gh_token"), encoding="utf-8")
+    with pytest.raises(ValueError, match=r"\$\{gh_token\}"):
+        load_target_file(path)
+
+
+def test_stdio_target_with_a_reserved_header_reference_still_loads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A stdio target sends no headers anywhere, so the check does not apply."""
+    monkeypatch.setenv("GH_TOKEN", _FAKE_VALUE)
+    path = tmp_path / "target.yaml"
+    path.write_text(
+        "family: acme\ncommand: python\nheaders:\n  Authorization: Bearer ${GH_TOKEN}\n"
+        "env:\n  GITHUB_TOKEN: ${GH_TOKEN}\n",
+        encoding="utf-8",
+    )
+    tf = load_target_file(path)
+    assert tf.headers["Authorization"] == f"Bearer {_FAKE_VALUE}"
+    assert tf.env["GITHUB_TOKEN"] == _FAKE_VALUE
+    assert "target file sends" not in capsys.readouterr().err
+
+
+def test_remote_target_env_block_with_a_reserved_name_is_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Only headers are checked; a remote target's ``env`` block is not sent."""
+    monkeypatch.setenv("GH_TOKEN", _FAKE_VALUE)
+    path = tmp_path / "target.yaml"
+    path.write_text(
+        "family: acme\ntransport: sse\nurl: https://app.example.com/mcp\n"
+        "env:\n  GITHUB_TOKEN: ${GH_TOKEN}\n",
+        encoding="utf-8",
+    )
+    assert load_target_file(path).env["GITHUB_TOKEN"] == _FAKE_VALUE
+
+
+@pytest.mark.parametrize(
+    ("transport", "field", "host"),
+    [
+        ("sse", "headers", "app.example.com"),
+        ("http", "headers", "app.example.com"),
+        ("rest", "request.headers", "agent.example.com"),
+    ],
+)
+def test_remote_target_names_each_header_variable_and_its_host(
+    transport: str,
+    field: str,
+    host: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The documented ``${MY_TOKEN}`` pattern keeps working and prints a
+    notice naming the variable and the host it goes to (never the value)."""
+    monkeypatch.setenv("MY_TOKEN", _FAKE_VALUE)
+    path = tmp_path / "target.yaml"
+    path.write_text(_remote_yaml(transport, field, "MY_TOKEN"), encoding="utf-8")
+
+    tf = load_target_file(path)
+    headers = tf.headers if field == "headers" else tf.request.headers  # type: ignore[union-attr]
+    assert headers["Authorization"] == f"Bearer {_FAKE_VALUE}"
+    err = capsys.readouterr().err
+    assert f"target file sends $MY_TOKEN to {host}" in err
+    assert _FAKE_VALUE not in err
+
+
+def test_reserved_set_covers_every_provider_credential() -> None:
+    """Guard: a provider added to the registry is reserved automatically."""
+    from mylonite.plugins._mcp.target_file import RESERVED_CREDENTIAL_ENV_VARS
+
+    assert set(_reserved_names()) <= RESERVED_CREDENTIAL_ENV_VARS

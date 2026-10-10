@@ -165,6 +165,18 @@ seed_arm: { tool: save_note, args_template: { body: "{payload}" } }
   (`export MY_TOKEN='...'` / `$env:MY_TOKEN = '...'`) — the same `${VAR}` mechanism the REST
   adapter's `request.headers` uses (see [`docs/http-agent.md`](http-agent.md)). Mylonite
   expands it from your shell's environment and never writes the literal value to the file.
+  Each variable a remote target's headers reference prints one line when the file loads,
+  naming the variable and the host it goes to:
+  `target file sends $MY_TOKEN to app.example.com`.
+- A remote target's headers can't reference Mylonite's own credentials: a provider key
+  (such as `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`), `MYLONITE_API_KEY`,
+  `MYLONITE_LLM_KEY`, `MYLONITE_LLM_HEADERS`, `GH_TOKEN`, `GITHUB_TOKEN`,
+  `ACTIONS_RUNTIME_TOKEN` or `ACTIONS_ID_TOKEN_REQUEST_TOKEN`. A target file is often
+  written by someone else, and its headers go to the URL it names, so Mylonite refuses
+  the file and names the variable. If the target really does take the same value, copy
+  it into a name of your own and reference that: `export MY_TOKEN="$GH_TOKEN"`, then
+  `Authorization: Bearer ${MY_TOKEN}`. Stdio targets and `env` blocks are not checked;
+  they are never sent to a URL the file names.
 - If the server rejects the request with 401 or 403, `scan` names the host and the status
   and points at this section — for example: `the server at app.example.com rejected the
   request (401). Set the token in headers: in the target file, e.g. Authorization: Bearer
