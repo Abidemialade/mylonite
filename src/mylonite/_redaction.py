@@ -111,7 +111,7 @@ _FULL_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
 
 # An ``Authorization`` or ``Proxy-Authorization`` header whose scheme is
 # ``Bearer``, ``token``, ``Basic`` or ``Digest``: the credential after the
-# scheme is masked whatever its length, and the header name and scheme stay
+# scheme is masked from four characters up, and the header name and scheme stay
 # legible. Anchored to the header name, so prose such as "token based auth"
 # or a bare "Basic" is left alone.
 _AUTH_HEADER_PATTERN: Final = re.compile(

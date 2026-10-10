@@ -1321,7 +1321,7 @@ def test_register_target_credentials_masks_credentials_but_not_ordinary_values()
 
 
 def test_registered_target_credentials_never_rewrite_ordinary_json_values() -> None:
-    """A persisted exploit record must keep its ordinary values: registering a
+    """A persisted attempt record must keep its ordinary values: registering a
     target's settings must not turn "4096", "true" or "vault" into the
     placeholder in what the generated test replays."""
     from mylonite._redaction import register_target_credentials
@@ -1382,3 +1382,47 @@ def test_expand_env_block_registers_the_bundled_github_pat(
     )
     out = redact_value({"tool_result": "your token is dummy-pat-not-shaped-0001"})
     assert "dummy-pat-not-shaped-0001" not in repr(out)
+
+
+@pytest.mark.parametrize(
+    ("credential", "masked"),
+    [("abc", False), ("abcd", True), ("abcde", True)],
+)
+def test_authorization_scheme_rule_masks_from_four_characters(
+    credential: str, masked: bool
+) -> None:
+    """The shape rule masks the credential after an auth scheme from four
+    characters up; three or fewer read as prose and stay as written."""
+    text = f"Authorization: Bearer {credential}"
+    if masked:
+        assert redact(text) == f"Authorization: Bearer {REDACTION_PLACEHOLDER}"
+    else:
+        assert redact(text) == text
+
+
+@pytest.mark.parametrize(
+    ("credential", "registered"),
+    [("abc1234", False), ("abc12345", True), ("abc123456", True)],  # pragma: allowlist secret
+)
+def test_authorization_header_registers_its_credential_from_eight_characters(
+    credential: str, registered: bool
+) -> None:
+    """A target's ``Authorization`` credential is registered for exact-value
+    masking only from eight characters up: a shorter one would be masked in
+    ordinary text everywhere it appears."""
+    from mylonite._redaction import (
+        clear_masked_values,
+        mask_registered_values,
+        register_target_credentials,
+    )
+
+    clear_masked_values()
+    try:
+        register_target_credentials(headers={"Authorization": f"Bearer {credential}"})
+        out = mask_registered_values(f"echo {credential} back")
+        if registered:
+            assert out == f"echo {REDACTION_PLACEHOLDER} back"
+        else:
+            assert out == f"echo {credential} back"
+    finally:
+        clear_masked_values()

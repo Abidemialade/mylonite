@@ -381,6 +381,33 @@ async def test_adapter_threads_launch_env_to_session() -> None:
     assert captured["args"] is None
 
 
+def test_adapter_constructor_registers_credentials_from_launch_env() -> None:
+    """A credential that reaches the target only through ``launch_env`` (an
+    ablation or prove-control re-drive) is masked like one in the spec's own
+    env when the target repeats it."""
+    from mylonite._redaction import clear_masked_values, mask_registered_values
+    from mylonite.plugins._mcp import target_registry
+    from mylonite.plugins._mcp.target_file import TargetFile, build_target_spec
+
+    target_registry.clear_runtime_targets()
+    clear_masked_values()
+    try:
+        tf = TargetFile(family="custom-srv", command="python", args=["-m", "srv"])
+        target_registry.register_target(build_target_spec(tf))
+        assert mask_registered_values("echo dummyLaunch0001 back") == "echo dummyLaunch0001 back"
+        MCPStdioAdapter(
+            family="custom-srv",
+            scope=None,
+            launch_env={"MY_API_TOKEN": "dummyLaunch0001", "LOG_LEVEL": "debug"},
+        )
+        out = mask_registered_values("echo dummyLaunch0001 debug back")
+        assert "dummyLaunch0001" not in out
+        assert "debug" in out
+    finally:
+        clear_masked_values()
+        target_registry.clear_runtime_targets()
+
+
 @pytest.mark.asyncio
 async def test_adapter_threads_vulnerable_launch_command_and_args() -> None:
     from mylonite.plugins._mcp import target_registry
