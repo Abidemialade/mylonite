@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The gate now installs LiteLLM 1.103.1.** The exact pin in
+  `mylonite-constraints.txt`, used by the scaffolded workflows and
+  `gate-action`, moves from 1.93.2 to 1.103.1. Both vendored copies stay
+  byte-identical, and the dev `ruff` pin and its pre-commit hook move to
+  0.16.9 together.
+
 ## [0.12.0] - 2026-10-06
 
 ### Fixed
