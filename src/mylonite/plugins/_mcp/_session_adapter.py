@@ -1781,13 +1781,17 @@ class MCPSessionAdapterBase(AsyncTargetAdapterBase):
             calibration.STATUS_CONFIRM_ONLY,
         )
         # The negative readings exempt the probe's verify tool as a read only
-        # once calibration has shown the probe reads back what a write leaves
-        # (#303). Until then the tool is whatever the operator or the scaffold
-        # guessed, and a call through it can carry the attack: it counts as a
-        # read only on its name or a declaration, like any other tool.
+        # once calibration has certified the probe (#303). Until then the tool
+        # is whatever the operator or the scaffold guessed, and a call through
+        # it can carry the attack: it counts as a read only on its name or a
+        # declaration, like any other tool. ``confirm_only`` is not enough: it
+        # shows the probe sees a write land, not that the verify tool cannot
+        # make one, so a send through it must never read "not called".
         # link_for keeps the verify tool: the probe's own readback never ties
         # a call to the attempt, so no new finding comes from this.
-        read_verify_tool = verify_tool if confirm_capable else None
+        read_verify_tool = (
+            verify_tool if cal is not None and cal.status == calibration.STATUS_CERTIFIED else None
+        )
         trace_outcome: TraceOutcome = classify_trace(
             planner_calls,
             consequential_tool_names=consequential,

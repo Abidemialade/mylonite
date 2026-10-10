@@ -96,12 +96,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   only negatives rested on the annotation now exits as partial rather than
   clean.
 - **An effect probe's verify tool counts as a read only once calibration has
-  shown the probe works.** The verdict treated every call to `verify_tool` as
-  a read, before calibration had shown that the probe sees a write land. A
-  verify tool that can also change state (`mail_queue`) could then carry out
-  the attack and the attempt still read RESISTED. Until calibration reports
-  `certified` or `confirm_only`, a call to the verify tool is a read only when
-  its name reads as one or you list it under
+  certified the probe.** The verdict treated every call to `verify_tool` as
+  a read, before calibration had shown that the probe works. A verify tool
+  that can also change state (`mail_queue`) could then carry out the attack
+  and the attempt still read RESISTED. Until calibration reports `certified`,
+  a call to the verify tool is a read only when its name reads as one or you
+  list it under
   `control_config.verdict_read_tools`; otherwise it reads NOT TESTED
   (`MYL-INC-001`). The probe's own readback still never links a call to the
   attempt, so no new finding comes from this. The tool-role classifier behind
