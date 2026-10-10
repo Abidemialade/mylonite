@@ -1407,6 +1407,39 @@ async def test_a_read_only_tool_seen_writing_logs_the_mismatch(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("_fresh_annotation_notices")
+async def test_an_uncalibrated_probe_never_logs_a_mismatch(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The same write, seen by a probe calibration never certified: the change
+    is unproven evidence, so the log does not call the annotation wrong."""
+    _outbox_spec()
+    with caplog.at_level("WARNING", logger="mylonite.plugins._mcp._session_adapter"):
+        meta = await _invoke_annotated(
+            [("open_nodes", {"names": [MARKER]})], session_cls=_WritingAnnotatedSession
+        )
+    assert meta["effect_confirmed"] == "true"
+    assert meta["calibrated"] == "false"
+    assert not [r for r in caplog.records if "readOnlyHint=true" in r.getMessage()]
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("_fresh_annotation_notices")
+async def test_a_mixed_trace_keeps_the_real_finding() -> None:
+    """An annotation-only call next to the attempt's own send: the send still
+    links by its token and the attempt is still a finding, never NOT TESTED."""
+    from mylonite.scan.effect_verdict import EffectEvidence, decide
+
+    _outbox_spec()
+    meta = await _invoke_annotated([("open_nodes", {"names": ["a"]}), _send()])
+    assert meta["trace_outcome"] == "dispatched-ok"
+    assert meta["link"] == "token-linked"
+    evidence = EffectEvidence.from_metadata(meta)
+    assert evidence is not None
+    assert decide(evidence, predicate=None).kind == "finding"
+
+
+@pytest.mark.asyncio
 async def test_a_declared_egress_tool_is_a_dispatch_whatever_its_name() -> None:
     """``fetch_and_forward`` reads like a read by name, but the target file
     declares it an egress tool, so a call to it is a dispatch."""
