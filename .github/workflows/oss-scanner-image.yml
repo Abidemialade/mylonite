@@ -1,0 +1,53 @@
+name: OSS scanner image
+
+# Builds .oss-scanner/Dockerfile the way an external code scanner does, then runs
+# the test suite, the zero-key demo and the offline end-to-end test inside it with
+# no network, on the scanner's agent machine size (2 CPUs, 8 GB). A broken image
+# means a scanner build failure mailed to the security contact, so this runs on
+# changes to the image or what it installs, on every push to main (a source
+# change can add a runtime network fetch), and weekly to catch upstream drift.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".oss-scanner/**"
+      - "pyproject.toml"
+      - "reference_targets/mcp_kitchen_sink/pyproject.toml"
+      - ".github/workflows/oss-scanner-image.yml"
+  push:
+    branches: [main]
+  schedule:
+    - cron: "23 5 * * 1" # weekly, Monday
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test-offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the image (network on, as the scanner builds it)
+        run: docker build -f .oss-scanner/Dockerfile -t mylonite-oss-scanner .
+      - name: Run the suite, the demo and the offline end-to-end test with no network
+        # Unlike the warm-up inside the Dockerfile, a failure here fails the job:
+        # this is the check that the image works offline. The last step checks
+        # the run left /src clean, since the scanner proposes patches as diffs.
+        run: |
+          docker run --rm --network none --cpus 2 --memory 8g mylonite-oss-scanner \
+            sh -c 'set -e
+              mylonite version
+              (cd /tmp && mylonite demo)
+              python -m pytest -n auto --dist worksteal -q -p no:cacheprovider
+              MYLONITE_OFFLINE_E2E=1 python -m pytest tests/e2e/test_offline_deep_path.py -q -p no:cacheprovider
+              git config --global --add safe.directory /src
+              dirty=$(git -C /src status --porcelain)
+              if [ -n "$dirty" ]; then echo "the run left /src dirty:"; echo "$dirty"; exit 1; fi'
