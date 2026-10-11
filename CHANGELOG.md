@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A build image and threat model for automated security scanning.**
+  `.oss-scanner/Dockerfile` builds Mylonite with its tests and the reference
+  target so the suite and `mylonite demo` run with no network, and
+  `.oss-scanner/threat_model.md` tells an automated code scanner where untrusted
+  input enters, which controls matter, how we rate severity, and what is
+  deliberately vulnerable. The new `OSS scanner image` workflow builds the image
+  and runs the suite in it with `--network none` on every push to `main`, on
+  pull requests that change the image or its dependencies, and weekly.
+
 ## [0.12.1] - 2026-10-10
 
 ### Fixed
