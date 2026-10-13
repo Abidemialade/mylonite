@@ -1,9 +1,12 @@
-"""Offline precision/recall corpus for the differential oracle.
+"""Offline precision/recall corpus for the seed catalogue's twin separation.
 
-The validation engine's worth rests on a measurable claim: the oracle flags a
-vulnerable target and clears a guarded one — reliably, with a low false-positive
-rate. This module turns that claim into a *measured* number instead of an
-asserted one.
+The seed catalogue's worth rests on a measurable claim: its per-weakness
+detector flags a vulnerable target and clears a guarded one — reliably, with
+a low false-positive rate. This module turns that claim into a *measured*
+number instead of an asserted one. It checks that the seed catalogue
+separates the two reference twins; it does not run the differential oracle's
+verdict path. See ``tests/corpus/test_labelled_corpus.py`` for the corpus
+that does.
 
 It drives the bundled kitchen-sink twins (vulnerable + guarded) deterministically
 across the four seeded weakness classes (W1-W4) with **no LLM and no network**,

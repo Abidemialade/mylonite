@@ -429,11 +429,13 @@ jobs:
       - name: Pytest
         if: env.RUN_TESTS == 'true' && matrix.python-version != '3.12'
         run: pytest -n auto --dist worksteal
-      - name: Precision/recall corpus (differential oracle)
+      - name: Twin-separation corpus (precision/recall)
         if: env.RUN_TESTS == 'true'
-        # Measures the oracle's FP/FN against the seeded kitchen-sink twins
-        # (offline, no LLM). The asserted numbers live in tests/corpus; this
-        # surfaces the measured precision/recall/FPR and the report artefact.
+        # Checks that the seed catalogue separates the seeded kitchen-sink
+        # twins (offline, no LLM). This does not run the differential
+        # oracle's verdict path — tests/corpus/test_labelled_corpus.py does
+        # that. The asserted numbers live in tests/corpus; this surfaces the
+        # measured precision/recall/FPR and the report artefact.
         run: python scripts/measure_precision_recall.py --out corpus_report.json
       - name: Upload coverage artifact
         if: matrix.python-version == '3.12'

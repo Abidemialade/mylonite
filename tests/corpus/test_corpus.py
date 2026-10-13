@@ -1,8 +1,10 @@
 """Tests for the offline precision/recall corpus (PR5).
 
 Deterministic and offline: drives the kitchen-sink twins, no LLM. Asserts the
-oracle perfectly separates the seeded twins AND that the confusion-matrix math
-is real (not a hardcoded 1.0) by feeding it synthetic FP/FN rows.
+seed catalogue perfectly separates the seeded twins AND that the
+confusion-matrix math is real (not a hardcoded 1.0) by feeding it synthetic
+FP/FN rows. This corpus does not run the differential oracle's verdict path;
+see ``tests/corpus/test_labelled_corpus.py`` for the corpus that does.
 """
 
 from __future__ import annotations
