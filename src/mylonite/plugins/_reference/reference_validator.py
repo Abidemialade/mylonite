@@ -557,6 +557,17 @@ def _with_run_count(
     )
 
 
+def _reached_verdict(verdict: Verdict) -> bool:
+    """True when the judge actually decided; False for a no-verdict fallback.
+
+    ``SuccessJudge.judge`` catches its own call and parse failures and returns
+    ``success=False`` with ``fallback_cause`` set instead of raising. That is
+    "nothing was judged", not "the judge disagreed", so every tally (the
+    metamorphic leg and the multi-judge consensus) skips it the same way.
+    """
+    return verdict.fallback_cause is None
+
+
 def _raise_if_request_ceiling_hit() -> None:
     """Stop validation once the hard request ceiling has refused a request."""
     limit = request_ceiling_hit()
@@ -1053,7 +1064,7 @@ class DifferentialValidator(ValidatorBase):
         agree = self._multi_judge_consensus([r for r in runs if r.finding], test.exploit.payload)
         consensus = ValidationOutcome(
             stage="consensus",
-            passed=fired > 0 and agree >= 0.5,
+            passed=fired > 0 and agree > 0.5,
             detail=(
                 f"adversarial multi-judge consensus on firing runs = {agree:.2f} "
                 "(majority required; judges the captured tool results, not just calls)"
@@ -1405,11 +1416,13 @@ class DifferentialValidator(ValidatorBase):
         deterministic (agreement ~1.0); otherwise repeated LLM judging surfaces
         flaky/over-eager verdicts.
 
-        A judge call that raises (see ``_judge_or_none``) contributes to NEITHER
-        ``agree`` nor ``total`` — it never happened, as far as the consensus
-        metric is concerned. If EVERY judge call fails this returns 0.0 (not an
-        exception, not a fabricated 1.0) — a broken judge model must fail the
-        consensus gate closed, never pass it by default.
+        A judge call that raises (see ``_judge_or_none``) or that returns a
+        no-verdict result (``fallback_cause`` set, see ``_reached_verdict``)
+        contributes to NEITHER ``agree`` nor ``total`` — it never happened, as
+        far as the consensus metric is concerned. If EVERY judge call fails this
+        returns 0.0 (not an exception, not a fabricated 1.0) — a broken judge
+        model must fail the consensus gate closed, never pass it by default.
+        The consensus leg passes only on a strict majority (``agree > 0.5``).
         """
         from mylonite.scan.judge import SuccessJudge
 
@@ -1426,7 +1439,7 @@ class DifferentialValidator(ValidatorBase):
             for _ in range(self._consensus_judges)
         ]
         raw_verdicts = asyncio.run(gather_bounded(judge_coros))
-        verdicts = [v for v in raw_verdicts if v is not None]
+        verdicts = [v for v in raw_verdicts if v is not None and _reached_verdict(v)]
         total = len(verdicts)
         agree = sum(1 for v in verdicts if v.success)
         return (agree / total) if total else 0.0
@@ -1946,7 +1959,7 @@ class DifferentialValidator(ValidatorBase):
             # not the raw exception text, and no exc_info.
             logger.error("metamorphic: judge.judge raised unexpectedly: %s", redact_exception(exc))
             return None
-        if verdict.fallback_cause is not None:
+        if not _reached_verdict(verdict):
             # The same failure as the `except` above, arriving by the other
             # door. `SuccessJudge.judge` catches its own LLM-call failures and
             # returns a `success=False` verdict rather than raising, so the

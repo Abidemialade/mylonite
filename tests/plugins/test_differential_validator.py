@@ -616,6 +616,80 @@ def test_multi_judge_consensus_reraises_budget_exceeded(monkeypatch) -> None:
         validator._multi_judge_consensus([run], exploit.payload)
 
 
+def _consensus_with(monkeypatch, verdicts: list[Verdict]) -> float:
+    """Run ``_multi_judge_consensus`` once over a scripted list of judge verdicts."""
+    from mylonite.scan import judge as judge_mod
+
+    it = iter(verdicts)
+
+    async def _scripted(self, payload, response):
+        del self, payload, response
+        return next(it)
+
+    monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _scripted)
+    exploit = _build_exploit()
+    validator = DifferentialValidator(
+        model="stub",
+        iterations=1,
+        completion_fn=_ScriptedCompletion(),
+        consensus_judges=len(verdicts),
+    )
+    run = _CustomRun(finding=True, effect_confirmed="unprobed", response=exploit.response)
+    return validator._multi_judge_consensus([run], exploit.payload)
+
+
+def _agree() -> Verdict:
+    return Verdict(success=True, reason="agree", evidence={}, mechanism="llm")
+
+
+def _no_verdict() -> Verdict:
+    return Verdict(
+        success=False,
+        reason="judge call failed",
+        evidence={},
+        mechanism="llm",
+        fallback_cause="call_raised",
+    )
+
+
+def test_multi_judge_consensus_skips_fallback_verdicts(monkeypatch) -> None:
+    """A judge call that reached no verdict (``fallback_cause`` set) is skipped,
+    the same way the metamorphic leg skips it: it neither agrees nor disagrees.
+    Two agreeing judges plus one failed call is 2/2, not 2/3."""
+    assert _consensus_with(monkeypatch, [_agree(), _no_verdict(), _agree()]) == 1.0
+
+
+def test_multi_judge_consensus_is_zero_when_every_verdict_is_a_fallback(monkeypatch) -> None:
+    """No judge reached a verdict: the consensus fails closed at 0.0."""
+    assert _consensus_with(monkeypatch, [_no_verdict(), _no_verdict()]) == 0.0
+
+
+@pytest.mark.parametrize(("agree", "passed"), [(0.5, False), (0.51, True), (1.0, True)])
+def test_consensus_leg_needs_more_than_half(agree: float, passed: bool) -> None:
+    """A split vote is not a majority: exactly 0.5 agreement fails the leg."""
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+
+    def _fake_run_custom_iteration(self, target, pattern_id, *, factory=None):
+        return _CustomRun(finding=True, effect_confirmed="true", response=None)
+
+    validator = DifferentialValidator(
+        model="stub",
+        iterations=2,
+        vuln_threshold=2,
+        completion_fn=_cust_completion,
+        run_build=False,
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            DifferentialValidator, "_run_custom_iteration", _fake_run_custom_iteration, raising=True
+        )
+        mp.setattr(DifferentialValidator, "_multi_judge_consensus", lambda self, r, p: agree)
+        report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+    consensus = next(o for o in report.outcomes if o.stage == "consensus")
+    assert consensus.passed is passed
+
+
 def test_run_perturbed_does_not_invert_a_guarded_adapter_error_into_resisted(monkeypatch) -> None:
     """DCR-0022: an adapter error on the GUARDED twin must not be silently
     inverted into ``guard_resisted=True``. Before this fix, ``_invoke_and_judge``

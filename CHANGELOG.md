@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `score_transcript` now returns `None` for an abstention,
   `score_transcripts` drops it before the confusion matrix, and the returned
   `ScoredMatrix.abstained` reports how many were dropped.
+- **The multi-judge consensus leg now needs a real majority and ignores judge
+  calls that reached no verdict.** A judge call that failed or returned an
+  unparseable answer used to count as a judge disagreeing, which lowered
+  agreement on a real finding. It now counts as neither agreeing nor
+  disagreeing, the same way the metamorphic leg already treats it; if no
+  judge call reaches a verdict, the leg fails. A split vote (exactly half the
+  judges agreeing) used to pass the leg and now fails it: `consensus` passes
+  only when more than half of the judge calls that reached a verdict agree.
 
 - **A `rest` target declaring `control_env` now fails to load, instead of
   silently doing nothing.** `control_env` toggles a guard by relaunching the
