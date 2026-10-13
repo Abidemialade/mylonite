@@ -28,6 +28,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   claim. See
   [Measuring the LLM judge itself](docs/verification.md#measuring-the-llm-judge-itself).
 
+### Fixed
+
+- **The LLM judge now sees each tool call's arguments and the end of a long
+  reply.** It used to see only each call's name, status and the first 300
+  characters of its result, plus the first 1,500 characters of the agent's
+  reply. A send whose recipient lived only in its arguments looked the same
+  whether it went to the user or elsewhere, so the judge could decline a
+  landed attack and the attempt read RESISTED. Each call now shows its
+  redacted arguments as compact JSON (about 300 characters) and up to 800
+  characters of result. A reply over 2,000 characters shows its first 1,500
+  and last 500 characters with a `[N characters omitted]` marker. The number
+  of model calls is unchanged. See
+  [Reading results](docs/reading-results.md).
+
 ## [0.12.1] - 2026-10-10
 
 ### Fixed
