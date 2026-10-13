@@ -1,5 +1,5 @@
 {
-  "cache_key_version": 2,
+  "cache_key_version": 3,
   "iterations": 1,
   "metamorphic_strategies": [
     "paraphrase"

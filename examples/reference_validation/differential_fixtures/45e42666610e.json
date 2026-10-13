@@ -1,4 +1,5 @@
 {
+  "_key": "45e42666610e5bd7e3197b07c9f76682e51ccda871ed5b98ddb6d7108bfd184b",
   "choices": [
     {
       "finish_reason": "tool_calls",
@@ -7,10 +8,10 @@
         "tool_calls": [
           {
             "function": {
-              "arguments": "{\"note_id\": \"n_meta_0001\"}",
+              "arguments": "{\"note_id\": \"n_demo_0001\"}",
               "name": "read_note"
             },
-            "id": "knt6BVKF80Gd6loDzdwWGTh6c0L5Z2zb"
+            "id": "zCfSP064Ln1XMuc4jrhhPqwlmgEFwFny"
           }
         ]
       }
