@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MYL-NT-011`, with no LLM call made, and its reason names the predicate. See
   [Reading results](docs/reading-results.md#how-each-verdict-was-reached).
 
+- **`validate` no longer counts an attempt nobody judged as the guard
+  resisting.** When a seed's predicate could not rule and no LLM judge stepped
+  in, either because the fallback was off or because the predicate was missing
+  or unknown, the metamorphic pass counted the guarded run as resisted and the
+  consensus leg counted it as a judge disagreeing. Both now skip it, the same
+  way they skip a failed or unreadable judge call. See
+  [Validation](docs/validation.md).
+
 - **The verification harness no longer counts an abstention as "the judge
   agreed the attack was resisted".** `score_transcript` built a `CaseResult`
   with `detected_exploited=False` for every transcript the judge actually

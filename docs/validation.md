@@ -128,7 +128,9 @@ Every validation reports three headline figures.
   verdict and more than half of those agree the attack landed; a call that reached
   no verdict (it failed, its answer could not be read, the judge was not confident
   enough, a predicate was inconclusive, or the effect probe errored) counts on
-  neither side.
+  neither side. A seed's predicate that could not rule with no LLM judge to fall back
+  on, or a predicate that is missing or unknown, also counts on neither side, here and
+  in the metamorphic pass, so it never reads as the guarded twin resisting.
 
   **The build leg passes only on a real pass.** On the reference target, `validate`
   records fixtures and runs the committed test offline; the leg passes only when pytest
