@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The verification harness no longer counts an abstention as "the judge
+  agreed the attack was resisted".** `score_transcript` built a `CaseResult`
+  with `detected_exploited=False` for every transcript the judge actually
+  abstained on — the deterministic predicate declined with no LLM fallback
+  configured, or an LLM call raised or returned unparseable output. Those
+  verdicts carry `fallback_cause` or `no_adjudicator`, not a real "resisted"
+  decision, so folding them in as true negatives inflated the measured
+  precision/recall/F1 with agreement the judge never reached.
+  `score_transcript` now returns `None` for an abstention,
+  `score_transcripts` drops it before the confusion matrix, and the returned
+  `ScoredMatrix.abstained` reports how many were dropped.
+
 - **A `rest` target declaring `control_env` now fails to load, instead of
   silently doing nothing.** `control_env` toggles a guard by relaunching the
   target process with different env vars, but Mylonite never launches a

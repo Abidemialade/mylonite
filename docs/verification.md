@@ -289,6 +289,14 @@ follow-up, not a live call made here.
 were resisted), so `fpr = 0.58` is a real measurement, not the `tn = 0` artifact the
 original (inverted) run produced.
 
+**These numbers are over decided verdicts only.** A transcript the judge
+abstained on — the deterministic predicate declined with no LLM fallback
+configured, or an LLM call raised or returned unparseable output — carries no
+real "resisted" or "exploited" answer, so `verification/score.py` drops it
+before the confusion matrix instead of counting it as a true negative. The
+dropped count is reported separately (`ScoredMatrix.abstained`), not folded
+into precision/recall/F1.
+
 ## Measuring the LLM judge itself
 
 Layer 2 above mostly scores Mylonite's deterministic rules. On attacks the recorded trace can't see, such as a summary written into the reply, a REST endpoint, or a seed that names no tool, the verdict comes from the LLM judge. That judge is measured on its own with `scripts/measure_judge.py`:

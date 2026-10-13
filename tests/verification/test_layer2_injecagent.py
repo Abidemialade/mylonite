@@ -16,10 +16,11 @@ import pytest
 from verification.crosswalk import Crosswalk, load_crosswalk
 from verification.layer2_datasets import injecagent
 from verification.report import build_report
-from verification.score import score_transcripts
-from verification.transcript import read_transcripts
+from verification.score import score_transcript, score_transcripts
+from verification.transcript import Transcript, read_transcripts
 
 from mylonite.corpus import CaseResult, confusion_matrix
+from mylonite.scan.judge import SuccessJudge
 from verification import fetch
 
 _FIXTURE = Path(injecagent.__file__).parent / "fixtures" / "injecagent_synthetic_fixture.jsonl"
@@ -313,6 +314,67 @@ async def test_judge_reproduces_benchmark_rule_on_fixture() -> None:
     assert matrix.recall == 1.0
     assert matrix.f1 == 1.0
     assert all(r.correct for r in rows)
+
+
+def _no_attacker_tool_transcript(case_id: str) -> Transcript:
+    """A transcript that leaves the portable predicate inconclusive: no
+    ``attacker_tool`` means ``consequential_action_executed`` declines to rule
+    (see ``predicates.py``), so there is nothing for the deterministic judge
+    to decide on its own.
+    """
+    return Transcript(
+        case_id=case_id,
+        dataset="injecagent",
+        split="dh",
+        attacker_tool="",
+        benchmark_success=False,
+    )
+
+
+async def test_score_transcript_abstains_when_predicate_has_no_adjudicator() -> None:
+    """With the deterministic judge (the ``score_transcripts`` default, no LLM
+    fallback), an inconclusive predicate is a ``no_adjudicator`` abstention —
+    nobody decided this attempt. ``score_transcript`` must return ``None``,
+    not a ``CaseResult`` that silently counts it as resisted.
+    """
+    cw = load_crosswalk()
+    judge = SuccessJudge(model="deterministic-unused", llm_fallback=False)
+    result = await score_transcript(_no_attacker_tool_transcript("abstain-noadj"), judge, cw)
+    assert result is None
+
+
+async def test_score_transcript_abstains_on_llm_fallback_cause() -> None:
+    """Same inconclusive predicate, but with the LLM fallback enabled and the
+    provider call raising: the verdict carries ``fallback_cause`` instead of
+    ``no_adjudicator`` — also an abstention, not a verdict.
+    """
+
+    async def _raising_completion(**_: object) -> SimpleNamespace:
+        raise RuntimeError("provider hiccup, try again")
+
+    cw = load_crosswalk()
+    judge = SuccessJudge(model="stub", completion_fn=_raising_completion, llm_fallback=True)
+    result = await score_transcript(_no_attacker_tool_transcript("abstain-fallback"), judge, cw)
+    assert result is None
+
+
+async def test_score_transcripts_drops_abstentions_and_counts_them() -> None:
+    """``score_transcripts`` must exclude abstentions from both ``rows`` and
+    the confusion matrix, and report how many were dropped — otherwise an
+    abstention silently inflates the judge's agreement with a "resisted"
+    verdict it never actually reached.
+    """
+    transcripts = list(read_transcripts(_FIXTURE))
+    cw = load_crosswalk()
+    rows, matrix = await score_transcripts(
+        [*transcripts, _no_attacker_tool_transcript("abstain-mixed")], crosswalk=cw
+    )
+    assert len(rows) == len(transcripts)
+    assert matrix.tp == 2
+    assert matrix.tn == 2
+    assert matrix.fp == 0
+    assert matrix.fn == 0
+    assert matrix.abstained == 1
 
 
 def test_report_flags_vacuous_agreement_when_no_positives() -> None:
