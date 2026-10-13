@@ -37,7 +37,7 @@ def test_passing_file(tmp_path: Path) -> None:
     f = _write(tmp_path, "test_ok.py", "def test_ok():\n    assert True\n")
     result = run_test_file(f)
     assert isinstance(result, PytestRunResult)
-    assert result.outcome is PytestOutcome.PASSED
+    assert result.outcome is PytestOutcome.PASSED, result.detail
     assert result.passed is True
     assert result.collected is True
     assert result.exit_code == 0
@@ -340,7 +340,7 @@ def test_collect_only_on_a_broken_file_is_a_collection_error(tmp_path: Path) -> 
 def test_collect_only_on_an_empty_file_is_no_tests(tmp_path: Path) -> None:
     f = _write(tmp_path, "test_empty.py", "x = 1\n")
     result = run_test_file(f, collect_only=True)
-    assert result.outcome is PytestOutcome.NO_TESTS
+    assert result.outcome is PytestOutcome.NO_TESTS, result.detail
     assert result.collected is False
 
 
