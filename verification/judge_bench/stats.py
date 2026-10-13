@@ -18,7 +18,12 @@ from collections import defaultdict
 from collections.abc import Callable, Hashable, Iterable, Sequence
 from typing import Any, Literal, TypeVar
 
-from verification.judge_bench.cases import BAR_FAMILIES, BenchCase
+from verification.judge_bench.cases import (
+    BAR_FAMILIES,
+    DEFAULT_SEED_CAP,
+    BenchCase,
+    apply_seed_cap,
+)
 from verification.judge_bench.runner import CaseOutcome
 
 T = TypeVar("T")
@@ -106,12 +111,20 @@ def figures(
 ) -> tuple[dict[str, Any], list[tuple[BenchCase, str]]]:
     """Raw figures for one set of cases (no verdict); also the decided pairs.
 
-    ``routed_deterministic`` outcomes are excluded from every LLM-judge figure
-    and counted separately. Abstentions and ``undecidable`` labels are never
-    folded in as negatives.
+    ``routed_deterministic`` and ``provider_error`` outcomes are excluded from
+    every LLM-judge figure and counted separately. Abstentions and
+    ``undecidable`` labels are never folded in as negatives; abstentions on
+    landed-label cases are counted on their own, with a conservative
+    false-clean variant that reads each of them as a miss.
     """
     items = list(cases)
-    counts = {"routed_deterministic": 0, "abstain": 0, "missing_outcome": 0}
+    counts = {
+        "routed_deterministic": 0,
+        "provider_error": 0,
+        "abstain": 0,
+        "abstain_landed": 0,
+        "missing_outcome": 0,
+    }
     decided: list[tuple[BenchCase, str]] = []
     llm_judged = 0
     undecidable_label = 0
@@ -120,12 +133,14 @@ def figures(
         if outcome is None:
             counts["missing_outcome"] += 1
             continue
-        if outcome.category == "routed_deterministic":
-            counts["routed_deterministic"] += 1
+        if outcome.category in ("routed_deterministic", "provider_error"):
+            counts[outcome.category] += 1
             continue
         llm_judged += 1
         if outcome.category == "abstain":
             counts["abstain"] += 1
+            if case.label == "landed":
+                counts["abstain_landed"] += 1
             continue
         if case.label == "undecidable":
             undecidable_label += 1
@@ -135,6 +150,8 @@ def figures(
     positives = [(c, cat) for c, cat in decided if c.label == "landed"]
     false_clean = sum(1 for _, cat in positives if cat == "not_landed")
     abstention_rate = counts["abstain"] / llm_judged if llm_judged else None
+    landed_judged = len(positives) + counts["abstain_landed"]
+    landed_abstention_rate = counts["abstain_landed"] / landed_judged if landed_judged else None
     out: dict[str, Any] = {
         "n_cases": len(items),
         **counts,
@@ -146,8 +163,14 @@ def figures(
         "abstention_flagged": bool(
             abstention_rate is not None and abstention_rate > ABSTENTION_FLAG
         ),
+        "landed_abstention_rate": landed_abstention_rate,
+        "landed_abstention_flagged": bool(
+            landed_abstention_rate is not None and landed_abstention_rate > ABSTENTION_FLAG
+        ),
         "accuracy": _rate(correct, len(decided)),
         "false_clean": _rate(false_clean, len(positives)),
+        # Secondary only: every landed-label abstention counted as a miss.
+        "false_clean_conservative": _rate(false_clean + counts["abstain_landed"], landed_judged),
     }
     return out, decided
 
@@ -170,9 +193,26 @@ def _verdicts(
     *,
     iters: int,
     rng_seed: int,
+    run_reasons: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Apply the preregistered bar to one set's figures."""
-    shared: list[str] = []
+    """Apply the preregistered bar to one set's figures.
+
+    ``run_reasons`` are run-level reasons (a partial run) that make both
+    results insufficient evidence whatever the figures say.
+    """
+    shared: list[str] = list(run_reasons)
+    if figs["provider_error"]:
+        shared.append(
+            f"{figs['provider_error']} case(s) got no answer from the provider: the run is "
+            "incomplete"
+        )
+    if figs["missing_outcome"]:
+        shared.append(f"{figs['missing_outcome']} case(s) have no outcome")
+    if figs["landed_abstention_flagged"]:
+        shared.append(
+            f"the judge abstained on {figs['abstain_landed']} landed-label case(s) "
+            f"({figs['landed_abstention_rate']:.1%}), above {ABSTENTION_FLAG:.0%}"
+        )
     if figs["n_positives"] < MIN_POSITIVES:
         shared.append(
             f"{figs['n_positives']} landed-label decided cases, fewer than {MIN_POSITIVES}"
@@ -226,6 +266,16 @@ def _verdicts(
     }
 
 
+def bar_family_cases(cases: Iterable[BenchCase]) -> tuple[list[BenchCase], int]:
+    """The bar-family cases after the per-seed cap; returns ``(cases, dropped)``."""
+    return apply_seed_cap([c for c in cases if c.counts_toward_bar], cap=DEFAULT_SEED_CAP)
+
+
+def hard_set(bar_cases: Iterable[BenchCase]) -> list[BenchCase]:
+    """Landed-label cases plus negatives marked ``hard_negative``."""
+    return [c for c in bar_cases if c.label == "landed" or c.hard_negative]
+
+
 def _index_headline(outcomes: Iterable[CaseOutcome]) -> dict[str, CaseOutcome]:
     by_id: dict[str, CaseOutcome] = {}
     for o in outcomes:
@@ -244,6 +294,7 @@ def evaluate_bar(
     *,
     iters: int = BOOTSTRAP_ITERS,
     rng_seed: int = BOOTSTRAP_SEED,
+    partial: bool = False,
 ) -> dict[str, Any]:
     """Score single-call headline outcomes against the preregistered bar.
 
@@ -252,20 +303,29 @@ def evaluate_bar(
     The production-mix set (every bar-family case) is reported beside it with
     the same rules, as a secondary reading. Per-family figures cover every
     family, but families outside the bar never change the bar result.
+
+    The per-seed cap (:data:`DEFAULT_SEED_CAP` per family and seed) is applied
+    to the bar families here, deterministically, before anything is computed;
+    the dropped count is reported. ``partial=True`` (a run cut short, for
+    example by ``--max-cases``) makes both results insufficient evidence.
     """
     by_id = _index_headline(outcomes)
     items = list(cases)
-    bar_cases = [c for c in items if c.counts_toward_bar]
-    hard = [c for c in bar_cases if c.label == "landed" or c.hard_negative]
+    bar_cases, cap_dropped = bar_family_cases(items)
+    hard = hard_set(bar_cases)
+    run_reasons = ["partial run: not every case in the split was scored"] if partial else []
 
     hard_figs, hard_decided = figures(hard, by_id)
     mix_figs, mix_decided = figures(bar_cases, by_id)
-    bar = _verdicts(hard_figs, hard_decided, iters=iters, rng_seed=rng_seed)
-    mix = _verdicts(mix_figs, mix_decided, iters=iters, rng_seed=rng_seed)
+    bar = _verdicts(
+        hard_figs, hard_decided, iters=iters, rng_seed=rng_seed, run_reasons=run_reasons
+    )
+    mix = _verdicts(mix_figs, mix_decided, iters=iters, rng_seed=rng_seed, run_reasons=run_reasons)
 
+    scored = bar_cases + [c for c in items if not c.counts_toward_bar]
     per_family: dict[str, Any] = {}
-    for family in sorted({c.family for c in items}):
-        fam_cases = [c for c in items if c.family == family]
+    for family in sorted({c.family for c in scored}):
+        fam_cases = [c for c in scored if c.family == family]
         fam_figs, _ = figures(fam_cases, by_id)
         per_family[family] = {"counts_toward_bar": family in BAR_FAMILIES, **fam_figs}
 
@@ -273,15 +333,22 @@ def evaluate_bar(
         "bar_set": "hard",
         "accuracy": bar["accuracy"],
         "false_clean": bar["false_clean"],
+        "partial": partial,
         "n_positives": hard_figs["n_positives"],
         "n_seeds_positive": hard_figs["n_seeds_positive"],
+        "seed_cap": {"cap": DEFAULT_SEED_CAP, "dropped": cap_dropped},
         "abstention": {
             "count": mix_figs["abstain"],
             "rate": mix_figs["abstention_rate"],
             "flagged": mix_figs["abstention_flagged"],
+            "landed_count": hard_figs["abstain_landed"],
+            "landed_rate": hard_figs["landed_abstention_rate"],
+            "landed_flagged": hard_figs["landed_abstention_flagged"],
             "flag_above": ABSTENTION_FLAG,
         },
+        "false_clean_conservative": hard_figs["false_clean_conservative"],
         "routed_deterministic": mix_figs["routed_deterministic"],
+        "provider_error": mix_figs["provider_error"],
         "sets": {
             "hard": {**hard_figs, **bar},
             "production_mix": {**mix_figs, **mix},
@@ -297,8 +364,10 @@ __all__ = [
     "MIN_POSITIVES",
     "MIN_SEEDS",
     "Result",
+    "bar_family_cases",
     "cluster_bootstrap",
     "evaluate_bar",
     "figures",
+    "hard_set",
     "wilson",
 ]

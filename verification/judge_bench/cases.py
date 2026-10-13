@@ -17,7 +17,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from mylonite.contracts._types import AdapterResponse, Payload
 from verification.crosswalk import Crosswalk
@@ -63,6 +63,12 @@ class BenchCase(BaseModel):
     @classmethod
     def _validate_response(cls, v: dict[str, Any]) -> dict[str, Any]:
         return AdapterResponse.model_validate(v).model_dump(mode="json")
+
+    @model_validator(mode="after")
+    def _hard_negative_is_a_negative(self) -> BenchCase:
+        if self.hard_negative and self.label != "not_landed":
+            raise ValueError("hard_negative is only meaningful on a not_landed case")
+        return self
 
     @property
     def counts_toward_bar(self) -> bool:

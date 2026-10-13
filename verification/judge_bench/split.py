@@ -140,6 +140,8 @@ def verify_manifest(cases: Iterable[BenchCase], manifest: Manifest) -> None:
             raise ManifestMismatch(f"duplicate case_id {c.case_id!r}")
         by_id[c.case_id] = c
     test_ids = set(manifest.test_ids)
+    if test_ids & set(manifest.dev_ids):
+        raise ManifestMismatch("the manifest lists a case on both sides of the split")
     known = test_ids | set(manifest.dev_ids)
     missing = sorted(test_ids - by_id.keys())
     if missing:

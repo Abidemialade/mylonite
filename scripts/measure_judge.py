@@ -15,8 +15,19 @@ Record mode makes live provider calls and needs the provider's key in the
 environment; it is meant for CI only. Fixtures live under
 ``<fixtures>/<model>/r<repeat>/`` so each repeat keeps its own reply.
 
+A judge call the provider never answered (rate limit, timeout, network, auth,
+a content filter) is a ``provider_error``, never an abstention: the outputs
+are still written, the summary is marked incomplete, and the run exits 3.
+``--max-cases`` that cuts the split short labels the run ``partial``; its bar
+results are always insufficient evidence.
+
+Record mode scores the live reply, while the fixture it stores is redacted. If
+a reply held a value the redactor masks, the replayed outcome can differ from
+the recorded one: the replay is the canonical result.
+
 Outputs ``outcomes.jsonl``, ``summary.json`` and ``summary.md`` in ``--out``.
-Exit codes: 0 success; 1 usage or provider error; 2 manifest mismatch or replay miss.
+Exit codes: 0 success; 1 usage or run error; 2 manifest mismatch or replay miss;
+3 incomplete run (provider errors).
 """
 
 from __future__ import annotations
@@ -54,6 +65,7 @@ from mylonite.scan.llm_types import AsyncCompletionFn  # noqa: E402
 EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_MISMATCH = 2
+EXIT_INCOMPLETE = 3
 
 
 def _slug(model: str) -> str:
@@ -137,8 +149,10 @@ def main(argv: list[str] | None = None) -> int:
 
     selected = cases if manifest is None else select(cases, manifest, args.split)
     selected = sorted(selected, key=lambda c: c.case_id)
-    if args.max_cases is not None:
+    split_label = args.split
+    if args.max_cases is not None and args.max_cases < len(selected):
         selected = selected[: args.max_cases]
+        split_label = "partial"  # never the held-out result
 
     mode: Literal["record", "replay"] = args.mode
     recorders: dict[tuple[str, int], LiteLLMRecorder] = {}
@@ -154,7 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     except FixtureError as exc:
         _err(f"fixture error: {exc}")
         return EXIT_MISMATCH if mode == "replay" else EXIT_ERROR
-    except Exception as exc:  # a non-recoverable provider error (auth, TLS, ...)
+    except Exception as exc:  # anything the runner did not turn into an outcome
         _err(f"judge run failed: {type(exc).__name__}: {exc}")
         return EXIT_ERROR
 
@@ -177,11 +191,17 @@ def main(argv: list[str] | None = None) -> int:
 
     args.out.mkdir(parents=True, exist_ok=True)
     _write(args.out / "outcomes.jsonl", dump_outcomes(outcomes))
-    summary = summarize(outcomes, selected, manifest, args.split)
+    summary = summarize(outcomes, selected, manifest, split_label)
     _write(args.out / "summary.json", json.dumps(summary, indent=2, sort_keys=True) + "\n")
     _write(args.out / "summary.md", to_markdown(summary))
     print(f"scored {len(selected)} case(s) x {len(models)} model(s) x {args.repeats} repeat(s)")
     print(f"wrote {args.out / 'summary.md'}")
+    if summary["incomplete"]:
+        _err(
+            f"incomplete run: {summary['provider_errors']} judge call(s) got no answer from "
+            "the provider; the summary is marked incomplete"
+        )
+        return EXIT_INCOMPLETE
     return EXIT_OK
 
 

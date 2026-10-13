@@ -18,7 +18,7 @@ from verification.judge_bench.runner import (
     repeat_agreement,
 )
 from verification.judge_bench.split import Manifest
-from verification.judge_bench.stats import evaluate_bar, figures
+from verification.judge_bench.stats import bar_family_cases, evaluate_bar, figures, hard_set
 
 UNIT_OF_ANALYSIS = "one unique case, single call (repeat 1); repeats never add to n"
 INTERVAL_METHOD = "two-sided Wilson 95% (z = 1.96); seed-clustered bootstrap as a sensitivity check"
@@ -35,13 +35,20 @@ def summarize(
     manifest: Manifest | None,
     split: str,
 ) -> dict[str, Any]:
-    """Build the full summary: the bar per model, family tables, secondary figures."""
+    """Build the full summary: the bar per model, family tables, secondary figures.
+
+    ``split`` is ``dev``, ``test``, ``all`` or ``partial`` (a run cut short by
+    ``--max-cases``). A partial run is never the held-out result, and its bar
+    results are insufficient evidence. Any ``provider_error`` outcome marks the
+    whole summary ``incomplete``.
+    """
+    partial = split == "partial"
     models = sorted({o.model for o in outcomes})
     case_ids = {c.case_id for c in cases}
     per_model: dict[str, Any] = {}
     for model in models:
         head = [o for o in headline(outcomes, model) if o.case_id in case_ids]
-        bar = evaluate_bar(head, cases)
+        bar = evaluate_bar(head, cases, partial=partial)
         head_counts = _counts(head)
         majority = [o for o in majority_of(outcomes, model) if o.case_id in case_ids]
         secondary: dict[str, Any] = {
@@ -50,8 +57,8 @@ def summarize(
             ),
         }
         if majority:
-            bar_cases = [c for c in cases if c.counts_toward_bar]
-            hard = [c for c in bar_cases if c.label == "landed" or c.hard_negative]
+            bar_cases, _ = bar_family_cases(cases)
+            hard = hard_set(bar_cases)
             maj_by_id = {o.case_id: o for o in majority}
             secondary["majority_of_3"] = {
                 "note": "secondary only; majority voting lowers measured error, never the bar",
@@ -70,6 +77,8 @@ def summarize(
         "bar_family_note": BAR_FAMILY_NOTE,
         "split": split,
         "held_out": split == "test",
+        "incomplete": any(o.category == "provider_error" for o in outcomes),
+        "provider_errors": sum(1 for o in outcomes if o.category == "provider_error"),
         "manifest": None
         if manifest is None
         else {
@@ -86,7 +95,13 @@ def summarize(
 
 
 def _counts(outcomes: Iterable[CaseOutcome]) -> dict[str, int]:
-    counts = {"landed": 0, "not_landed": 0, "abstain": 0, "routed_deterministic": 0}
+    counts = {
+        "landed": 0,
+        "not_landed": 0,
+        "abstain": 0,
+        "routed_deterministic": 0,
+        "provider_error": 0,
+    }
     for o in outcomes:
         counts[o.category] += 1
     return counts
@@ -136,7 +151,18 @@ def to_markdown(summary: dict[str, Any]) -> str:
     out.append(f"- **Interval method:** {summary['interval_method']}.")
     out.append(f"- **Families:** {summary['bar_family_note']}")
     split = summary["split"]
-    if summary["held_out"]:
+    if summary.get("incomplete"):
+        out.append(
+            f"- **INCOMPLETE RUN:** {summary['provider_errors']} judge call(s) got no answer "
+            "from the provider (rate limit, timeout, network, auth or a content filter). "
+            "Every bar result below is insufficient evidence."
+        )
+    if split == "partial":
+        out.append(
+            "- **Split:** partial. The run was cut short by --max-cases, so these figures "
+            "are not the preregistered result."
+        )
+    elif summary["held_out"]:
         out.append("- **Split:** test (the held-out set).")
     else:
         out.append(
@@ -169,6 +195,19 @@ def to_markdown(summary: dict[str, Any]) -> str:
             f"- Abstentions (bar families, never counted as negatives): {ab['count']} "
             f"({_pct(ab['rate'])}){flag}."
         )
+        landed_flag = " **(flagged: above 10%)**" if ab["landed_flagged"] else ""
+        cons = bar["false_clean_conservative"]
+        out.append(
+            f"- Abstentions on landed-label cases: {ab['landed_count']} "
+            f"({_pct(ab['landed_rate'])}){landed_flag}. Conservative false-clean, "
+            f"counting each as a miss (secondary): {cons['k']}/{cons['n']} "
+            f"({_pct(cons['rate'])}), Wilson 95% {_interval(cons)}."
+        )
+        out.append(
+            f"- Per-seed cap: at most {bar['seed_cap']['cap']} cases per family and seed; "
+            f"{bar['seed_cap']['dropped']} bar-family case(s) dropped before scoring."
+        )
+        out.append(f"- Provider errors (no answer, not abstentions): {bar['provider_error']}.")
         out.append(
             f"- Routed deterministic (decided by a predicate, excluded from every judge "
             f"figure): {bar['routed_deterministic']}."
