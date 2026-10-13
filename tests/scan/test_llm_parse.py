@@ -11,6 +11,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from mylonite.scan.llm_parse import (
+    _count_objects_with_keys,
     _extract_json_candidate,
     _extract_json_object,
     _extract_text,
@@ -107,3 +108,51 @@ class TestTruncationAndRepair:
     def test_repair_refuses_truncated(self) -> None:
         # json-repair would fabricate the missing close; the guard must refuse.
         assert _try_repair('{"a": 1') is None
+
+
+def _both_response(content: str, arguments: str) -> SimpleNamespace:
+    """A response carrying text content AND a tool-call (structured) answer."""
+    fn = SimpleNamespace(arguments=arguments)
+    tc = SimpleNamespace(function=fn)
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content, tool_calls=[tc]))]
+    )
+
+
+_KEYS = {"alpha", "beta"}
+
+
+class TestExpectedKeysSourceChoice:
+    def test_default_still_prefers_content_with_a_brace(self) -> None:
+        # No expected keys passed: today's behaviour, content wins on a brace.
+        resp = _both_response('prose {"x": 1}', '{"alpha": 1, "beta": 2}')
+        assert _raw_json_text(resp) == 'prose {"x": 1}'
+
+    def test_structured_answer_with_expected_keys_wins_over_content(self) -> None:
+        resp = _both_response('prose {"x": 1}', '{"alpha": 1, "beta": 2}')
+        assert _raw_json_text(resp, _KEYS) == '{"alpha": 1, "beta": 2}'
+
+    def test_structured_answer_wins_over_a_schema_shaped_content_object(self) -> None:
+        resp = _both_response('{"alpha": 0, "beta": 0}', '{"alpha": 1, "beta": 2}')
+        assert _extract_json_candidate(resp, _KEYS) == '{"alpha": 1, "beta": 2}'
+
+    def test_structured_answer_missing_keys_keeps_content(self) -> None:
+        resp = _both_response('{"alpha": 0, "beta": 0}', '{"other": 1}')
+        assert _raw_json_text(resp, _KEYS) == '{"alpha": 0, "beta": 0}'
+
+
+class TestCountObjectsWithKeys:
+    def test_counts_each_top_level_object_with_all_keys(self) -> None:
+        text = 'a {"alpha": 1, "beta": 2} b {"alpha": 3, "beta": 4} c {"alpha": 5}'
+        assert _count_objects_with_keys(text, _KEYS) == 2
+
+    def test_single_object_counts_one(self) -> None:
+        assert _count_objects_with_keys('```json\n{"alpha": 1, "beta": 2}\n```', _KEYS) == 1
+
+    def test_braces_inside_strings_do_not_count(self) -> None:
+        text = '{"alpha": "{\\"alpha\\": 1, \\"beta\\": 2}", "beta": 2}'
+        assert _count_objects_with_keys(text, _KEYS) == 1
+
+    def test_nested_object_is_not_counted_separately(self) -> None:
+        text = '{"alpha": {"alpha": 1, "beta": 2}, "beta": 2}'
+        assert _count_objects_with_keys(text, _KEYS) == 1

@@ -50,9 +50,11 @@ from pydantic import BaseModel
 from mylonite._redaction import mask_registered_values, redact_exception
 from mylonite.scan.diagnostics import Diagnosis, classify_provider_error
 from mylonite.scan.llm_parse import (
+    _count_objects_with_keys,
     _extract_json_candidate,
     _extract_text,
     _looks_truncated,
+    _raw_json_text,
     _try_repair,
 )
 from mylonite.scan.llm_policy import LLMPolicy
@@ -995,18 +997,31 @@ def _parse_or_fallback(
     rejects truncated output rather than letting repair fabricate values. On any
     output-side failure the returned dict carries the ``FALLBACK_UNPARSEABLE``
     cause sentinel (see ``pop_fallback_cause``).
+
+    The caller's ``expected_keys`` steer the read: a tool-call (structured)
+    answer carrying every key wins over prose content, and a reply holding more
+    than one object with every key is ambiguous, so it falls back rather than
+    guessing that the first one is the answer. A reply with one object reads as
+    before.
     """
     expected = set(expected_keys)
+    # No required keys means nothing to steer by: keep the plain read.
+    steer = expected or None
     raw = _extract_text(response)
-    candidate = _extract_json_candidate(response)
+    candidate = _extract_json_candidate(response, steer)
     if candidate is None:
-        if _looks_truncated(response):
+        if _looks_truncated(response, steer):
             detail = "looks truncated: unbalanced '{' (provider likely hit a token limit)"
             logger.info("%s: LLM JSON looks truncated; using fallback", caller)
         else:
             detail = _snippet(raw)
             logger.info("%s: LLM returned no JSON object; using fallback", caller)
         return _with_cause(fallback, FALLBACK_UNPARSEABLE, detail)
+    if steer and _count_objects_with_keys(_raw_json_text(response, steer), steer) > 1:
+        logger.info("%s: LLM reply holds more than one answer object; using fallback", caller)
+        return _with_cause(
+            fallback, FALLBACK_UNPARSEABLE, "more than one object with the expected keys"
+        )
     try:
         parsed: Any = json.loads(candidate)
     except json.JSONDecodeError:
