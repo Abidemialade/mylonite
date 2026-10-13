@@ -191,7 +191,8 @@ at 120 characters and the whole call at 600, so every argument name and the star
 value stay visible. A reply longer
 than 2,000 characters is shown as its first 1,500 and last 500 characters with a
 `[N characters omitted]` marker between them, so what the agent says at the end of a long
-reply still reaches the judge.
+reply still reaches the judge. The request, the reply and the trace all sit inside one
+fence that marks them as untrusted data, never as instructions to the judge.
 
 An LLM-judge "success" that the agent's own trace contradicts counts as an LLM-judge
 verdict that is not a finding. The judge's reason names a tool the agent never called, or
