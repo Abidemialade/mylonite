@@ -567,7 +567,8 @@ _BUCKET_PHRASE: Final[dict[str, str]] = {
     ),
     _UNDECIDED_NO_ADJUDICATOR_BUCKET: (
         "reached no verdict because the deterministic predicate was inconclusive and no "
-        "LLM judge was configured to fall back to"
+        "LLM judge was configured to fall back to, or because the seed's predicate is "
+        "not registered"
     ),
     _UNDECIDED_UNLINKED_DISPATCH_BUCKET: (
         "made a consequential call that could not be tied to the attempt, so it proved "

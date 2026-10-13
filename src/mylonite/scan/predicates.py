@@ -11,9 +11,13 @@ LLM-judge is the catch-all for fuzzier cases.
 
 Predicates are registered by name via the ``@predicate(name)`` decorator and
 looked up by ``SeedPattern.predicate``. Nothing checks a seed's predicate
-string against this registry before a scan runs. A missing or unknown name
-reaches the judge, which makes no LLM call for it and returns a no-verdict
-result, so the attempt reads NOT TESTED rather than resisted.
+string against this registry before a scan runs; the judge looks the name up
+per attempt. On an attempt with a recorded trace outcome (an MCP target), an
+unknown name counts as an inconclusive predicate and the trace rule still
+decides the attempt, which can be resisted. Without a trace outcome, the judge
+makes no LLM call for an unknown name and returns a no-verdict result, so the
+attempt reads NOT TESTED. A scan rejects a payload with no ``predicate`` key
+earlier, as invalid metadata.
 """
 
 from __future__ import annotations

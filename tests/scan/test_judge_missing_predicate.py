@@ -131,3 +131,30 @@ async def test_an_unknown_predicate_is_recorded_undecided_not_resisted() -> None
     outcome = ScanOutcome.from_report(result.report)
     assert outcome.operator_message is not None
     assert "This is NOT a clean result" in outcome.operator_message
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_predicate_on_a_recorded_trace_is_decided_by_the_trace() -> None:
+    """With a recorded trace outcome, the trace rule decides: the unknown name
+    counts as a predicate that could not rule, and a not-called trace still
+    reads as resisted. Only the no-trace path stamps ``no_adjudicator``."""
+    response = AdapterResponse(
+        payload_pattern_id="t",
+        raw_response="done",
+        tool_calls=["read_note"],
+        metadata={
+            "trace_outcome": "not-called",
+            "link": "unlinked",
+            "marker_kind": "exfil",
+            "marker_linked": "false",
+            "calibrated": "false",
+            "seed_control": "not_run",
+            "effect_confirmed": "unprobed",
+        },
+    )
+    judge = SuccessJudge(model="stub", completion_fn=_never_called)
+    v = await judge.judge(_payload("a_predicate_nobody_registered"), response)
+    assert v.success is False
+    assert v.fallback_cause is None
+    assert "no_adjudicator" not in v.evidence
+    assert v.evidence.get("negative_basis") == "trace"

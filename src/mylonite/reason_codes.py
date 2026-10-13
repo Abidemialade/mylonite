@@ -156,8 +156,15 @@ _NOT_TESTED: Final[tuple[ReasonCode, ...]] = (
     ),
     _rc(
         NT_NO_ADJUDICATOR,
-        "The deterministic check was inconclusive and no LLM judge was configured.",
-        "set a judge model, or accept this as an intentional predicate-only run",
+        (
+            "No mechanism ruled on the attempt: the deterministic check was inconclusive "
+            "and no LLM judge was configured, or the seed's predicate is not registered."
+        ),
+        (
+            "with no judge set, set a judge model or accept this as an intentional "
+            "predicate-only run; with a judge set, check the seed's predicate name "
+            "against the registered predicates"
+        ),
     ),
     _rc(
         NT_UNDECIDED,

@@ -14,8 +14,8 @@ attack modules" this docstring used to promise are those two.)
 The ``predicate`` field stores a registry key (string). This file does not
 check it against ``mylonite.scan.predicates``, so it has no runtime dependency
 on the predicate implementations, and nothing else checks it before a scan
-runs: the judge resolves the name per attempt, and a name it cannot resolve
-gives a no-verdict result (NOT TESTED), never a resisted one.
+runs: the judge resolves the name per attempt. See ``predicates.py`` for what
+an unknown name produces with and without a recorded trace outcome.
 """
 
 from __future__ import annotations
