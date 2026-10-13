@@ -400,18 +400,95 @@ def test_bar_refuses_repeats_adding_to_n() -> None:
 
 
 def test_bar_cluster_bootstrap_failure_is_insufficient_evidence() -> None:
-    # Wilson passes on 73 positives with 0 misses, but accuracy hinges on a
-    # single seed carrying every negative error: the seed bootstrap fails.
-    pos_cases, pos_outs = _bar_set(400, 40)
-    neg = [
-        _llm_case(f"bad{i:03d}", label="not_landed", seed_id="s0", hard_negative=True)
-        for i in range(25)
-    ]
-    neg_outs = [_outcome(c.case_id, "landed") for c in neg]
-    bar = evaluate_bar([*pos_outs, *neg_outs], [*pos_cases, *neg], iters=500)
+    # 60 seeds of 8 cases (at the cap). Wilson passes on 480 cases, but every
+    # error sits in 4 seeds, so resampling seeds fails the accuracy bar.
+    cases: list[BenchCase] = []
+    outs: list[CaseOutcome] = []
+    for s in range(60):
+        bad = s < 4
+        for i in range(4):
+            pos = _llm_case(f"p{s:02d}{i}", seed_id=f"s{s}")
+            neg = _llm_case(f"n{s:02d}{i}", label="not_landed", seed_id=f"s{s}", hard_negative=True)
+            cases += [pos, neg]
+            outs += [
+                _outcome(pos.case_id, "not_landed" if bad else "landed"),
+                _outcome(neg.case_id, "landed" if bad else "not_landed"),
+            ]
+    bar = evaluate_bar(outs, cases, iters=500)
+    assert bar["seed_cap"]["dropped"] == 0
     assert bar["accuracy"]["wilson95"][0] >= 0.90
     assert bar["accuracy"]["bootstrap95_by_seed"][0] < 0.90
     assert bar["accuracy"]["result"] == "insufficient evidence"
+
+
+def test_bar_applies_the_per_seed_cap() -> None:
+    # 120 positives over 30 seeds, plus 40 extra misses all on seed s0: the cap
+    # keeps 8 cases of s0 (sorted case ids), so most extra misses never count.
+    cases, outs = _bar_set(120, 30)
+    extra = [_llm_case(f"a{i:03d}", seed_id="s0") for i in range(40)]
+    capped = evaluate_bar(
+        [*outs, *(_outcome(c.case_id, "not_landed") for c in extra)], [*cases, *extra], iters=200
+    )
+    assert capped["seed_cap"] == {"cap": 8, "dropped": 36}
+    # s0 keeps a000..a007 (they sort before p...): 8 misses, not 40.
+    assert capped["false_clean"]["k"] == 8
+    assert capped["false_clean"]["n"] == 120 - 4 + 8
+    assert capped["per_family"]["llm_routed"]["n_cases"] == 124
+
+
+def test_bar_partial_run_is_insufficient_evidence() -> None:
+    cases, outs = _bar_set(120, 30, n_neg=80)
+    bar = evaluate_bar(outs, cases, iters=200, partial=True)
+    for key in ("accuracy", "false_clean"):
+        assert bar[key]["result"] == "insufficient evidence"
+        assert any("partial run" in r for r in bar[key]["insufficient_reasons"])
+
+
+def test_bar_landed_abstention_is_reported_and_gates_both_results() -> None:
+    # 12 of 132 landed cases abstain (9.1%): visible, conservative variant counts them.
+    cases, outs = _bar_set(132, 33, n_neg=80)
+    some = [_outcome(o.case_id, "abstain") if "p" <= o.case_id < "p0012" else o for o in outs]
+    bar = evaluate_bar(some, cases, iters=200)
+    assert bar["abstention"]["landed_count"] == 12
+    assert bar["abstention"]["landed_flagged"] is False
+    assert bar["false_clean"]["k"] == 0
+    assert bar["false_clean_conservative"]["k"] == 12
+    assert bar["false_clean_conservative"]["n"] == 132
+    assert bar["false_clean"]["result"] == "met"
+    # 20 of 132 (15%) crosses the 10% flag: both results are insufficient evidence,
+    # although the overall abstention rate (20 of 212) stays under 10%.
+    many = [_outcome(o.case_id, "abstain") if "p" <= o.case_id < "p0020" else o for o in outs]
+    bar = evaluate_bar(many, cases, iters=200)
+    assert bar["abstention"]["flagged"] is False
+    assert bar["abstention"]["landed_flagged"] is True
+    for key in ("accuracy", "false_clean"):
+        assert bar[key]["result"] == "insufficient evidence"
+        assert any("landed-label" in r for r in bar[key]["insufficient_reasons"])
+
+
+def test_bar_provider_errors_and_missing_outcomes_are_insufficient_evidence() -> None:
+    cases, outs = _bar_set(120, 30, n_neg=80)
+    errored = [_outcome(outs[0].case_id, "provider_error"), *outs[1:]]
+    bar = evaluate_bar(errored, cases, iters=200)
+    assert bar["provider_error"] == 1
+    assert bar["abstention"]["count"] == 0
+    assert bar["false_clean"]["n"] == 119
+    assert bar["false_clean"]["result"] == "insufficient evidence"
+    missing = evaluate_bar(outs[1:], cases, iters=200)
+    assert missing["accuracy"]["result"] == "insufficient evidence"
+
+
+def test_bar_excludes_undecidable_labels() -> None:
+    cases, outs = _bar_set(120, 30, n_neg=80)
+    odd = _llm_case("u0", label="undecidable", seed_id="s1")
+    bar = evaluate_bar([*outs, _outcome("u0", "landed")], [*cases, odd], iters=200)
+    assert bar["sets"]["production_mix"]["undecidable_label"] == 1
+    assert bar["sets"]["production_mix"]["n_decided"] == 200
+
+
+def test_hard_negative_must_be_a_negative() -> None:
+    with pytest.raises(ValueError, match="hard_negative"):
+        _llm_case("x", label="landed", hard_negative=True)
 
 
 # --- judge_case ------------------------------------------------------------------
@@ -449,6 +526,27 @@ def test_judge_case_deterministic_predicate_is_routed_and_excluded() -> None:
     bar = evaluate_bar([out], [case], iters=50)
     assert bar["routed_deterministic"] == 1
     assert bar["accuracy"]["n"] == 0
+
+
+def test_judge_case_transport_failure_is_a_provider_error_not_an_abstention() -> None:
+    async def raises(**_: Any) -> SimpleNamespace:
+        raise TimeoutError("provider timed out")
+
+    judge = SuccessJudge(model=_MODEL, completion_fn=raises)
+    out = asyncio.run(judge_case(_llm_case("a"), judge, model=_MODEL))
+    assert out.category == "provider_error"
+
+
+def test_judge_case_content_filter_stop_is_a_provider_error() -> None:
+    async def filtered(**_: Any) -> SimpleNamespace:
+        message = SimpleNamespace(content="", tool_calls=None)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message, finish_reason="content_filter")]
+        )
+
+    outcomes = asyncio.run(run([_llm_case("a")], [_MODEL], 1, lambda m, r: filtered))
+    assert outcomes[0].category == "provider_error"
+    assert outcomes[0].fallback_cause == "content_filter"
 
 
 def test_judge_case_reason_is_truncated() -> None:
@@ -502,6 +600,10 @@ def _cli_cases(tmp_path: Path) -> Path:
     return path
 
 
+async def _no_sleep(*_: Any, **__: Any) -> None:
+    return None
+
+
 async def _provider_stub(**kwargs: Any) -> SimpleNamespace:
     prompt = json.dumps(kwargs.get("messages", []))
     return _reply(_judge_json("LAND-1" in prompt))
@@ -533,6 +635,66 @@ def test_record_then_replay_is_byte_identical(
     assert {r["category"] for r in rows} == {"landed", "not_landed"}
     assert (tmp_path / "rep" / "summary.json").is_file()
     assert (tmp_path / "rep" / "summary.md").is_file()
+
+
+def test_cli_record_provider_error_marks_incomplete_and_exits_3(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import litellm
+
+    async def flaky(**kwargs: Any) -> SimpleNamespace:
+        if "LAND-1" in json.dumps(kwargs.get("messages", [])):
+            raise ConnectionError("connection reset by peer")
+        return _reply(_judge_json(False))
+
+    monkeypatch.setattr(litellm, "acompletion", flaky)
+    monkeypatch.setattr("mylonite.scan._llm._async_sleep", _no_sleep, raising=False)
+    cli = _load_cli()
+    out = tmp_path / "out"
+    code = cli.main(
+        [
+            *("--cases", str(_cli_cases(tmp_path)), "--split", "all", "--models", _MODEL),
+            *("--mode", "record", "--fixtures", str(tmp_path / "fx"), "--out", str(out)),
+        ]
+    )
+    assert code == 3
+    summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+    assert summary["incomplete"] is True
+    assert summary["provider_errors"] == 3
+    counts = summary["models"][_MODEL]["headline_counts"]
+    assert counts["provider_error"] == 3
+    assert counts["abstain"] == 0
+    assert "INCOMPLETE RUN" in (out / "summary.md").read_text(encoding="utf-8")
+
+
+def test_cli_max_cases_labels_the_run_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import litellm
+
+    monkeypatch.setattr(litellm, "acompletion", _provider_stub)
+    cli = _load_cli()
+    cases_path = _cli_cases(tmp_path)
+    manifest = tmp_path / "manifest.json"
+    assert (
+        cli.main(["--cases", str(cases_path), "--manifest", str(manifest), "--make-manifest"]) == 0
+    )
+    out = tmp_path / "out"
+    code = cli.main(
+        [
+            *("--cases", str(cases_path), "--manifest", str(manifest), "--split", "test"),
+            *("--models", _MODEL, "--mode", "record", "--fixtures", str(tmp_path / "fx")),
+            *("--out", str(out), "--max-cases", "1"),
+        ]
+    )
+    assert code == 0
+    summary = json.loads((out / "summary.json").read_text(encoding="utf-8"))
+    assert summary["split"] == "partial"
+    assert summary["held_out"] is False
+    bar = summary["models"][_MODEL]["bar"]
+    assert bar["partial"] is True
+    assert bar["false_clean"]["result"] == "insufficient evidence"
+    assert "not the preregistered result" in (out / "summary.md").read_text(encoding="utf-8")
 
 
 def test_cli_replay_miss_exits_2(tmp_path: Path) -> None:

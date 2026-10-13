@@ -11,7 +11,12 @@ Each verdict is folded into one of four categories:
 * ``abstain`` -- no verdict: ``fallback_cause`` set, ``evidence["no_adjudicator"]``
   set, or ``applicable`` False. Never read as a negative;
 * ``routed_deterministic`` -- a predicate (not the LLM) decided. Excluded from
-  every LLM-judge metric and counted separately.
+  every LLM-judge metric and counted separately;
+* ``provider_error`` -- the judge call itself failed (rate limit, timeout,
+  network, auth, a content-filter stop): the provider never answered, so this
+  is neither a verdict nor an abstention. Counted separately; any one of them
+  makes the run incomplete. A reply that arrived but is not parseable stays an
+  ``abstain``.
 
 The headline is repeat 1 only. Majority-of-3 and repeat agreement are
 secondary figures (:func:`majority_of`, :func:`repeat_agreement`); repeats
@@ -29,11 +34,18 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict
 
 from mylonite._concurrency import gather_bounded
+from mylonite.scan._llm import FALLBACK_CALL_RAISED, NonRecoverableProviderError
 from mylonite.scan.judge import SuccessJudge
 from mylonite.scan.llm_types import AsyncCompletionFn
 from verification.judge_bench.cases import BenchCase
 
-Category = Literal["landed", "not_landed", "abstain", "routed_deterministic"]
+Category = Literal["landed", "not_landed", "abstain", "routed_deterministic", "provider_error"]
+
+#: ``fallback_cause`` set on an outcome whose judge call raised a non-recoverable
+#: provider error (auth, TLS, a rejected request such as a content filter).
+NON_RECOVERABLE = "non_recoverable_provider_error"
+#: ``fallback_cause`` set when the provider stopped the reply for content filtering.
+CONTENT_FILTERED = "content_filter"
 
 REASON_LIMIT = 300
 
@@ -71,11 +83,14 @@ class _ReplyCapture:
     def __init__(self, fn: AsyncCompletionFn) -> None:
         self._fn = fn
         self.content: str | None = None
+        self.finish_reason: str | None = None
 
     async def __call__(self, **kwargs: Any) -> Any:
         response = await self._fn(**kwargs)
         try:
-            self.content = str(response.choices[0].message.content or "")
+            choice = response.choices[0]
+            self.content = str(choice.message.content or "")
+            self.finish_reason = getattr(choice, "finish_reason", None)
         except (AttributeError, IndexError, KeyError, TypeError):
             self.content = None
         return response
@@ -117,7 +132,13 @@ async def judge_case(
     verdict = await judge.judge(case.to_payload(), case.to_response())
     evidence = verdict.evidence
     category: Category
-    if verdict.fallback_cause or evidence.get("no_adjudicator") or not verdict.applicable:
+    fallback_cause = verdict.fallback_cause
+    filtered = capture is not None and capture.finish_reason == CONTENT_FILTERED
+    if fallback_cause == FALLBACK_CALL_RAISED or (filtered and verdict.mechanism == "llm"):
+        category = "provider_error"
+        if fallback_cause != FALLBACK_CALL_RAISED:
+            fallback_cause = CONTENT_FILTERED
+    elif verdict.fallback_cause or evidence.get("no_adjudicator") or not verdict.applicable:
         category = "abstain"
     elif verdict.mechanism != "llm":
         category = "routed_deterministic"
@@ -136,14 +157,29 @@ async def judge_case(
         confidence=_as_float(evidence.get("confidence")),
         harmful_intent=harmful_intent,
         reason=verdict.reason[:REASON_LIMIT],
-        fallback_cause=verdict.fallback_cause,
+        fallback_cause=fallback_cause,
     )
 
 
 async def _one(case: BenchCase, model: str, repeat: int, fn: AsyncCompletionFn) -> CaseOutcome:
     capture = _ReplyCapture(fn)
     judge = SuccessJudge(model=model, completion_fn=capture)
-    return await judge_case(case, judge, model=model, repeat=repeat, capture=capture)
+    try:
+        return await judge_case(case, judge, model=model, repeat=repeat, capture=capture)
+    except NonRecoverableProviderError as exc:
+        # The chokepoint re-raises auth/TLS/bad-request failures. Record the case
+        # as a provider error rather than aborting the run, so the summary can
+        # say exactly how much of the run never got an answer.
+        return CaseOutcome(
+            case_id=case.case_id,
+            model=model,
+            repeat=repeat,
+            mechanism="llm",
+            category="provider_error",
+            # The category only: the raw provider text can echo request details.
+            reason=f"non-recoverable provider error [{exc.diagnosis.category}]",
+            fallback_cause=NON_RECOVERABLE,
+        )
 
 
 async def run(
