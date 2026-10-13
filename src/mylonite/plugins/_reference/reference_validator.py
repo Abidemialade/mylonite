@@ -1422,7 +1422,9 @@ class DifferentialValidator(ValidatorBase):
         far as the consensus metric is concerned. If EVERY judge call fails this
         returns 0.0 (not an exception, not a fabricated 1.0) — a broken judge
         model must fail the consensus gate closed, never pass it by default.
-        The consensus leg passes only on a strict majority (``agree > 0.5``).
+        The same 0.0 is returned when no more than half of all judge calls
+        reached a verdict (the quorum). The consensus leg passes only on a
+        strict majority of the decided calls (``agree > 0.5``).
         """
         from mylonite.scan.judge import SuccessJudge
 
@@ -1441,8 +1443,14 @@ class DifferentialValidator(ValidatorBase):
         raw_verdicts = asyncio.run(gather_bounded(judge_coros))
         verdicts = [v for v in raw_verdicts if v is not None and _reached_verdict(v)]
         total = len(verdicts)
+        # Quorum: more than half of ALL judge calls must have reached a verdict.
+        # Without it one decided call among several no-verdict calls would read
+        # as full agreement. Below quorum the leg fails closed, as when no call
+        # reached a verdict.
+        if total * 2 <= len(raw_verdicts):
+            return 0.0
         agree = sum(1 for v in verdicts if v.success)
-        return (agree / total) if total else 0.0
+        return agree / total
 
     # -- pure decision helper (unit-tested directly) --------------------------
 
