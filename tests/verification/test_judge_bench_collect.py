@@ -130,6 +130,29 @@ def test_every_judged_attempt_is_captured_once_with_full_fields(
     assert sum(s["captures"] for s in spend["scans"]) == len(captures)
 
 
+def test_llm_routed_attempts_carry_their_judge_call_and_deterministic_ones_none(
+    offline: dict[str, Any], tmp_path: Path
+) -> None:
+    code, out = _run(tmp_path, "--target", "reference:vulnerable")
+    assert code == collect.EXIT_OK
+    captures = collect.load_captures(out / "captures.jsonl")
+    llm = [c for c in captures if c.verdict["mechanism"] == "llm"]
+    assert llm, "the fake run routed no attempt to the LLM judge"
+    for cap in llm:
+        assert len(cap.judge_calls) == 1
+        [call] = cap.judge_calls
+        assert call["model"] == _MODEL
+        assert call["raw_content"] == _benign().choices[0].message.content
+        roles = [m["role"] for m in call["messages"]]
+        assert roles[-1] == "user" and "system" in roles
+        assert cap.payload["body"] in call["messages"][-1]["content"]
+    for cap in captures:
+        if cap.verdict["mechanism"] != "llm":
+            assert cap.judge_calls == []
+    spend = json.loads((out / "spend.json").read_text(encoding="utf-8"))
+    assert sum(len(c.judge_calls) for c in captures) == spend["calls_by_role"]["judge"]
+
+
 def test_the_request_ceiling_is_honoured(offline: dict[str, Any], tmp_path: Path) -> None:
     code, out = _run(tmp_path, "--scans", "2", ceiling=4)
     assert code == collect.EXIT_CEILING
@@ -191,6 +214,7 @@ async def test_the_recording_judge_leaves_the_verdict_unchanged() -> None:
     assert got == want
     [cap] = sink.captures
     assert (cap.capture_id, cap.seed_id, cap.pattern_id) == ("scan-1-0001", "s1", "p1")
+    assert cap.judge_calls == [], "a deterministic verdict made no judge call"
     assert cap.verdict["mechanism"] == want.mechanism
     assert cap.verdict["success"] is want.success
 
