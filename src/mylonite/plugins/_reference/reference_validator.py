@@ -112,7 +112,7 @@ from mylonite.scan._llm import (
     request_ceiling_hit,
 )
 from mylonite.scan._types import AdapterInvocationSkipped, Verdict
-from mylonite.scan.coverage import attempt_reached_no_verdict
+from mylonite.scan.coverage import NO_VERDICT_EVIDENCE_KEYS, attempt_reached_no_verdict
 from mylonite.scan.effect_verdict import ProofLevel
 from mylonite.scan.engine import ScanResult
 from mylonite.scan.evidence_tier import attempt_evidence_tier, rests_on_judge_only
@@ -561,11 +561,17 @@ def _reached_verdict(verdict: Verdict) -> bool:
     """True when the judge actually decided; False for a no-verdict fallback.
 
     ``SuccessJudge.judge`` catches its own call and parse failures and returns
-    ``success=False`` with ``fallback_cause`` set instead of raising. That is
-    "nothing was judged", not "the judge disagreed", so every tally (the
-    metamorphic leg and the multi-judge consensus) skips it the same way.
+    ``success=False`` with ``fallback_cause`` set instead of raising. When the
+    seed's predicate cannot rule and no LLM judge does (fallback disabled, or a
+    missing or unknown predicate), it returns ``success=False`` with the
+    ``no_adjudicator`` evidence key instead. Either is "nothing was judged",
+    not "the judge disagreed", so every tally (the metamorphic leg and the
+    multi-judge consensus) skips it the same way. The keys are the engine's own
+    ``NO_VERDICT_EVIDENCE_KEYS``, so this reads a verdict the way a scan does.
     """
-    return verdict.fallback_cause is None
+    if verdict.fallback_cause is not None:
+        return False
+    return not any(verdict.evidence.get(key) for key in NO_VERDICT_EVIDENCE_KEYS)
 
 
 def _raise_if_request_ceiling_hit() -> None:
@@ -1417,7 +1423,7 @@ class DifferentialValidator(ValidatorBase):
         flaky/over-eager verdicts.
 
         A judge call that raises (see ``_judge_or_none``) or that returns a
-        no-verdict result (``fallback_cause`` set, see ``_reached_verdict``)
+        no-verdict result (see ``_reached_verdict``)
         contributes to NEITHER ``agree`` nor ``total`` — it never happened, as
         far as the consensus metric is concerned. If EVERY judge call fails this
         returns 0.0 (not an exception, not a fabricated 1.0) — a broken judge
@@ -1976,7 +1982,7 @@ class DifferentialValidator(ValidatorBase):
             # score on exactly the runs where nothing was actually judged.
             logger.warning(
                 "metamorphic: no verdict reached (%s) — counting as neither fired nor resisted",
-                verdict.fallback_cause,
+                verdict.fallback_cause or verdict.evidence.get("no_adjudicator"),
             )
             return None
         return verdict.success

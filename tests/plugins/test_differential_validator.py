@@ -48,6 +48,7 @@ from mylonite.plugins._reference.reference_validator import (
 from mylonite.plugins.registry import discover
 from mylonite.scan._llm import BudgetExceededError, NonRecoverableProviderError
 from mylonite.scan._types import Verdict
+from mylonite.scan.coverage import NO_ADJUDICATOR
 from mylonite.scan.diagnostics import Diagnosis
 
 # The exploit the validator validates. W2 indirect-injection: the planner reads
@@ -657,9 +658,21 @@ def _no_verdict(cause: str = "call_raised", mechanism: str = "llm") -> Verdict:
     )
 
 
-# Every kind of no-verdict result the judge returns carries ``fallback_cause``:
-# a failed call, an unreadable answer, a lean below the confidence floor and an
-# inconclusive predicate. Consensus skips each the same way.
+def _no_adjudicator() -> Verdict:
+    """The predicate could not rule and nothing else did: no ``fallback_cause``,
+    only the ``no_adjudicator`` evidence key."""
+    return Verdict(
+        success=False,
+        reason="no verdict",
+        evidence={"no_adjudicator": NO_ADJUDICATOR},
+        mechanism="predicate",
+    )
+
+
+# Every kind of no-verdict result the judge returns: a failed call, an
+# unreadable answer, a lean below the confidence floor and an inconclusive
+# predicate carry ``fallback_cause``; a predicate nobody could rule on carries
+# ``no_adjudicator``. Consensus skips each the same way.
 _NO_VERDICT_KINDS = [
     pytest.param(_no_verdict("call_raised"), id="call-raised"),
     pytest.param(_no_verdict("unparseable_output"), id="unparseable"),
@@ -668,6 +681,7 @@ _NO_VERDICT_KINDS = [
         _no_verdict(reason_codes.INC_UNLINKED_DISPATCH, mechanism="predicate"),
         id="predicate-inconclusive",
     ),
+    pytest.param(_no_adjudicator(), id="no-adjudicator"),
 ]
 
 
@@ -682,6 +696,13 @@ def test_multi_judge_consensus_skips_fallback_verdicts(monkeypatch, skipped: Ver
 def test_multi_judge_consensus_is_zero_when_every_verdict_is_a_fallback(monkeypatch) -> None:
     """No judge reached a verdict: the consensus fails closed at 0.0."""
     assert _consensus_with(monkeypatch, [_no_verdict(), _no_verdict()]) == 0.0
+
+
+def test_multi_judge_consensus_does_not_count_a_no_adjudicator_verdict(monkeypatch) -> None:
+    """A ``no_adjudicator`` verdict is not a disagreeing judge: with one agreeing
+    call and two of them, the quorum is not met and the leg fails closed."""
+    verdicts = [_agree(), _no_adjudicator(), _no_adjudicator()]
+    assert _consensus_with(monkeypatch, verdicts) == 0.0
 
 
 def test_multi_judge_consensus_needs_a_quorum(monkeypatch) -> None:
@@ -1827,6 +1848,26 @@ def test_invoke_and_judge_async_returns_none_when_no_verdict_was_reached(monkeyp
     result = asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
 
     assert result is None, "a non-verdict must not be reported as resistance"
+
+
+def test_invoke_and_judge_async_does_not_read_no_adjudicator_as_resisted(monkeypatch) -> None:
+    """A verdict nobody adjudicated (``no_adjudicator`` set, no ``fallback_cause``)
+    is neither fired nor resisted on the metamorphic leg."""
+    from mylonite.scan import judge as judge_mod
+
+    async def _unadjudicated(self, payload, response):
+        del self, payload, response
+        return _no_adjudicator()
+
+    monkeypatch.setattr(judge_mod.SuccessJudge, "judge", _unadjudicated)
+
+    exploit = _build_exploit()
+    validator = DifferentialValidator(
+        model="stub", iterations=1, completion_fn=_ScriptedCompletion()
+    )
+    result = asyncio.run(validator._invoke_and_judge_async("guarded", exploit.payload))
+
+    assert result is None, "an unadjudicated verdict must not be reported as resistance"
 
 
 def test_invoke_and_judge_async_still_returns_a_real_verdict(monkeypatch) -> None:
