@@ -1144,11 +1144,19 @@ class SuccessJudge:
                 fallback_cause=FALLBACK_EFFECT_PROBE_ERRORED,
             )
 
+        # A seed with no predicate, or one naming a predicate nobody registered,
+        # cannot be judged here: nothing checks the name before the scan runs.
+        # That is "nobody decided", not "the target resisted", so both stamp
+        # `no_adjudicator` exactly as the fallback-disabled branch below does,
+        # and the engine records the attempt undecided (NOT TESTED).
         if not predicate_name:
             return Verdict(
                 success=False,
                 reason="payload metadata missing 'predicate' key; cannot judge",
-                evidence={"metadata_keys": sorted(payload.metadata)},
+                evidence={
+                    "metadata_keys": sorted(payload.metadata),
+                    "no_adjudicator": NO_ADJUDICATOR,
+                },
                 mechanism="predicate",
             )
         try:
@@ -1156,8 +1164,8 @@ class SuccessJudge:
         except PredicateNotFound:
             return Verdict(
                 success=False,
-                reason=f"predicate {predicate_name!r} is not registered",
-                evidence={"predicate": predicate_name},
+                reason=f"predicate {predicate_name!r} is not registered; cannot judge",
+                evidence={"predicate": predicate_name, "no_adjudicator": NO_ADJUDICATOR},
                 mechanism="predicate",
             )
         deterministic = predicate_fn(payload, response)

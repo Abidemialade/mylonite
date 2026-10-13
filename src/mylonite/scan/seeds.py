@@ -11,9 +11,11 @@ the W1 / W2 seeds and ``ExcessiveAgencyAttackModule`` the W3 / W4 ones, both
 filtered by ``applicable_targets``. (W3 / W4 arrived in v0.2.1; the "later
 attack modules" this docstring used to promise are those two.)
 
-The ``predicate`` field stores a registry key (string). It is validated against
-``mylonite.scan.predicates`` at engine startup time, not at module-import time,
-so this file has no runtime dependency on the predicate implementations.
+The ``predicate`` field stores a registry key (string). This file does not
+check it against ``mylonite.scan.predicates``, so it has no runtime dependency
+on the predicate implementations, and nothing else checks it before a scan
+runs: the judge resolves the name per attempt, and a name it cannot resolve
+gives a no-verdict result (NOT TESTED), never a resisted one.
 """
 
 from __future__ import annotations
@@ -115,7 +117,7 @@ class SeedPattern(BaseModel):
     )
     predicate: str = Field(
         ...,
-        description="Predicate-registry key — validated at engine startup.",
+        description="Predicate-registry key, resolved by the judge per attempt.",
     )
     judge_context: str = Field(
         default="",

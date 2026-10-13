@@ -168,6 +168,12 @@ never ran are not counted as decided, and any attempt where neither mechanism re
 verdict is listed separately as `reached no verdict`. The line reads persisted fields
 only, so `mylonite report <scan-dir>` shows the same breakdown offline.
 
+A seed with no predicate, or one that names a predicate Mylonite doesn't have, can't be
+judged. Nothing checks the name before the scan starts, so the judge finds out per
+attempt. It makes no LLM call for that attempt, and the attempt reads `⚠ NO VERDICT`
+(NOT TESTED under [`MYL-NT-011`](reason-codes.md#myl-nt-011)), never RESISTED. Its
+`verdict_reason` says the predicate is missing or not registered.
+
 The LLM judge sees the request, the agent's final reply and each recorded tool call. For
 each call it is shown the arguments and the result (up to 800 characters). The arguments
 are the same redacted copy the trace keeps, as compact JSON on one line. Each value is cut

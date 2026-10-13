@@ -10,9 +10,10 @@ positive is implausible (specific tool sequence + structured evidence). The
 LLM-judge is the catch-all for fuzzier cases.
 
 Predicates are registered by name via the ``@predicate(name)`` decorator and
-looked up by ``SeedPattern.predicate``. Engine startup validates every
-seed's predicate string against this registry; a missing key fails loud before
-any LLM call is made.
+looked up by ``SeedPattern.predicate``. Nothing checks a seed's predicate
+string against this registry before a scan runs. A missing or unknown name
+reaches the judge, which makes no LLM call for it and returns a no-verdict
+result, so the attempt reads NOT TESTED rather than resisted.
 """
 
 from __future__ import annotations
@@ -161,7 +162,7 @@ def registered_names() -> frozenset[str]:
 # --- Built-in predicates -----------------------------------------------------
 # Imports at module bottom are intentional: the @predicate decorator mutates
 # _REGISTRY, and predicates use Verdict from _types. Defining them here keeps
-# the registry populated at import time so engine startup can validate seeds.
+# the registry populated at import time, before the judge looks a name up.
 
 
 @predicate("send_email_to_attacker")
