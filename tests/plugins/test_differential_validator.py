@@ -28,6 +28,7 @@ from typing import Any
 import pytest
 from rich.console import Console
 
+from mylonite import reason_codes
 from mylonite.contracts import (
     AdapterResponse,
     ComplianceTags,
@@ -642,26 +643,118 @@ def _agree() -> Verdict:
     return Verdict(success=True, reason="agree", evidence={}, mechanism="llm")
 
 
-def _no_verdict() -> Verdict:
+def _disagree() -> Verdict:
+    return Verdict(success=False, reason="disagree", evidence={}, mechanism="llm")
+
+
+def _no_verdict(cause: str = "call_raised", mechanism: str = "llm") -> Verdict:
     return Verdict(
         success=False,
-        reason="judge call failed",
+        reason="no verdict",
         evidence={},
-        mechanism="llm",
-        fallback_cause="call_raised",
+        mechanism=mechanism,
+        fallback_cause=cause,
     )
 
 
-def test_multi_judge_consensus_skips_fallback_verdicts(monkeypatch) -> None:
+# Every kind of no-verdict result the judge returns carries ``fallback_cause``:
+# a failed call, an unreadable answer, a lean below the confidence floor and an
+# inconclusive predicate. Consensus skips each the same way.
+_NO_VERDICT_KINDS = [
+    pytest.param(_no_verdict("call_raised"), id="call-raised"),
+    pytest.param(_no_verdict("unparseable_output"), id="unparseable"),
+    pytest.param(_no_verdict(reason_codes.INC_JUDGE_BELOW_FLOOR), id="below-floor"),
+    pytest.param(
+        _no_verdict(reason_codes.INC_UNLINKED_DISPATCH, mechanism="predicate"),
+        id="predicate-inconclusive",
+    ),
+]
+
+
+@pytest.mark.parametrize("skipped", _NO_VERDICT_KINDS)
+def test_multi_judge_consensus_skips_fallback_verdicts(monkeypatch, skipped: Verdict) -> None:
     """A judge call that reached no verdict (``fallback_cause`` set) is skipped,
     the same way the metamorphic leg skips it: it neither agrees nor disagrees.
-    Two agreeing judges plus one failed call is 2/2, not 2/3."""
-    assert _consensus_with(monkeypatch, [_agree(), _no_verdict(), _agree()]) == 1.0
+    Two agreeing judges plus one no-verdict call is 2/2, not 2/3."""
+    assert _consensus_with(monkeypatch, [_agree(), skipped, _agree()]) == 1.0
 
 
 def test_multi_judge_consensus_is_zero_when_every_verdict_is_a_fallback(monkeypatch) -> None:
     """No judge reached a verdict: the consensus fails closed at 0.0."""
     assert _consensus_with(monkeypatch, [_no_verdict(), _no_verdict()]) == 0.0
+
+
+def test_multi_judge_consensus_needs_a_quorum(monkeypatch) -> None:
+    """One agreeing call among three, with two no-verdict calls, is below the
+    quorum (more than half of all calls must reach a verdict): it fails closed
+    at 0.0 instead of reading as full agreement."""
+    verdicts = [_agree(), _no_verdict(), _no_verdict(reason_codes.INC_JUDGE_BELOW_FLOOR)]
+    assert _consensus_with(monkeypatch, verdicts) == 0.0
+
+
+def _consensus_leg(verdicts: list[Verdict]) -> Any:
+    """Validate a custom target with one firing run, judged by ``verdicts``."""
+    from mylonite.scan import judge as judge_mod
+
+    exploit = _custom_exploit()
+    test = ReferencePytestGenerator().emit(exploit)
+    it = iter(verdicts)
+
+    async def _scripted(self, payload, response):
+        del self, payload, response
+        return next(it)
+
+    def _fake_run_custom_iteration(self, target, pattern_id, *, factory=None):
+        return _CustomRun(finding=True, effect_confirmed="true", response=exploit.response)
+
+    validator = DifferentialValidator(
+        model="stub",
+        iterations=1,
+        vuln_threshold=1,
+        completion_fn=_cust_completion,
+        run_build=False,
+        consensus_judges=len(verdicts),
+    )
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(judge_mod.SuccessJudge, "judge", _scripted)
+        mp.setattr(
+            DifferentialValidator, "_run_custom_iteration", _fake_run_custom_iteration, raising=True
+        )
+        report = validator.validate(test, _FakeCustomAdapter("true"), ReferenceVulnerableOracle())
+    return next(o for o in report.outcomes if o.stage == "consensus")
+
+
+def test_consensus_leg_passes_two_decided_agreeing_of_three() -> None:
+    """Two of three calls decided and agreed: quorum met, majority met."""
+    assert _consensus_leg([_agree(), _no_verdict(), _agree()]).passed is True
+
+
+def test_consensus_leg_fails_one_agreeing_of_three() -> None:
+    """One agreeing call and two no-verdict calls: below quorum, the leg fails."""
+    assert _consensus_leg([_agree(), _no_verdict(), _no_verdict()]).passed is False
+
+
+def test_consensus_leg_flips_to_pass_when_no_verdict_calls_stop_counting_against() -> None:
+    """Two agree, one disagrees, two reach no verdict. Counting the no-verdict
+    calls as disagreement read 2/5 and failed the leg; skipping them reads 2/3
+    with a quorum of 3 of 5, and the leg passes."""
+    verdicts = [
+        _agree(),
+        _no_verdict(reason_codes.INC_JUDGE_BELOW_FLOOR),
+        _disagree(),
+        _no_verdict("unparseable_output"),
+        _agree(),
+    ]
+    leg = _consensus_leg(verdicts)
+    assert leg.metric == pytest.approx(2 / 3)
+    assert leg.passed is True
+
+
+def test_consensus_leg_flips_to_fail_on_a_split_vote() -> None:
+    """One agrees and one disagrees: 0.5 passed the leg before; it now fails."""
+    leg = _consensus_leg([_agree(), _disagree()])
+    assert leg.metric == 0.5
+    assert leg.passed is False
 
 
 @pytest.mark.parametrize(("agree", "passed"), [(0.5, False), (0.51, True), (1.0, True)])

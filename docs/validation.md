@@ -124,10 +124,11 @@ Every validation reports three headline figures.
   `effect_probe` for a KEPT test backed by real damage confirmation. The **differential**
   leg contributes only when a guarded twin is inferable (a server-layer control or a
   synthesised boundary shim). The **consensus** leg re-judges each firing run
-  several times and passes only when more than half of the judge calls agree the
-  attack landed. A judge call that reached no verdict (it failed, or its answer
-  could not be read) counts on neither side; if none reached a verdict, the leg
-  fails.
+  several times and passes only when more than half of all judge calls reached a
+  verdict and more than half of those agree the attack landed; a call that reached
+  no verdict (it failed, its answer could not be read, the judge was not confident
+  enough, a predicate was inconclusive, or the effect probe errored) counts on
+  neither side.
 
   **The build leg passes only on a real pass.** On the reference target, `validate`
   records fixtures and runs the committed test offline; the leg passes only when pytest
