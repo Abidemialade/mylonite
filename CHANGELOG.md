@@ -91,10 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `PytestOutcome.INTERNAL_ERROR`, `detail` now also carries a bounded,
   redacted tail of the child's own output (the same tail `failure_tail`
   already computed), so a report or an assertion message shows the cause
-  without an extra call. `PytestRunResult` gains no new field. Investigated,
-  but did not confirm, a root cause for the intermittent Windows/xdist
-  collection error this is meant to make diagnosable the next time it fires;
-  see the investigation notes on `fix/runner-collection-detail`.
+  without an extra call. `PytestRunResult` gains no new field.
 
 ### Added
 
