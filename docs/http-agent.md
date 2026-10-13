@@ -113,9 +113,14 @@ mylonite gate --target-file my-agent.yaml --authorize my-agent
   the highest-value REST finding), and endpoint-boundary enforcement (an explicit
   allowlist of upstream endpoints/actions the wrapper may invoke, since there is no
   tool boundary to attach one to).
-- **Server-side differential.** To toggle a *server-side* guard instead, declare
-  `vulnerable_launch` / `control_env` (see [Concepts](concepts.md)) so Mylonite can
-  run the endpoint with its guard on and off.
+- **No server-side differential here.** `control_env` toggles a guard by
+  relaunching the target process with different env vars, so it only makes sense
+  for a target Mylonite actually launches or holds an MCP session with
+  (`stdio`/`sse`/`http`) — a `rest` target file is refused if it declares one.
+  Mylonite only sends a `rest` endpoint HTTP requests; it never starts or
+  restarts it. To toggle a real server-side guard, point Mylonite at the
+  agent's MCP server instead (see [Concepts](concepts.md)); on a `rest` target,
+  use the input-framing differential above (`--prove-input-control`) instead.
 - **Scope.** This is still AI-layer testing — it exercises the agent's prompt
   handling, not the surrounding HTTP service. Traditional endpoint security belongs
   to DAST tools.
