@@ -139,6 +139,8 @@ than just the bare exit code. Any secret-shaped string in that excerpt is masked
 way the rest of the CLI's output is. For a collection error or an internal pytest error,
 the run result's own detail carries the same excerpt, so any caller of the runner sees
 the cause too.
+The build run is confined to the test's own folder: pytest reads no conftest or
+settings from the folders above it.
 
 With `--iterations 1` the flakiness leg has nothing to compare, because one run per build
 gives a rate of 0% or 100% by construction. The panel then shows that leg as
