@@ -77,6 +77,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its verdict. It writes `captures.jsonl` and a `spend.json` with calls by
   role and token totals, and stops at the `--max-llm-requests` ceiling.
 
+- **Captures become labelled benchmark cases.**
+  `python -m verification.judge_bench.build_cases` sorts captures into
+  `llm_routed`, `shadow` and `shadow_stripped` families, keeps only strong
+  deterministic evidence for `shadow`, flags hard negatives, merges review
+  labels with `--labels`, and applies the per-seed cap.
+
 ## [0.12.1] - 2026-10-10
 
 ### Fixed
