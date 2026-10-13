@@ -71,6 +71,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   intervals, and says "insufficient evidence" when the cases can't support a
   claim. See
   [Measuring the LLM judge itself](docs/verification.md#measuring-the-llm-judge-itself).
+- **Judge cases can be collected from real scans.**
+  `python -m verification.judge_bench.collect` runs `mylonite scan` on each
+  target and records every attempt the judge saw, exactly as it saw it, with
+  its verdict. It writes `captures.jsonl` and a `spend.json` with calls by
+  role and token totals, and stops at the `--max-llm-requests` ceiling.
 
 ## [0.12.1] - 2026-10-10
 
