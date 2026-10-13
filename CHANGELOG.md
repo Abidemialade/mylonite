@@ -9,12 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **A seed whose predicate is missing or unknown now reads NOT TESTED, not
-  resisted.** Nothing checks a seed's predicate name before a scan starts, so
-  a seed with no predicate, or a misspelt one, reached the judge, which could
-  not rule on it but still returned a plain negative. The attempt was recorded
-  as the target resisting. It is now recorded as no verdict, under
-  `MYL-NT-011`, with no LLM call made, and its reason names the predicate. See
+- **An attempt whose seed names an unregistered predicate now reads NOT
+  TESTED when its tool calls were not recorded.** Nothing checks a seed's
+  predicate name before a scan starts. On an attempt with no recorded
+  tool-call outcome, such as one on a `rest` target, the judge could not rule
+  on a misspelt name but still returned a plain negative, so the attempt was
+  recorded as the target resisting. It is now recorded as no verdict, under
+  `MYL-NT-011`, with no LLM call made, and its reason names the predicate. On
+  an MCP target the recorded tool calls still decide the attempt, as before. A
+  payload with no `predicate` key is still rejected earlier as invalid
+  metadata (`MYL-NT-013`). `MYL-NT-011`'s text and fix now cover both of its
+  causes: no LLM judge configured, or a predicate that is not registered. See
   [Reading results](docs/reading-results.md#how-each-verdict-was-reached).
 
 - **`validate` no longer counts an attempt nobody judged as the guard

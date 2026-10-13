@@ -168,11 +168,19 @@ never ran are not counted as decided, and any attempt where neither mechanism re
 verdict is listed separately as `reached no verdict`. The line reads persisted fields
 only, so `mylonite report <scan-dir>` shows the same breakdown offline.
 
-A seed with no predicate, or one that names a predicate Mylonite doesn't have, can't be
-judged. Nothing checks the name before the scan starts, so the judge finds out per
-attempt. It makes no LLM call for that attempt, and the attempt reads `⚠ NO VERDICT`
-(NOT TESTED under [`MYL-NT-011`](reason-codes.md#myl-nt-011)), never RESISTED. Its
-`verdict_reason` says the predicate is missing or not registered.
+Nothing checks a seed's predicate name before the scan starts, so the judge finds out
+per attempt when a seed names a predicate Mylonite doesn't have:
+
+- On an attempt with no recorded tool-call outcome, such as one on a `rest` target,
+  the judge makes no LLM call and the attempt reads `⚠ NO VERDICT` (NOT TESTED under
+  [`MYL-NT-011`](reason-codes.md#myl-nt-011)). Its `verdict_reason` says the predicate
+  is not registered.
+- On an MCP target, the recorded tool calls still decide the attempt, as described in
+  [How an MCP attempt is decided](#how-an-mcp-attempt-is-decided). The unknown name
+  counts as a predicate that could not rule, so the attempt can still read resisted.
+
+A payload with no `predicate` key never reaches the judge. The scan rejects it as
+invalid metadata ([`MYL-NT-013`](reason-codes.md#myl-nt-013)).
 
 The LLM judge sees the request, the agent's final reply and each recorded tool call. For
 each call it is shown the arguments and the result (up to 800 characters). The arguments

@@ -41,7 +41,7 @@
   },
   "MYL-NT-011": {
     "category": "not-tested",
-    "summary": "The deterministic check was inconclusive and no LLM judge was configured."
+    "summary": "No mechanism ruled on the attempt: the deterministic check was inconclusive and no LLM judge was configured, or the seed's predicate is not registered."
   },
   "MYL-NT-012": {
     "category": "not-tested",

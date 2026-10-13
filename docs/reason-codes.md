@@ -93,9 +93,12 @@ The LLM judge answered, but its output could not be used.
 
 ## MYL-NT-011
 
-The deterministic check was inconclusive and no LLM judge was configured.
+No mechanism ruled on the attempt: the deterministic check was inconclusive and no LLM
+judge was configured, or the seed's predicate is not registered.
 
-**Fix:** Set a judge model, or accept this as an intentional predicate-only run.
+**Fix:** With no judge set, set a judge model or accept this as an intentional
+predicate-only run; with a judge set, check the seed's predicate name against the
+registered predicates.
 
 ## MYL-NT-012
 

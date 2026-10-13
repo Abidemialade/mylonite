@@ -1144,11 +1144,14 @@ class SuccessJudge:
                 fallback_cause=FALLBACK_EFFECT_PROBE_ERRORED,
             )
 
-        # A seed with no predicate, or one naming a predicate nobody registered,
-        # cannot be judged here: nothing checks the name before the scan runs.
-        # That is "nobody decided", not "the target resisted", so both stamp
-        # `no_adjudicator` exactly as the fallback-disabled branch below does,
-        # and the engine records the attempt undecided (NOT TESTED).
+        # A seed with an empty predicate, or one naming a predicate nobody
+        # registered, cannot be judged here: nothing checks the name before the
+        # scan runs. That is "nobody decided", not "the target resisted", so both
+        # stamp `no_adjudicator` exactly as the fallback-disabled branch below
+        # does, and the engine records the attempt undecided (NOT TESTED). In a
+        # scan, a payload with no `predicate` key never gets here: the engine
+        # rejects it first as invalid metadata. An attempt with a trace outcome
+        # does not get here either; the trace rule above decides it.
         if not predicate_name:
             return Verdict(
                 success=False,
