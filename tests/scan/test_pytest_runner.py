@@ -68,6 +68,7 @@ def test_collection_error(tmp_path: Path) -> None:
     assert result.passed is False
     assert result.collected is False
     assert result.exit_code == 2
+    assert "does_not_exist_xyz" in result.detail
 
 
 def test_syntax_error_is_collection_error(tmp_path: Path) -> None:
@@ -77,6 +78,12 @@ def test_syntax_error_is_collection_error(tmp_path: Path) -> None:
     assert result.passed is False
     assert result.collected is False
     assert result.exit_code == 2
+    # Diagnosability: a bare one-line classification ("collection error or
+    # interruption (exit 2)") says WHAT happened but never WHY. `detail` must
+    # also carry a bounded tail of the child's own output so the actual cause
+    # (here, a real SyntaxError) is visible without a caller separately
+    # calling `failure_tail` or digging through `stdout`/`stderr`.
+    assert "SyntaxError" in result.detail
 
 
 def test_no_tests_collected_is_not_collected(tmp_path: Path) -> None:
@@ -247,6 +254,9 @@ def test_internal_error_from_a_raising_hook(tmp_path: Path) -> None:
     tail = pytest_runner.failure_tail(result)
     assert "INTERNALERROR" in tail
     assert "boom-configure" in tail
+    # Diagnosability: `detail` itself must also carry the cause, not just a
+    # one-line "internal pytest error (exit 3)" classification.
+    assert "boom-configure" in result.detail
 
 
 def test_failure_tail_is_bounded_and_prioritises_diagnostic_lines() -> None:

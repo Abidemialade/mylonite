@@ -104,6 +104,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   offline and without a model call — the oracle's verdict path never runs.
   `tests/corpus/test_labelled_corpus.py` is the corpus that replays real
   scans through that verdict path. Wording only; no behaviour changed.
+- **A pytest run that fails to collect or crashes internally now says why.**
+  `run_test_file`'s `detail` used to stop at the exit code — "collection
+  error or interruption (exit 2)" — with the real cause (an import error, a
+  syntax error, a plugin raising in `pytest_configure`) left in `stdout`/
+  `stderr` for a caller to go dig out. For `PytestOutcome.COLLECTION_ERROR`
+  and `PytestOutcome.INTERNAL_ERROR`, `detail` now also carries a bounded,
+  redacted tail of the child's own output (the same tail `failure_tail`
+  already computed), so a report or an assertion message shows the cause
+  without an extra call. `PytestRunResult` gains no new field. Investigated,
+  but did not confirm, a root cause for the intermittent Windows/xdist
+  collection error this is meant to make diagnosable the next time it fires;
+  see the investigation notes on `fix/runner-collection-detail`.
 
 ### Added
 
