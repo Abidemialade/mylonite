@@ -1,4 +1,4 @@
-"""Measure the differential oracle's precision/recall on the offline corpus.
+"""Measure the seed catalogue's precision/recall on the offline twin corpus.
 
 Run from the repo root::
 
@@ -10,7 +10,10 @@ writes a JSON report. Requires the reference target::
 
     pip install -e ./reference_targets/mcp_kitchen_sink
 
-This turns "the oracle is reliable" into a measured number CI can track.
+This checks that the seed catalogue separates the vulnerable twin from the
+guarded one; it does not run the differential oracle's verdict path. See
+``tests/corpus/test_labelled_corpus.py`` for the corpus that does. This turns
+"the seed catalogue separates the twins" into a measured number CI can track.
 """
 
 from __future__ import annotations
@@ -35,7 +38,7 @@ def main() -> None:
 
     results, cm = run_corpus()
 
-    print("Differential-oracle precision/recall corpus (offline, no LLM)\n")
+    print("Twin-separation precision/recall corpus (offline, no LLM)\n")
     print(f"{'weakness':<10} {'variant':<11} {'expected':<10} {'detected':<10} {'ok':<3}")
     for r in results:
         print(

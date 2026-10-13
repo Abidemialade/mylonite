@@ -75,6 +75,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of model calls is unchanged. See
   [Reading results](docs/reading-results.md).
 
+- **The offline twin corpus no longer calls itself "the oracle".**
+  `scripts/measure_precision_recall.py`, its CI step and the
+  `mylonite.corpus` docstring described themselves as measuring the
+  differential oracle. They check that the seed catalogue's per-weakness
+  detector separates the vulnerable kitchen-sink twin from the guarded one,
+  offline and without a model call — the oracle's verdict path never runs.
+  `tests/corpus/test_labelled_corpus.py` is the corpus that replays real
+  scans through that verdict path. Wording only; no behaviour changed.
+
 ### Added
 
 - **A harness that measures the LLM judge against a fixed bar.**
