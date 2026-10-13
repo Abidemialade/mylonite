@@ -316,6 +316,7 @@ Layer 2 above mostly scores Mylonite's deterministic rules. On attacks the recor
 - **Replay.** Recorded judge calls replay with no API key, so the numbers can be recomputed from the same recordings.
 - **Collecting cases.** `python -m verification.judge_bench.collect` runs real `mylonite scan` commands and writes every attempt the judge saw, with its verdict, to `captures.jsonl`, plus the spend by role to `spend.json`. `--max-llm-requests` is required and caps the whole collection. Target files need `--authorize`, as they do for `scan`.
 - **Building cases.** `python -m verification.judge_bench.build_cases` turns captures into cases, one file per family. Attempts the LLM judge decided become `llm_routed` cases, labelled `undecidable` until review labels are merged with `--labels`. Attempts a deterministic rule decided on strong evidence become `shadow` cases, and a `shadow_stripped` copy with the trace removed shows how the judge does without it. `--agentdojo` and `--injecagent` add the recorded datasets.
+- **Synthetic variants.** `python -m verification.judge_bench.variants` derives `synthetic` cases from landed ones by moving evidence the case already holds: only the tool-call arguments left, the evidence pushed past the 300- and 1,500-character excerpts the judge reads, or the reply repeated as a JSON block. No new text is written, and synthetic cases never count toward the bar.
 
 There are no results yet. They will be published here, with their intervals and the cases behind them.
 
