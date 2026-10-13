@@ -197,20 +197,13 @@ def test_rest_transport_weakness_already_input_frame_sentinel() -> None:
     assert plan.control_weakness == INPUT_FRAME_CONTROL
 
 
-def test_rest_transport_server_layer_takes_priority_over_input_frame() -> None:
-    """A rest target that ALSO declares control_env for this weakness gets the
-    (higher-fidelity) server-layer twin, not the input-framing one, even with
-    --prove-input-control set."""
-    spec = _spec(
-        transport="rest",
-        url=None,
-        request=_REST_REQUEST,
-        control_env={"W2": {"W2_GUARD": "off"}},
-    )
-    plan = plan_twins(spec, weakness="W2", fast=False, prove_input_control=True)
-    assert plan.guarded_is_server_layer is True
-    assert plan.raw == LaunchIntent(disable_controls=("W2",))
-    assert plan.guarded == LaunchIntent()
+# A rest target can no longer declare control_env at all -- TargetFile._check
+# now refuses it at load time, since Mylonite never launches a rest endpoint
+# and has no process to re-env (see
+# tests/mcp_plugin/test_target_file.py::test_target_file_rejects_a_control_env_on_a_rest_transport).
+# The "server-layer takes priority over input-frame" test that used to live
+# here constructed exactly that now-invalid spec (rest + control_env), so it
+# is removed rather than updated.
 
 
 def test_fast_and_prove_input_control_on_rest_notes_the_override() -> None:

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `rest` target declaring `control_env` now fails to load, instead of
+  silently doing nothing.** `control_env` toggles a guard by relaunching the
+  target process with different env vars, but Mylonite never launches a
+  `rest` endpoint — it only sends it HTTP requests — so the toggle had no
+  process to act on. The field is now refused at load time, the same way
+  `timeout_s`, `seed_tool_ceiling`, `calibration` and `effect_probe` already
+  are on a `rest` target, naming the field and pointing at
+  `--prove-input-control` as the black-box way to test an input defence
+  instead. `docs/http-agent.md` no longer says `control_env` works there.
+
 ### Added
 
 - **A harness that measures the LLM judge against a fixed bar.**

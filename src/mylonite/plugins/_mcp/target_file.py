@@ -74,6 +74,18 @@ _REST_EFFECT_PROBE_MESSAGE: Final = (
     "instead (transport: stdio, sse or http), where effect_probe works."
 )
 
+#: Why a ``transport: rest`` target can't declare ``control_env``, and what to
+#: do instead. Shared by the loader and its tests.
+_REST_CONTROL_ENV_MESSAGE: Final = (
+    "control_env is not supported on a rest target. Mylonite never launches a "
+    "rest endpoint -- it only sends it HTTP requests -- so there is no process "
+    "to restart with the guard toggled off. Remove the control_env block: a "
+    "rest target gets the black-box differential instead (--prove-input-control; "
+    "see docs/http-agent.md). To toggle a real server-side guard, scan the "
+    "agent's MCP server instead (transport: stdio, sse or http), where "
+    "control_env works."
+)
+
 
 class TargetFile(BaseModel):
     """Declarative description of a custom MCP stdio target."""
@@ -114,6 +126,8 @@ class TargetFile(BaseModel):
     # this server (vulnerable_launch) and/or per-control env toggles that disable
     # a single server-layer guard (control_env). Optional; omitting both keeps
     # today's behaviour. See docs/quarry.md and SECURITY.md (--authorize gate).
+    # MCP transports (stdio/sse/http) only -- control_env is refused on a rest
+    # target in _check below, which has no launched process to re-env.
     vulnerable_launch: LaunchOverride | None = None
     control_env: dict[str, dict[str, str]] = {}
     # transport: rest — the plain HTTP agent request shape (endpoint + body template).
@@ -190,6 +204,8 @@ class TargetFile(BaseModel):
                 # It used to be dropped without a word, and validate then told
                 # the user to declare one: refuse it, before any LLM call.
                 raise ValueError(_REST_EFFECT_PROBE_MESSAGE)
+            if self.control_env:
+                raise ValueError(_REST_CONTROL_ENV_MESSAGE)
         else:  # sse | http — remote MCP
             if not self.url:
                 raise ValueError(f"transport {self.transport!r} requires a 'url'")

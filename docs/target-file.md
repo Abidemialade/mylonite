@@ -442,6 +442,11 @@ print the list in their run plan, next to the consequential tools the run may dr
   differential against *your own* unguarded build and per-control env toggles, instead of
   the adapter-boundary shim. Use these when you can launch genuinely (un)guarded variants
   of the server. See [Concepts](concepts.md) and [Security](security.md).
+  `control_env` is not available on a `transport: rest` target: declaring one there is
+  refused on load, with exit `2`, before any model call — Mylonite never launches a
+  `rest` endpoint, only sends it HTTP requests, so there is no process to restart with
+  the guard toggled off. Test an input defence on a `rest` target with
+  `--prove-input-control` instead (see [Test a plain HTTP agent](http-agent.md)).
 - **`framework`** — optional, free-form (e.g. `langchain`, `crewai`, `llamaindex`).
   Entirely a labelling hint: it names your agent framework in a structural
   recommendation's code sketch alongside the language Mylonite already infers from

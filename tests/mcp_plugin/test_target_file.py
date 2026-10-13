@@ -878,6 +878,66 @@ def test_a_rest_target_without_an_effect_probe_still_loads(tmp_path: Path) -> No
     assert load_target_file(target).effect_probe is None
 
 
+def _rest_with_control_env_yaml() -> str:
+    return (
+        "family: my-agent\n"
+        "transport: rest\n"
+        "weakness_classes: [W2]\n"
+        "request:\n"
+        "  url: https://agent.example/chat\n"
+        '  body: \'{"prompt": "{prompt}"}\'\n'
+        "control_env:\n"
+        "  W2:\n"
+        "    DISABLE_GUARD: '1'\n"
+    )
+
+
+def test_target_file_rejects_a_control_env_on_a_rest_transport() -> None:
+    """A rest target is a plain HTTP endpoint Mylonite never launches, so there
+    is no process to toggle a server-layer guard on. control_env relies on
+    re-launching the target with different env vars (see LaunchOverride /
+    control_env on the stdio/sse/http path), which has no meaning here."""
+    with pytest.raises(ValueError, match="control_env is not supported on a rest target") as info:
+        _tf(
+            transport="rest",
+            command="",
+            request=RequestSpec(url="https://agent.example/chat", body='{"prompt": "{prompt}"}'),
+            control_env={"W2": {"DISABLE_GUARD": "1"}},
+        )
+    message = str(info.value)
+    assert "black-box" in message or "black box" in message
+
+
+def test_load_target_file_rejects_a_control_env_on_a_rest_transport(tmp_path: Path) -> None:
+    target = tmp_path / "agent.yaml"
+    target.write_text(_rest_with_control_env_yaml(), encoding="utf-8")
+    with pytest.raises(ValueError, match="control_env is not supported on a rest target"):
+        load_target_file(target)
+
+
+def test_a_rest_target_without_control_env_still_loads(tmp_path: Path) -> None:
+    target = tmp_path / "agent.yaml"
+    target.write_text(_rest_with_control_env_yaml().split("control_env:")[0], encoding="utf-8")
+    assert load_target_file(target).control_env == {}
+
+
+@pytest.mark.parametrize("transport", ["stdio", "sse"])
+def test_stdio_and_sse_targets_with_control_env_still_load(transport: str) -> None:
+    """control_env is rejected only on a rest target -- stdio/sse (and http)
+    targets are real launched/addressable MCP servers, so re-launching them
+    with the toggled env still makes sense."""
+    if transport == "stdio":
+        tf = _tf(control_env={"W2": {"DISABLE_GUARD": "1"}})
+    else:
+        tf = _tf(
+            transport="sse",
+            command="",
+            url="https://mcp.example/sse",
+            control_env={"W2": {"DISABLE_GUARD": "1"}},
+        )
+    assert tf.control_env == {"W2": {"DISABLE_GUARD": "1"}}
+
+
 # --- seed_tool_ceiling -------------------------------------------------------
 
 
