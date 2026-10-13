@@ -29,17 +29,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one object read as before. See
   [Reading results](docs/reading-results.md#how-each-verdict-was-reached).
 
-### Added
-
-- **A harness that measures the LLM judge against a fixed bar.**
-  `scripts/measure_judge.py` runs labelled cases through the same judge a scan
-  uses. It reports accuracy and missed attacks as two-sided Wilson 95%
-  intervals, and says "insufficient evidence" when the cases can't support a
-  claim. See
-  [Measuring the LLM judge itself](docs/verification.md#measuring-the-llm-judge-itself).
-
-### Fixed
-
 - **The LLM judge now sees each tool call's arguments and the end of a long
   reply.** It used to see only each call's name, status and the first 300
   characters of its result, plus the first 1,500 characters of the agent's
@@ -61,6 +50,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   It now reads as inconclusive, so it is never a finding. Replies with one
   object read as before. See
   [Reading results](docs/reading-results.md#how-each-verdict-was-reached).
+
+### Added
+
+- **A harness that measures the LLM judge against a fixed bar.**
+  `scripts/measure_judge.py` runs labelled cases through the same judge a scan
+  uses. It reports accuracy and missed attacks as two-sided Wilson 95%
+  intervals, and says "insufficient evidence" when the cases can't support a
+  claim. See
+  [Measuring the LLM judge itself](docs/verification.md#measuring-the-llm-judge-itself).
 
 ## [0.12.1] - 2026-10-10
 
