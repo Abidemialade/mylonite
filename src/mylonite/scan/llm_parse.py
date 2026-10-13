@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from typing import Any
 
 from json_repair import repair_json
@@ -33,16 +34,12 @@ def _extract_text(response: Any) -> str:
         return ""
 
 
-def _first_balanced_object(text: str) -> str | None:
-    """Return the first balanced ``{...}`` span in ``text``, or ``None``.
+def _balanced_span(text: str, start_from: int = 0) -> tuple[int, int] | None:
+    """``(start, end)`` of the first balanced ``{...}`` at or after ``start_from``.
 
-    Brace depth is tracked with awareness of JSON string literals so that
-    braces *inside* a string value (``{"reason": "use } carefully"}``) do not
-    miscount. This is what makes extraction robust to surrounding prose and to
-    code fences (the leading ```` ```json ```` and trailing ```` ``` ```` are
-    simply skipped over before/after the object).
+    ``end`` is exclusive. ``None`` when no ``{`` follows or it never closes.
     """
-    start = text.find("{")
+    start = text.find("{", start_from)
     if start == -1:
         return None
     depth = 0
@@ -65,8 +62,55 @@ def _first_balanced_object(text: str) -> str | None:
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                return text[start : i + 1]
+                return start, i + 1
     return None
+
+
+def _first_balanced_object(text: str) -> str | None:
+    """Return the first balanced ``{...}`` span in ``text``, or ``None``.
+
+    Brace depth is tracked with awareness of JSON string literals so that
+    braces *inside* a string value (``{"reason": "use } carefully"}``) do not
+    miscount. This is what makes extraction robust to surrounding prose and to
+    code fences (the leading ```` ```json ```` and trailing ```` ``` ```` are
+    simply skipped over before/after the object).
+    """
+    span = _balanced_span(text)
+    if span is None:
+        return None
+    return text[span[0] : span[1]]
+
+
+def _parse_object(candidate: str) -> dict[str, Any] | None:
+    """Strict ``json.loads`` then the guarded repair pass; ``None`` unless a dict."""
+    try:
+        parsed: Any = json.loads(candidate)
+    except json.JSONDecodeError:
+        parsed = _try_repair(candidate)
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _has_keys(candidate: str, expected: set[str]) -> bool:
+    """True when ``candidate`` parses to an object carrying every ``expected`` key."""
+    parsed = _parse_object(candidate)
+    return parsed is not None and expected.issubset(parsed)
+
+
+def _count_objects_with_keys(text: str, expected_keys: Iterable[str]) -> int:
+    """How many top-level balanced objects in ``text`` carry every expected key.
+
+    Objects nested inside another object are not counted separately, and braces
+    inside string literals are ignored. More than one means the answer is
+    ambiguous: picking the first could pick an object quoted from the input.
+    """
+    expected = set(expected_keys)
+    count = 0
+    pos = 0
+    while (span := _balanced_span(text, pos)) is not None:
+        if _has_keys(text[span[0] : span[1]], expected):
+            count += 1
+        pos = span[1]
+    return count
 
 
 def _extract_json_object(text: str) -> str | None:
@@ -118,36 +162,49 @@ def _tool_call_arguments(response: Any) -> str | None:
     return None
 
 
-def _raw_json_text(response: Any) -> str:
+def _raw_json_text(response: Any, expected_keys: Iterable[str] | None = None) -> str:
     """The text to extract JSON from: ``content`` if it has an object, else tool-call args.
 
     Unifies the content path and the JSON-in-tool_call path so BOTH flow through
     the same balanced-object extraction and truncation check below — crucial so a
     truncated tool-call argument is never handed to json-repair.
+
+    When the caller passes ``expected_keys`` (the keys its schema requires), a
+    tool-call (structured) answer whose object carries every one of them wins,
+    even if ``content`` also holds a brace: prose must not shadow the structured
+    answer. Without ``expected_keys`` the choice is unchanged.
     """
     content = _extract_text(response)
+    tool_args = _tool_call_arguments(response)
+    if expected_keys is not None and tool_args is not None:
+        obj = _extract_json_object(tool_args)
+        if obj is not None and _has_keys(obj, set(expected_keys)):
+            return tool_args
     if "{" in content:
         return content
-    return _tool_call_arguments(response) or content
+    return tool_args or content
 
 
-def _extract_json_candidate(response: Any) -> str | None:
+def _extract_json_candidate(
+    response: Any, expected_keys: Iterable[str] | None = None
+) -> str | None:
     """Best-effort balanced JSON object from a response (content or tool call).
 
     Returns ``None`` when no balanced ``{...}`` is recoverable — including the
     truncated case, from either source (see ``_looks_truncated``).
+    ``expected_keys`` steers the source choice (see ``_raw_json_text``).
     """
-    return _extract_json_object(_raw_json_text(response))
+    return _extract_json_object(_raw_json_text(response, expected_keys))
 
 
-def _looks_truncated(response: Any) -> bool:
+def _looks_truncated(response: Any, expected_keys: Iterable[str] | None = None) -> bool:
     """True when the JSON-bearing text opened a ``{`` that never closed.
 
     Checks whichever source carried the JSON (content OR tool call), so the
     fallback detail is honest and we never hand truncated text to ``json-repair``
     (which would fabricate the missing close and a plausible-but-wrong value).
     """
-    text = _raw_json_text(response)
+    text = _raw_json_text(response, expected_keys)
     return "{" in text and _first_balanced_object(text) is None
 
 

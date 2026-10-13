@@ -1019,3 +1019,102 @@ def test_a_success_keeps_the_last_failure_category() -> None:
     counter.mark_success()
     assert counter.consecutive_failures == 0
     assert counter.last_failure_category == "rate_limit"
+
+
+# --- the answer is read from the structured reply, never a guessed object ----
+
+_VERDICT_KEYS = {"success", "confidence", "reason"}
+_VERDICT_FALLBACK = {"success": False, "confidence": 0.0, "reason": ""}
+
+
+def _verdict_call(stub: Any) -> dict[str, Any]:
+    return litellm_json_call(
+        model="stub",
+        prompt="p",
+        expected_keys=_VERDICT_KEYS,
+        fallback=_VERDICT_FALLBACK,
+        caller="test",
+        completion_fn=stub,
+    )
+
+
+def test_tool_call_answer_wins_over_content_with_a_brace() -> None:
+    """Prose content holding a brace must not shadow the structured answer."""
+
+    def stub(**_: Any) -> SimpleNamespace:
+        return _tool_call_response(
+            '{"success": true, "confidence": 0.9, "reason": "dummy-structured"}',
+            content="Some prose with a {placeholder} in it.",
+        )
+
+    result = _verdict_call(stub)
+    cause, _ = pop_fallback_cause(result)
+    assert cause is None
+    assert result == {"success": True, "confidence": 0.9, "reason": "dummy-structured"}
+
+
+def test_tool_call_answer_wins_over_a_schema_shaped_content_object() -> None:
+    def stub(**_: Any) -> SimpleNamespace:
+        return _tool_call_response(
+            '{"success": true, "confidence": 0.9, "reason": "dummy-structured"}',
+            content='{"success": false, "confidence": 0.2, "reason": "dummy-content"}',
+        )
+
+    result = _verdict_call(stub)
+    cause, _ = pop_fallback_cause(result)
+    assert cause is None
+    assert result["reason"] == "dummy-structured"
+
+
+def test_two_schema_shaped_objects_give_the_unparseable_fallback() -> None:
+    """More than one object with every expected key is ambiguous: no verdict."""
+
+    def stub(**_: Any) -> SimpleNamespace:
+        return _stub_response(
+            'First {"success": false, "confidence": 0.2, "reason": "dummy-one"} '
+            'then {"success": true, "confidence": 0.9, "reason": "dummy-two"}'
+        )
+
+    result = _verdict_call(stub)
+    cause, _ = pop_fallback_cause(result)
+    assert cause == FALLBACK_UNPARSEABLE
+    assert result == _VERDICT_FALLBACK
+
+
+def test_single_schema_object_with_prose_is_unchanged() -> None:
+    def stub(**_: Any) -> SimpleNamespace:
+        return _stub_response(
+            'Here it is:\n```json\n{"success": true, "confidence": 0.7, "reason": "dummy"}\n```'
+        )
+
+    result = _verdict_call(stub)
+    cause, _ = pop_fallback_cause(result)
+    assert cause is None
+    assert result == {"success": True, "confidence": 0.7, "reason": "dummy"}
+
+
+def test_one_schema_object_beside_an_unrelated_object_is_unchanged() -> None:
+    """Only objects carrying every expected key count toward ambiguity."""
+
+    def stub(**_: Any) -> SimpleNamespace:
+        return _stub_response(
+            '{"success": true, "confidence": 0.7, "reason": "dummy"} and {"note": "x"}'
+        )
+
+    result = _verdict_call(stub)
+    cause, _ = pop_fallback_cause(result)
+    assert cause is None
+    assert result["reason"] == "dummy"
+
+
+def test_content_used_when_tool_call_lacks_expected_keys() -> None:
+    def stub(**_: Any) -> SimpleNamespace:
+        return _tool_call_response(
+            '{"other": 1}',
+            content='{"success": true, "confidence": 0.7, "reason": "dummy-content"}',
+        )
+
+    result = _verdict_call(stub)
+    cause, _ = pop_fallback_cause(result)
+    assert cause is None
+    assert result["reason"] == "dummy-content"
