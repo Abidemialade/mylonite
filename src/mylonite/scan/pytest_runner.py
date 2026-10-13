@@ -355,6 +355,16 @@ def run_test_file(
                 "addopts=",  # belt-and-suspenders: also drop `-c`'s own addopts
                 "--rootdir",
                 str(rootdir),
+                # Pin conftest discovery and the parent-directory walk to the
+                # test's own directory. Left to default, pytest takes the ini's
+                # directory as the cut-off; on Windows the temp path can come
+                # back in 8.3 short form (RUNNER~1) while the test path is long
+                # form, so no ancestor matches and pytest collects every parent
+                # up to the drive root -- including the shared temp directory,
+                # where another process's temp dir vanishing mid-scan raised
+                # FileNotFoundError as a collection error.
+                "--confcutdir",
+                str(rootdir),
                 "-q",
             ]
             if collect_only:

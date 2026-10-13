@@ -169,6 +169,30 @@ def test_missing_pytest_never_invokes_real_pytest_subprocess(
     assert calls == []
 
 
+def test_collection_never_walks_above_the_test_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The child run pins ``--confcutdir`` to the test's own directory, so
+    pytest never collects the parent directories -- a shared temp directory
+    among them, where another process deleting its own temp dir mid-scan
+    turned a passing test into a collection error."""
+    calls: list[list[str]] = []
+    real_run = pytest_runner.subprocess.run
+
+    def _spy_run(cmd: list[str], **kwargs: object) -> object:
+        calls.append(cmd)
+        return real_run(cmd, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(pytest_runner.subprocess, "run", _spy_run)
+    f = _write(tmp_path, "test_ok.py", "def test_ok():\n    assert True\n")
+    result = run_test_file(f)
+    assert result.outcome is PytestOutcome.PASSED, result.detail
+    pytest_calls = [c for c in calls if "pytest" in c and str(f) in c]
+    assert len(pytest_calls) == 1
+    cmd = pytest_calls[0]
+    assert cmd[cmd.index("--confcutdir") + 1] == str(f.parent)
+
+
 def test_import_preflight_is_memoized(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """``run_test_file`` may be called once per emitted test, potentially many
     times per validation run — the cheap ``import pytest`` probe must only
