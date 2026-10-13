@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A seed whose predicate is missing or unknown now reads NOT TESTED, not
+  resisted.** Nothing checks a seed's predicate name before a scan starts, so
+  a seed with no predicate, or a misspelt one, reached the judge, which could
+  not rule on it but still returned a plain negative. The attempt was recorded
+  as the target resisting. It is now recorded as no verdict, under
+  `MYL-NT-011`, with no LLM call made, and its reason names the predicate. See
+  [Reading results](docs/reading-results.md#how-each-verdict-was-reached).
+
 - **The verification harness no longer counts an abstention as "the judge
   agreed the attack was resisted".** `score_transcript` built a `CaseResult`
   with `detected_exploited=False` for every transcript the judge actually
