@@ -572,6 +572,24 @@ async def test_llm_invalid_json_falls_back_to_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_llm_two_answer_objects_name_the_ambiguity() -> None:
+    """Two schema-shaped objects are valid JSON: the reason says ambiguous, not unparseable."""
+
+    async def stub(**_: Any) -> SimpleNamespace:
+        return _stub_response(
+            '{"success": false, "confidence": 0.2, "reason": "dummy-one"} '
+            '{"success": true, "confidence": 0.9, "reason": "dummy-two"}'
+        )
+
+    judge = SuccessJudge(model="stub", completion_fn=stub)
+    v = await judge.judge(_payload(), _response(tool_calls=("read_note",)))
+    assert v.success is False
+    assert v.fallback_cause == "unparseable_output"
+    assert "more than one answer object" in v.reason
+    assert "not parseable as JSON" not in v.reason
+
+
+@pytest.mark.asyncio
 async def test_llm_call_raised_reports_call_failure() -> None:
     """Issue #7: a raised provider call must read as a call failure, not a parse failure.
 

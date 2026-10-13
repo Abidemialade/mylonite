@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are on a `rest` target, naming the field and pointing at
   `--prove-input-control` as the black-box way to test an input defence
   instead. `docs/http-agent.md` no longer says `control_env` works there.
+- **The LLM judge's verdict is read from its structured answer, and an
+  ambiguous reply gets no verdict.** When a provider returned the answer as a
+  tool call and the reply's text held a brace, the text won and the structured
+  answer was ignored. Now the tool-call object is used whenever it carries the
+  required keys. A reply holding two or more objects with every required key
+  used to give the first one, which could be an object quoted from the
+  target's text. It now reads as inconclusive, so it is never a finding, and
+  the customiser falls back to the seed's own body the same way. Replies with
+  one object read as before. See
+  [Reading results](docs/reading-results.md#how-each-verdict-was-reached).
 
 ### Added
 
