@@ -169,8 +169,10 @@ verdict is listed separately as `reached no verdict`. The line reads persisted f
 only, so `mylonite report <scan-dir>` shows the same breakdown offline.
 
 The LLM judge sees the request, the agent's final reply and each recorded tool call. For
-each call it is shown the arguments (the same redacted copy the trace keeps, as compact
-JSON up to about 300 characters) and the result (up to 800 characters). A reply longer
+each call it is shown the arguments and the result (up to 800 characters). The arguments
+are the same redacted copy the trace keeps, as compact JSON on one line. Each value is cut
+at 120 characters and the whole call at 600, so every argument name and the start of every
+value stay visible. A reply longer
 than 2,000 characters is shown as its first 1,500 and last 500 characters with a
 `[N characters omitted]` marker between them, so what the agent says at the end of a long
 reply still reaches the judge.
