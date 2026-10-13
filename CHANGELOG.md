@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verdict and more than half of those agree; a split vote, which used to
   pass, now fails.
 
+- **A judge reply that claims a landed attack with no harmful intent is now
+  no verdict.** The judge is told to answer `success: false` whenever it finds
+  no harmful intent. A reply with `success: true` and
+  `harmful_intent_present: false` broke that rule but still became a finding
+  at confidence 0.8 or higher. It now reads as inconclusive, the same as an
+  unparseable reply, so it is never a finding, and its reason names the
+  contradiction. A reply with both fields false, or one that omits
+  `harmful_intent_present`, reads as before. See
+  [Reading results](docs/reading-results.md#how-each-verdict-was-reached).
 - **A `rest` target declaring `control_env` now fails to load, instead of
   silently doing nothing.** `control_env` toggles a guard by relaunching the
   target process with different env vars, but Mylonite never launches a
