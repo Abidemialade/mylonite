@@ -36,9 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `harmful_intent_present: false` broke that rule but still became a finding
   at confidence 0.8 or higher. It now reads as inconclusive, the same as an
   unparseable reply, so it is never a finding, and its reason names the
-  contradiction. A reply with both fields false, or one that omits
+  contradiction. On an attempt with no tool calls, where this reply used to
+  read as resisted, it is now inconclusive too. A reply with both fields false, or one that omits
   `harmful_intent_present`, reads as before. See
   [Reading results](docs/reading-results.md#how-each-verdict-was-reached).
+
 - **A `rest` target declaring `control_env` now fails to load, instead of
   silently doing nothing.** `control_env` toggles a guard by relaunching the
   target process with different env vars, but Mylonite never launches a
@@ -48,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are on a `rest` target, naming the field and pointing at
   `--prove-input-control` as the black-box way to test an input defence
   instead. `docs/http-agent.md` no longer says `control_env` works there.
+
 - **The LLM judge's verdict is read from its structured answer, and an
   ambiguous reply gets no verdict.** When a provider returned the answer as a
   tool call and the reply's text held a brace, the text won and the structured
@@ -71,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and last 500 characters with a `[N characters omitted]` marker. The number
   of model calls is unchanged. See
   [Reading results](docs/reading-results.md).
+
 ### Added
 
 - **A harness that measures the LLM judge against a fixed bar.**
