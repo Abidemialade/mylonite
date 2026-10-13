@@ -113,6 +113,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redacted tail of the child's own output (the same tail `failure_tail`
   already computed), so a report or an assertion message shows the cause
   without an extra call. `PytestRunResult` gains no new field.
+- **The request text the judge is shown now sits inside the same fence as
+  the target's response and trace.** `payload.body` — which, for a
+  customised seed, is model output shaped by the target's own fenced tool
+  descriptions — used to sit loose in the judge prompt, outside the
+  delimiters that mark the rest of the target-influenced material as
+  untrusted data. It is now wrapped in the same per-call fence tag. See
+  [Reading results](docs/reading-results.md).
 
 ### Added
 
