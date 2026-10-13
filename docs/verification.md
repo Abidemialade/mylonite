@@ -314,6 +314,7 @@ Layer 2 above mostly scores Mylonite's deterministic rules. On attacks the recor
   - more than 10% of landed cases got no verdict;
   - the run was cut short or hit a provider error.
 - **Replay.** Recorded judge calls replay with no API key, so the numbers can be recomputed from the same recordings.
+- **Collecting cases.** `python -m verification.judge_bench.collect` runs real `mylonite scan` commands and writes every attempt the judge saw, with its verdict, to `captures.jsonl`, plus the spend by role to `spend.json`. `--max-llm-requests` is required and caps the whole collection. Target files need `--authorize`, as they do for `scan`.
 
 There are no results yet. They will be published here, with their intervals and the cases behind them.
 
