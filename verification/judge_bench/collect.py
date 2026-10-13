@@ -331,7 +331,7 @@ class ScanRun:
 
 
 def run_scan(argv: Sequence[str], log_path: Path) -> int:
-    """Run ``mylonite <argv>`` in-process; write its output to ``log_path``."""
+    """Run the Mylonite CLI with ``argv`` in-process; write its output to ``log_path``."""
     from typer.testing import CliRunner
 
     from mylonite.cli import app
