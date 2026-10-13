@@ -2072,7 +2072,12 @@ class DifferentialValidator(ValidatorBase):
             test_path.write_text(test.source, encoding="utf-8")
             result = run_test_file(test_path, collect_only=True)
         collected = result.outcome is PytestOutcome.COLLECTED
+        # `result.detail` already carries this same tail for COLLECTION_ERROR /
+        # INTERNAL_ERROR (see `run_test_file`); only append it again when it
+        # isn't already in there, so the excerpt doesn't show twice.
         tail = "" if collected else failure_tail(result)
+        if tail and tail in result.detail:
+            tail = ""
         return ValidationOutcome(
             stage="build",
             passed=collected,
@@ -2168,7 +2173,11 @@ class DifferentialValidator(ValidatorBase):
 
         # 4. Run the ON-DISK committed test offline — FULL pass required (exit 0).
         result = run_test_file(test_path)
+        # See the matching comment in `_collect_only_outcome`: don't repeat a
+        # tail `result.detail` already carries.
         tail = "" if result.passed else failure_tail(result)
+        if tail and tail in result.detail:
+            tail = ""
         return ValidationOutcome(
             stage="build",
             passed=result.passed,

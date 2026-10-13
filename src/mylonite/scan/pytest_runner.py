@@ -127,7 +127,13 @@ class PytestRunResult:
             pytest was never invoked.
         stderr: Decoded child stderr (UTF-8, ``errors="replace"``); empty when
             pytest was never invoked.
-        detail: One-line human-readable summary of the outcome.
+        detail: Human-readable summary of the outcome. Usually one line; for
+            :attr:`PytestOutcome.COLLECTION_ERROR` and
+            :attr:`PytestOutcome.INTERNAL_ERROR` it also carries a bounded,
+            redacted tail of the child's output (see :func:`failure_tail`) on
+            a second line, so a collection/internal failure is diagnosable
+            from ``detail`` alone without a caller having to separately call
+            :func:`failure_tail` or dig through ``stdout``/``stderr``.
     """
 
     outcome: PytestOutcome
@@ -392,13 +398,24 @@ def run_test_file(
     outcome, detail = _classify(
         completed.returncode, stdout=completed.stdout or "", collect_only=collect_only
     )
-    return PytestRunResult(
+    result = PytestRunResult(
         outcome=outcome,
         exit_code=completed.returncode,
         stdout=completed.stdout or "",
         stderr=completed.stderr or "",
         detail=detail,
     )
+    if outcome in (PytestOutcome.COLLECTION_ERROR, PytestOutcome.INTERNAL_ERROR):
+        tail = failure_tail(result)
+        if tail:
+            result = PytestRunResult(
+                outcome=result.outcome,
+                exit_code=result.exit_code,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                detail=f"{detail}\n{tail}",
+            )
+    return result
 
 
 def _coerce_stream(stream: str | bytes | None) -> str:
