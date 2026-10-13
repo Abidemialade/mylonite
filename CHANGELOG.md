@@ -102,6 +102,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   excerpt, and the reply repeated as a JSON block. They keep the source
   label and never count toward the bar.
 
+- **A labelling kit for the judge benchmark.**
+  `python -m verification.judge_bench.labels` exports blinded review packets
+  with no verdict in them, draws a stratified 20-case gold set with a fixed
+  seed, and merges two reviewers' labels with the maintainer's into
+  `labels.jsonl`, with Cohen's kappa and each reviewer's gold-set score.
+
 ## [0.12.1] - 2026-10-10
 
 ### Fixed
