@@ -9,8 +9,9 @@ Each scan is the real ``mylonite scan`` command, run in-process, so the target,
 its authorization, the attack modules and the request ceiling behave exactly as
 they do on the command line. The only difference is the judge: while a scan is
 assembled, :class:`mylonite.scan.judge.SuccessJudge` is swapped for a recording
-subclass. It calls the real ``judge()`` unchanged and appends what it was given
-and what it returned to ``captures.jsonl``. Nothing under ``src/`` changes.
+subclass. It calls the real ``judge()`` unchanged and appends what it was given,
+what it returned, and each LLM call the judge made (messages and raw reply) to
+``captures.jsonl``. Nothing under ``src/`` changes.
 
 Outputs in ``--out``:
 
@@ -35,6 +36,7 @@ Exit codes: 0 every scan ran; 1 usage error or a scan that could not run;
 from __future__ import annotations
 
 import argparse
+import contextvars
 import json
 import sys
 from collections.abc import Iterable, Iterator, Sequence
@@ -86,6 +88,9 @@ class Capture(BaseModel):
     payload: dict[str, Any]
     response: dict[str, Any]
     verdict: dict[str, Any]
+    #: Every LLM call the judge made on this attempt: ``{messages, raw_content,
+    #: model}``. Empty when a deterministic rule decided.
+    judge_calls: list[dict[str, Any]] = []
     model: str
     mylonite_version: str
 
@@ -108,7 +113,14 @@ class CaptureSink:
     context: ScanContext | None = None
     _seq: dict[str, int] = field(default_factory=dict)
 
-    def record(self, model: str, payload: Payload, response: AdapterResponse, verdict: Any) -> None:
+    def record(
+        self,
+        model: str,
+        payload: Payload,
+        response: AdapterResponse,
+        verdict: Any,
+        judge_calls: list[dict[str, Any]] | None = None,
+    ) -> None:
         ctx = self.context
         if ctx is None:
             raise RuntimeError("a judge ran outside a collection scan")
@@ -127,6 +139,7 @@ class CaptureSink:
                 payload=payload.model_dump(mode="json"),
                 response=response.model_dump(mode="json"),
                 verdict=verdict_record(verdict),
+                judge_calls=list(judge_calls or []),
                 model=model,
                 mylonite_version=self.mylonite_version,
             )
@@ -163,14 +176,72 @@ def verdict_record(verdict: Any) -> dict[str, Any]:
     return out
 
 
+#: The judge calls made inside the current ``RecordingJudge.judge`` call. A
+#: context variable, so concurrent attempts (each its own asyncio task) never
+#: see each other's calls.
+_JUDGE_CALLS: contextvars.ContextVar[list[dict[str, Any]] | None] = contextvars.ContextVar(
+    "judge_bench_judge_calls", default=None
+)
+
+
+def _raw_content(reply: Any) -> str | None:
+    try:
+        content = reply.choices[0].message.content
+    except (AttributeError, IndexError, KeyError, TypeError):
+        return None
+    return None if content is None else str(content)
+
+
+def _jsonable_messages(messages: Any) -> Any:
+    try:
+        return json.loads(json.dumps(messages, default=str))
+    except (TypeError, ValueError):
+        return str(messages)
+
+
 def recording_judge_class(sink: CaptureSink) -> type[Any]:
-    """A ``SuccessJudge`` subclass that records every call into ``sink``."""
+    """A ``SuccessJudge`` subclass that records every call into ``sink``.
+
+    Its completion function wraps the one the scan passed (or, when that is
+    ``None``, ``litellm.acompletion``, resolved at call time exactly as the
+    chokepoint resolves it) and records each call's messages, raw reply text
+    and model. The reply itself is returned unchanged.
+    """
     from mylonite.scan.judge import SuccessJudge
 
     class RecordingJudge(SuccessJudge):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            inner = self._completion_fn
+
+            async def recording_completion(**call_kwargs: Any) -> Any:
+                fn = inner
+                if fn is None:
+                    import litellm
+
+                    fn = litellm.acompletion
+                entry: dict[str, Any] = {
+                    "messages": _jsonable_messages(call_kwargs.get("messages")),
+                    "raw_content": None,
+                    "model": str(call_kwargs.get("model", "")),
+                }
+                calls = _JUDGE_CALLS.get()
+                if calls is not None:
+                    calls.append(entry)
+                reply = await fn(**call_kwargs)
+                entry["raw_content"] = _raw_content(reply)
+                return reply
+
+            self._completion_fn = recording_completion
+
         async def judge(self, payload: Payload, response: AdapterResponse) -> Any:
-            verdict = await super().judge(payload, response)
-            sink.record(self._model, payload, response, verdict)
+            calls: list[dict[str, Any]] = []
+            token = _JUDGE_CALLS.set(calls)
+            try:
+                verdict = await super().judge(payload, response)
+            finally:
+                _JUDGE_CALLS.reset(token)
+            sink.record(self._model, payload, response, verdict, calls)
             return verdict
 
     return RecordingJudge
