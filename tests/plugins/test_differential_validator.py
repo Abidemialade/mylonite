@@ -734,6 +734,19 @@ def test_consensus_leg_fails_one_agreeing_of_three() -> None:
     assert _consensus_leg([_agree(), _no_verdict(), _no_verdict()]).passed is False
 
 
+@pytest.mark.parametrize(
+    "verdicts",
+    [
+        pytest.param([_agree(), _no_verdict()], id="1-of-2"),
+        pytest.param([_agree(), _agree(), _no_verdict(), _no_verdict()], id="2-of-4"),
+    ],
+)
+def test_consensus_leg_fails_when_exactly_half_reached_a_verdict(verdicts: list[Verdict]) -> None:
+    """Exactly half the calls reaching a verdict is not more than half: the
+    quorum is missed even though every decided call agrees."""
+    assert _consensus_leg(verdicts).passed is False
+
+
 def test_consensus_leg_flips_to_pass_when_no_verdict_calls_stop_counting_against() -> None:
     """Two agree, one disagrees, two reach no verdict. Counting the no-verdict
     calls as disagreement read 2/5 and failed the leg; skipping them reads 2/3
