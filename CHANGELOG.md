@@ -71,16 +71,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and last 500 characters with a `[N characters omitted]` marker. The number
   of model calls is unchanged. See
   [Reading results](docs/reading-results.md).
-- **The LLM judge's verdict is read from its structured answer, never a
-  guessed object.** When a provider returned the answer as a tool call and the
-  reply's text held a brace, the text won and the structured answer was
-  ignored. Now the tool-call object is used whenever it carries the required
-  keys. A reply holding two or more objects with every required key used to
-  give the first one, which could be an object quoted from the target's text.
-  It now reads as inconclusive, so it is never a finding. Replies with one
-  object read as before. See
-  [Reading results](docs/reading-results.md#how-each-verdict-was-reached).
-
 ### Added
 
 - **A harness that measures the LLM judge against a fixed bar.**
