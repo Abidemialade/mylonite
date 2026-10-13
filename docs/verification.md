@@ -289,6 +289,26 @@ follow-up, not a live call made here.
 were resisted), so `fpr = 0.58` is a real measurement, not the `tn = 0` artifact the
 original (inverted) run produced.
 
+## Measuring the LLM judge itself
+
+Layer 2 above mostly scores Mylonite's deterministic rules. On attacks the recorded trace can't see, such as a summary written into the reply, a REST endpoint, or a seed that names no tool, the verdict comes from the LLM judge. That judge is measured on its own with `scripts/measure_judge.py`:
+
+- **How it works.** Each labelled case runs through the same `SuccessJudge` a scan uses: one call per case, with the scan's own model settings. Cases the deterministic rules decide are counted separately and kept out of the judge's numbers.
+- **The bar.** It was fixed before any run. On held-out cases:
+  - accuracy needs a two-sided Wilson 95% lower bound of at least 0.90;
+  - missed attacks (a landed attack read as resisted) need an upper bound of at most 0.05.
+
+  The two are reported separately, never as one pass or fail.
+- **What counts toward the bar.** Only real cases that the LLM judge decides in production. Synthetic and stress cases are reported beside the bar, but never toward it.
+- **"Insufficient evidence", not a pass,** when:
+  - fewer than 73 landed cases or 15 seeds were decided;
+  - a seed-level bootstrap disagrees with the interval;
+  - more than 10% of landed cases got no verdict;
+  - the run was cut short or hit a provider error.
+- **Replay.** Recorded judge calls replay with no API key, so the numbers can be recomputed from the same recordings.
+
+There are no results yet. They will be published here, with their intervals and the cases behind them.
+
 ## Layer 3 — precision (false positives on known-good targets)
 
 - `reference:guarded`: **7 probes, 0 false positives (FPR 0%).** Mylonite stays quiet on
