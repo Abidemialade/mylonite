@@ -983,6 +983,11 @@ def pop_fallback_cause(result: dict[str, Any]) -> tuple[str | None, str | None]:
     return cause, detail
 
 
+# The ``FALLBACK_UNPARSEABLE`` detail for a reply holding more than one object
+# with every expected key. Callers compare against it to word their reason.
+AMBIGUOUS_ANSWER_DETAIL: Final = "more than one answer object with the expected keys"
+
+
 def _parse_or_fallback(
     response: Any,
     expected_keys: Iterable[str],
@@ -1019,9 +1024,7 @@ def _parse_or_fallback(
         return _with_cause(fallback, FALLBACK_UNPARSEABLE, detail)
     if steer and _count_objects_with_keys(_raw_json_text(response, steer), steer) > 1:
         logger.info("%s: LLM reply holds more than one answer object; using fallback", caller)
-        return _with_cause(
-            fallback, FALLBACK_UNPARSEABLE, "more than one object with the expected keys"
-        )
+        return _with_cause(fallback, FALLBACK_UNPARSEABLE, AMBIGUOUS_ANSWER_DETAIL)
     try:
         parsed: Any = json.loads(candidate)
     except json.JSONDecodeError:

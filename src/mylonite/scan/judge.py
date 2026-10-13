@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 from mylonite import reason_codes
 from mylonite.contracts import AdapterResponse, Payload
 from mylonite.scan._llm import (
+    AMBIGUOUS_ANSWER_DETAIL,
     FALLBACK_CALL_RAISED,
     FALLBACK_UNPARSEABLE,
     litellm_json_call_async,
@@ -1213,6 +1214,8 @@ class SuccessJudge:
         if cause is not None:
             if cause == FALLBACK_CALL_RAISED:
                 reason = f"LLM-judge inconclusive — LLM call raised: {detail}"
+            elif detail == AMBIGUOUS_ANSWER_DETAIL:
+                reason = "LLM-judge inconclusive — LLM output held more than one answer object"
             else:
                 reason = "LLM-judge inconclusive — LLM output not parseable as JSON"
             return Verdict(

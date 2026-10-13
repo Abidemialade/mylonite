@@ -137,8 +137,9 @@ def _tool_call_arguments(response: Any) -> str | None:
     Several providers implement "JSON mode" by returning the object as a tool
     call (``message.content`` empty, the JSON in
     ``message.tool_calls[0].function.arguments``) rather than as text. The
-    judge/customiser want that JSON too, so we look here when ``content`` has
-    no usable object. Every access is ``getattr``-guarded so the content-only
+    judge/customiser want that JSON too. ``_raw_json_text`` reads it first when
+    the caller passes ``expected_keys`` and the object carries them all, and
+    otherwise only when ``content`` has no brace. Every access is ``getattr``-guarded so the content-only
     test stubs (no ``tool_calls`` attribute) fall straight through.
     """
     try:
