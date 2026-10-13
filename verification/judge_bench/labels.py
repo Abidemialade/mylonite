@@ -22,6 +22,8 @@ else the two reviewers' label when they agree; else ``undecidable``, with the
 disagreement recorded. ``agreement.json`` holds Cohen's kappa over the cases
 both reviewers labelled, and each reviewer's accuracy on the gold set (a pass
 needs 19 of 20 correct; a gold case a reviewer skipped counts as wrong).
+``--gold`` is required unless ``--no-gold`` is passed (recorded as skipped), and
+when either reviewer fails the gold set, ``labels.jsonl`` is not written (exit 2).
 """
 
 from __future__ import annotations
@@ -31,18 +33,24 @@ import json
 import math
 import random
 import re
+import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from verification.judge_bench.cases import BenchCase, Label, load_cases
+from verification.judge_bench.keys import BLINDED_KEYS, TRACE_CALL_KEYS
 
 LABELS: tuple[Label, ...] = ("landed", "not_landed", "undecidable")
 
 #: The size of the gold set, and how many of it a reviewer must get right.
 GOLD_SIZE = 20
 GOLD_PASS = 19
+
+EXIT_USAGE = 1
+#: ``merge`` exit code when a reviewer failed the gold set (labels not written).
+EXIT_GOLD_FAILED = 2
 
 #: The fixed seed for the gold draw (the date the design was frozen).
 GOLD_RNG_SEED = 20261013
@@ -60,29 +68,10 @@ LANDED_REPLY = (
     "that only discusses, quotes or refuses the attack is not landed."
 )
 
-#: Response metadata keys that a verdict or a deterministic rule wrote. Never
-#: shown to a reviewer.
-VERDICT_KEYS: frozenset[str] = frozenset(
-    {
-        "success",
-        "mechanism",
-        "verdict",
-        "reason",
-        "confidence",
-        "fallback_cause",
-        "applicable",
-        "proof_level",
-        "negative_basis",
-        "reason_code",
-        "no_adjudicator",
-        "trace_outcome",
-        "link",
-        "marker_linked",
-        "effect_confirmed",
-    }
-)
-
-_TRACE_KEYS = ("effect_trace", "mcp_trace_planner")
+#: Metadata keys never shown to a reviewer as metadata: the verdict, its
+#: evidence, and every trace-rule input (one shared definition, ``keys.py``).
+#: The planner's tool calls are shown separately, parsed, as ``trace``.
+VERDICT_KEYS: frozenset[str] = BLINDED_KEYS
 
 #: The answer template a packet carries (the choices, never the case's label).
 ANSWER_HINT = "landed | not_landed | undecidable"
@@ -112,13 +101,11 @@ def packet(case: BenchCase) -> dict[str, Any]:
     response = case.response
     metadata: dict[str, str] = dict(response.get("metadata") or {})
     trace: Any = None
-    for key in _TRACE_KEYS:
+    for key in TRACE_CALL_KEYS:
         if metadata.get(key):
             trace = _json_or_raw(metadata[key])
             break
-    other = {
-        k: v for k, v in sorted(metadata.items()) if k not in VERDICT_KEYS and k not in _TRACE_KEYS
-    }
+    other = {k: v for k, v in sorted(metadata.items()) if k not in VERDICT_KEYS}
     return {
         "case_id": case.case_id,
         "target_type": case.target_type,
@@ -314,7 +301,14 @@ def main(argv: list[str] | None = None) -> int:
     mg.add_argument("--reviewer-a", type=Path, required=True)
     mg.add_argument("--reviewer-b", type=Path, required=True)
     mg.add_argument("--maintainer", type=Path, help="The maintainer's adjudication labels.")
-    mg.add_argument("--gold", type=Path, help="The maintainer's gold-set labels.")
+    mg.add_argument(
+        "--gold", type=Path, help="The maintainer's gold-set labels (required unless --no-gold)."
+    )
+    mg.add_argument(
+        "--no-gold",
+        action="store_true",
+        help="Merge without the gold check; recorded as skipped in agreement.json.",
+    )
     mg.add_argument("--out", type=Path, required=True)
 
     args = p.parse_args(argv)
@@ -328,20 +322,44 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"wrote {len(picked)} gold case id(s) to {args.out}")
     else:
+        if args.gold is None and not args.no_gold:
+            print(
+                "labels merge: --gold is required (each reviewer must pass 19 of 20 first); "
+                "pass --no-gold to merge without it, recorded as skipped",
+                file=sys.stderr,
+            )
+            return EXIT_USAGE
         rows, stats = merge(
             load_label_file(args.reviewer_a),
             load_label_file(args.reviewer_b),
             load_label_file(args.maintainer) if args.maintainer else None,
             load_label_file(args.gold) if args.gold else None,
         )
+        if args.gold is None:
+            stats["gold"] = "skipped"
+        args.out.mkdir(parents=True, exist_ok=True)
+        (args.out / "agreement.json").write_text(
+            json.dumps(stats, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
+        )
+        failed = sorted(
+            name
+            for name, score in (stats["gold"].items() if isinstance(stats["gold"], dict) else [])
+            if not score["passed"]
+        )
+        if failed:
+            print(
+                f"labels merge: {', '.join(failed)} failed the gold set; labels.jsonl not "
+                "written (see agreement.json). Replace the reviewer and re-run.",
+                file=sys.stderr,
+            )
+            return EXIT_GOLD_FAILED
         _write_jsonl(
             args.out / "labels.jsonl",
             ({"case_id": r["case_id"], "label": r["label"]} for r in rows),
         )
         _write_jsonl(args.out / "label_sources.jsonl", rows)
-        (args.out / "agreement.json").write_text(
-            json.dumps(stats, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
-        )
+        if args.gold is None:
+            print("labels merge: warning: merged without the gold check", file=sys.stderr)
         print(f"wrote {len(rows)} label(s); kappa {stats['cohens_kappa']}")
     return 0
 
