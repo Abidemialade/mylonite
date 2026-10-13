@@ -1,0 +1,161 @@
+# Judge-bench runs for the private rehearsal repo. A TEMPLATE: copy it to
+# .github/workflows/judge-bench.yml there. It never runs in this repo.
+#
+# Phases:
+#   pilot   -- collect from both reference twins, build cases, then judge at
+#              most 10 LLM-routed cases in record mode: proves the model routes
+#              and returns a parseable reply before any real spend.
+#   collect -- collect from the targets, then build the case files.
+#   measure -- score committed cases (CASES_PATH, MANIFEST_PATH in the
+#              rehearsal repo) with scripts/measure_judge.py in record mode.
+#
+# Every phase runs under a hard request ceiling (max_requests). Outputs are
+# uploaded as a workflow artifact; the rehearsal repo is private, and so are
+# the captures, which hold attack payloads.
+name: judge-bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      phase:
+        description: "pilot | collect | measure"
+        required: true
+        default: pilot
+        type: choice
+        options: [pilot, collect, measure]
+      model:
+        description: "litellm model id for planner, customiser and judge"
+        default: openai/gpt-4o-mini
+      scans:
+        description: "Scans per target (pilot and collect)"
+        default: "1"
+      max_requests:
+        description: "Hard LLM request ceiling for the whole job, retries included"
+        default: "300"
+      mylonite_ref:
+        description: "Mylonite ref (branch, tag or SHA) to run"
+        default: main
+  push:
+    branches: [judge-bench]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: judge-bench-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Paths inside the rehearsal repo checkout, used by the measure phase.
+  CASES_PATH: judge-bench/cases.jsonl
+  MANIFEST_PATH: judge-bench/manifest.json
+
+jobs:
+  judge-bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      OPENAI_API_KEY: ${{ secrets.MYLONITE_API_KEY }}
+      # Free-text inputs reach scripts through env only, never inline `${{ }}`.
+      # A push has no inputs, so each falls back to the pilot defaults.
+      PHASE: ${{ inputs.phase || 'pilot' }}
+      MODEL: ${{ inputs.model || 'openai/gpt-4o-mini' }}
+      SCANS: ${{ inputs.scans || '1' }}
+      MAX_REQUESTS: ${{ inputs.max_requests || '300' }}
+      MYLONITE_REF: ${{ inputs.mylonite_ref || 'main' }}
+    steps:
+      - name: Validate inputs
+        run: |
+          case "$PHASE" in pilot|collect|measure) ;; *) echo "::error::bad phase"; exit 1;; esac
+          for v in "$SCANS" "$MAX_REQUESTS"; do
+            case "$v" in ''|*[!0-9]*) echo "::error::scans and max_requests must be whole numbers"; exit 1;; esac
+          done
+          if [ "$MAX_REQUESTS" -lt 1 ]; then echo "::error::max_requests must be at least 1"; exit 1; fi
+          case "$MODEL" in *[!A-Za-z0-9._:/-]*|'') echo "::error::bad model id"; exit 1;; esac
+          case "$MYLONITE_REF" in *[!A-Za-z0-9._/-]*|'') echo "::error::bad ref"; exit 1;; esac
+          if [ -z "$OPENAI_API_KEY" ]; then echo "::error::MYLONITE_API_KEY is not set"; exit 1; fi
+
+      - name: Check out the rehearsal repo (cases, labels, manifest)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: rehearsal
+          persist-credentials: false
+
+      - name: Check out Mylonite
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: Abidemialade/mylonite
+          ref: ${{ env.MYLONITE_REF }}
+          path: mylonite
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Mylonite and the reference target
+        run: |
+          python -m pip install -e "./mylonite[dev]"
+          python -m pip install -e ./mylonite/reference_targets/mcp_kitchen_sink
+
+      - name: Collect captures
+        if: env.PHASE != 'measure'
+        working-directory: mylonite
+        run: |
+          set +e
+          python -m verification.judge_bench.collect \
+            --model "$MODEL" --scans "$SCANS" \
+            --max-llm-requests "$MAX_REQUESTS" \
+            --out "$RUNNER_TEMP/judge-bench/collect"
+          code=$?
+          set -e
+          # 3 = the ceiling stopped the collection; what was captured is kept.
+          if [ "$code" -ne 0 ] && [ "$code" -ne 3 ]; then exit "$code"; fi
+          python -m verification.judge_bench.build_cases \
+            --captures "$RUNNER_TEMP/judge-bench/collect/captures.jsonl" \
+            --out "$RUNNER_TEMP/judge-bench/cases"
+
+      - name: Pilot -- judge up to 10 LLM-routed cases
+        if: env.PHASE == 'pilot'
+        working-directory: mylonite
+        env:
+          # The ceiling for this step: the same hard cap, read by the chokepoint.
+          MYLONITE_MAX_LLM_REQUESTS: ${{ env.MAX_REQUESTS }}
+        run: |
+          cases="$RUNNER_TEMP/judge-bench/cases/llm_routed.jsonl"
+          if [ ! -s "$cases" ]; then
+            echo "::warning::the pilot collected no LLM-routed cases; nothing to judge"
+            exit 0
+          fi
+          python scripts/measure_judge.py --cases "$cases" --split all \
+            --models "$MODEL" --mode record --max-cases 10 \
+            --fixtures "$RUNNER_TEMP/judge-bench/fixtures" \
+            --out "$RUNNER_TEMP/judge-bench/measure"
+
+      - name: Measure -- score the committed cases
+        if: env.PHASE == 'measure'
+        working-directory: mylonite
+        env:
+          MYLONITE_MAX_LLM_REQUESTS: ${{ env.MAX_REQUESTS }}
+        run: |
+          python scripts/measure_judge.py \
+            --cases "$GITHUB_WORKSPACE/rehearsal/$CASES_PATH" \
+            --manifest "$GITHUB_WORKSPACE/rehearsal/$MANIFEST_PATH" \
+            --split test --models "$MODEL" --repeats 3 --mode record \
+            --fixtures "$RUNNER_TEMP/judge-bench/fixtures" \
+            --out "$RUNNER_TEMP/judge-bench/measure"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: judge-bench-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/judge-bench/collect/captures.jsonl
+            ${{ runner.temp }}/judge-bench/collect/spend.json
+            ${{ runner.temp }}/judge-bench/collect/scans/
+            ${{ runner.temp }}/judge-bench/cases/
+            ${{ runner.temp }}/judge-bench/fixtures/
+            ${{ runner.temp }}/judge-bench/measure/
+          if-no-files-found: warn
+          retention-days: 30
