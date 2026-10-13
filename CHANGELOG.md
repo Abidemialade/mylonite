@@ -106,7 +106,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `python -m verification.judge_bench.labels` exports blinded review packets
   with no verdict in them, draws a stratified 20-case gold set with a fixed
   seed, and merges two reviewers' labels with the maintainer's into
-  `labels.jsonl`, with Cohen's kappa and each reviewer's gold-set score.
+  `labels.jsonl`, with Cohen's kappa and each reviewer's gold-set score. A
+  reviewer below 19 of 20 on the gold set blocks the merge.
 
 - **A workflow template for running the judge benchmark privately.**
   `verification/judge_bench/ci/judge-bench.yml` runs a `pilot`, `collect`

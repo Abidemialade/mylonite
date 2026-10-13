@@ -20,6 +20,9 @@ Outputs in ``--out``:
   them, requests sent against the ceiling, and each scan's exit code;
 * ``scans/<scan_id>/`` -- each scan's own artefacts and its CLI output.
 
+Every scan id starts with ``--run-id`` (default: the UTC start time), so the
+captures of separate runs can be combined without id clashes.
+
 ``--max-llm-requests`` is required and is the CLI's own hard ceiling. It is
 process-wide, so it caps the whole collection, not each scan; once it trips,
 no further scan starts. Reference targets need no authorization and no
@@ -42,6 +45,7 @@ import sys
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -49,20 +53,13 @@ from unittest import mock
 from pydantic import BaseModel, ConfigDict
 
 from mylonite.contracts._types import AdapterResponse, Payload
+from verification.judge_bench.keys import VERDICT_EVIDENCE_KEYS
 
 #: The targets scanned when no ``--target`` is given: both reference twins.
 DEFAULT_TARGETS: tuple[str, ...] = ("reference:vulnerable", "reference:guarded")
 
-#: Verdict evidence keys copied into a capture when present.
-EVIDENCE_KEYS: tuple[str, ...] = (
-    "proof_level",
-    "trace_outcome",
-    "link",
-    "effect_confirmed",
-    "negative_basis",
-    "reason_code",
-    "no_adjudicator",
-)
+#: Verdict evidence keys copied into a capture when present (shared definition).
+EVIDENCE_KEYS: tuple[str, ...] = VERDICT_EVIDENCE_KEYS
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -392,6 +389,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--authorize", default=None, help="Passed to scan for target files.")
     p.add_argument("--out", type=Path, required=True, help="Output directory.")
+    p.add_argument(
+        "--run-id",
+        default=None,
+        help="Prefix for every scan and capture id, so captures from separate runs can "
+        "be combined. Default: the UTC start time (YYYYMMDDTHHMMSSZ).",
+    )
     return p
 
 
@@ -413,6 +416,7 @@ def main(argv: list[str] | None = None) -> int:
         _err(f"--authorize is required for target files (as for mylonite scan): {unauthorized}")
         return EXIT_ERROR
     seeds = frozenset(s.strip() for s in args.seeds.split(",") if s.strip()) or None
+    run_id = _slug(args.run_id) if args.run_id else datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
     from mylonite import __version__
     from mylonite.scan._llm import request_ceiling_hit, requests_sent, usage_tally
@@ -426,7 +430,7 @@ def main(argv: list[str] | None = None) -> int:
     with usage_tally() as tally, instrumented(sink, seeds):
         for target in targets:
             for i in range(1, args.scans + 1):
-                scan_id = f"{_slug(target)}-s{i:02d}"
+                scan_id = f"{run_id}-{_slug(target)}-s{i:02d}"
                 sink.context = ScanContext(scan_id, target, target_type_for(target))
                 before = len(sink.captures)
                 scan_dir = out / "scans" / scan_id
@@ -457,6 +461,7 @@ def main(argv: list[str] | None = None) -> int:
     n = write_captures(out / "captures.jsonl", sink.captures)
     summary = {
         "model": args.model,
+        "run_id": run_id,
         "mylonite_version": __version__,
         "targets": targets,
         "scans_per_target": args.scans,

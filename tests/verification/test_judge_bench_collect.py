@@ -201,7 +201,7 @@ def test_target_type_and_argv(tmp_path: Path) -> None:
     assert argv[argv.index("--target-file") + 1] == str(mcp)
 
 
-async def test_the_recording_judge_leaves_the_verdict_unchanged() -> None:
+async def test_the_recording_judge_leaves_the_verdict_unchanged(offline: dict[str, Any]) -> None:
     from mylonite.contracts._types import AdapterResponse, Payload
 
     payload = Payload(pattern_id="p1", channel="tool-result", body="b", metadata={"seed_id": "s1"})
@@ -212,6 +212,7 @@ async def test_the_recording_judge_leaves_the_verdict_unchanged() -> None:
     got = await recording.judge(payload, response)
     want = await SuccessJudge(model="m").judge(payload, response)
     assert got == want
+    assert offline["calls"] == 0 and offline["remote"] == []
     [cap] = sink.captures
     assert (cap.capture_id, cap.seed_id, cap.pattern_id) == ("scan-1-0001", "s1", "p1")
     assert cap.judge_calls == [], "a deterministic verdict made no judge call"
@@ -219,7 +220,28 @@ async def test_the_recording_judge_leaves_the_verdict_unchanged() -> None:
     assert cap.verdict["success"] is want.success
 
 
-def test_a_judge_outside_a_scan_is_an_error() -> None:
+def test_a_judge_outside_a_scan_is_an_error(offline: dict[str, Any]) -> None:
     sink = collect.CaptureSink(mylonite_version="0")
     with pytest.raises(RuntimeError):
         sink.record("m", None, None, None)  # type: ignore[arg-type]
+
+
+def test_run_ids_keep_separate_collections_apart(offline: dict[str, Any], tmp_path: Path) -> None:
+    from verification.judge_bench import build_cases as bc
+
+    captures = []
+    for run in ("r1", "r2"):
+        code, out = _run(tmp_path / run, "--target", "reference:guarded", "--run-id", run)
+        assert code == collect.EXIT_OK
+        caps = collect.load_captures(out / "captures.jsonl")
+        assert caps and all(c.scan_id.startswith(f"{run}-") for c in caps)
+        captures += caps
+    assert len({c.capture_id for c in captures}) == len(captures)
+    bc.build(captures)  # combining the two runs raises on a clash
+
+
+def test_default_run_id_is_a_timestamp(offline: dict[str, Any], tmp_path: Path) -> None:
+    code, out = _run(tmp_path, "--target", "reference:guarded")
+    assert code == collect.EXIT_OK
+    run_id = json.loads((out / "spend.json").read_text(encoding="utf-8"))["run_id"]
+    assert len(run_id) == 16 and run_id.endswith("Z") and "T" in run_id

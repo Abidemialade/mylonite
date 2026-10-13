@@ -162,29 +162,35 @@ def test_merge_cli_writes_labels_and_agreement(tmp_path: Path) -> None:
 
     a = write("a.jsonl", {"g1": "landed", "x": "landed"})
     b = write("b.jsonl", {"g1": "not_landed", "x": "landed"})
+    good_b = write("b2.jsonl", {"g1": "landed", "x": "landed"})
     gold = write("gold.jsonl", {"g1": "landed"})
-    out = tmp_path / "labels"
-    code = lb.main(
-        [
-            "merge",
-            "--reviewer-a",
-            str(a),
-            "--reviewer-b",
-            str(b),
-            "--gold",
-            str(gold),
-            "--out",
-            str(out),
-        ]
-    )
-    assert code == 0
-    rows = [json.loads(x) for x in (out / "labels.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert rows == [{"case_id": "g1", "label": "landed"}, {"case_id": "x", "label": "landed"}]
+
+    def run(*extra: str, rb: Path = b) -> tuple[int, Path]:
+        out = tmp_path / f"labels{len(list(tmp_path.iterdir()))}"
+        argv = ["merge", "--reviewer-a", str(a), "--reviewer-b", str(rb), "--out", str(out)]
+        return lb.main([*argv, *extra]), out
+
+    # A reviewer who fails the gold set blocks the merge.
+    code, out = run("--gold", str(gold))
+    assert code == lb.EXIT_GOLD_FAILED
+    assert not (out / "labels.jsonl").exists()
     stats = json.loads((out / "agreement.json").read_text(encoding="utf-8"))
     assert stats["gold"]["reviewer_a"]["passed"] is True
     assert stats["gold"]["reviewer_b"]["passed"] is False
-    assert stats["gold"]["reviewer_a"]["correct"] == 1
     assert stats["gold"]["reviewer_b"]["correct"] == 0
+
+    # Both pass: labels are written.
+    code, out = run("--gold", str(gold), rb=good_b)
+    assert code == 0
+    rows = [json.loads(x) for x in (out / "labels.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert rows == [{"case_id": "g1", "label": "landed"}, {"case_id": "x", "label": "landed"}]
+
+    # No gold: refused unless --no-gold, which is recorded.
+    code, out = run(rb=good_b)
+    assert code == lb.EXIT_USAGE and not out.exists()
+    code, out = run("--no-gold", rb=good_b)
+    assert code == 0 and (out / "labels.jsonl").exists()
+    assert json.loads((out / "agreement.json").read_text(encoding="utf-8"))["gold"] == "skipped"
 
 
 def test_gold_cli_and_bad_labels(tmp_path: Path) -> None:
@@ -197,3 +203,28 @@ def test_gold_cli_and_bad_labels(tmp_path: Path) -> None:
     bad.write_text(json.dumps({"case_id": "x", "label": "maybe"}) + "\n", encoding="utf-8")
     with pytest.raises(ValueError):
         lb.load_label_file(bad)
+
+
+def test_packets_hide_every_trace_and_verdict_key() -> None:
+    from verification.judge_bench import build_cases as bc
+    from verification.judge_bench import keys
+
+    hidden = set(keys.TRACE_METADATA_KEYS) | set(keys.VERDICT_EVIDENCE_KEYS) | keys.VERDICT_FIELDS
+    meta = {k: "true" for k in hidden}
+    meta["effect_trace"] = json.dumps(_TRACE)
+    meta["mcp_trace_planner"] = json.dumps(_TRACE)
+    meta["mcp_trace_setup"] = json.dumps(_TRACE)
+    meta["tool_surface"] = json.dumps(["send_note"])
+    base = _case("full").model_dump(mode="json")
+    base["response"]["metadata"] = meta
+    case = BenchCase.model_validate(base)
+    data = lb.packet(case)
+    assert set(data["response_metadata"]) == {"tool_surface"}
+    outside_trace = {k: v for k, v in data.items() if k != "trace"}
+    assert not _walk_keys(outside_trace) & hidden
+    assert hidden <= lb.VERDICT_KEYS, "labels blinds exactly the shared definition"
+    assert data["trace"] == _TRACE
+    # build_cases strips the same trace keys from the same metadata.
+    stripped = bc.strip_trace(case.response)["metadata"]
+    assert not set(stripped) & keys.TRACE_METADATA_KEYS
+    assert set(meta) - set(stripped) == set(keys.TRACE_METADATA_KEYS)

@@ -193,3 +193,20 @@ def test_datasets_convert_with_their_families(tmp_path: Path) -> None:
     assert dojo and all(c.family == "agentdojo" for c in dojo)
     assert inject and all(c.family == "injecagent" for c in inject)
     assert all("consequential_tool" not in c.payload["metadata"] for c in inject)
+
+
+def test_guarded_negatives_need_engagement_or_a_block() -> None:
+    engaged = _capture("eng", target="reference:guarded", trace_outcome="not-called")
+    idle = _capture("idle", target="reference:guarded", trace_outcome="not-called")
+    idle = idle.model_copy(update={"response": {**idle.response, "tool_calls": []}})
+    blocked = _capture("blk", target="reference:guarded", trace_outcome="blocked-by-client")
+    cases, _ = bc.build([engaged, idle, blocked])
+    shadow = {c.case_id: c.label for c in cases if c.family == "shadow"}
+    assert shadow == {"eng": "not_landed", "blk": "not_landed"}
+
+
+def test_duplicate_capture_ids_are_refused() -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="duplicate capture_id"):
+        bc.build([_capture("same", mechanism="llm"), _capture("same", mechanism="llm")])
