@@ -83,6 +83,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deterministic evidence for `shadow`, flags hard negatives, merges review
   labels with `--labels`, and applies the per-seed cap.
 
+- **Synthetic judge cases that test where evidence sits.**
+  `python -m verification.judge_bench.variants` derives four variants of
+  each landed case: evidence only in tool-call arguments, evidence past the
+  300-character result excerpt, evidence past the 1,500-character reply
+  excerpt, and the reply repeated as a JSON block. They keep the source
+  label and never count toward the bar.
+
 ## [0.12.1] - 2026-10-10
 
 ### Fixed
