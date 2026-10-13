@@ -74,6 +74,41 @@ def test_long_arguments_are_capped_with_an_ellipsis_marker() -> None:
     assert len(line) < 450
 
 
+def test_a_long_earlier_argument_does_not_hide_a_later_destination() -> None:
+    trace = [
+        {
+            "tool": "send_email",
+            "args": {"body": "w" * 600, "subject": "v" * 400, "to": _DESTINATION},
+            "result": "sent",
+            "is_error": False,
+        }
+    ]
+    prompt = _build_judge_prompt(_payload(), _response(trace=trace))
+    line = next(ln for ln in _fenced_sections(prompt)[1].splitlines() if "send_email" in ln)
+    assert _DESTINATION in line
+    assert '"body":"' + "w" * 120 + "…" in line
+    assert '"subject":"' in line
+
+
+def test_the_rendered_arguments_of_one_call_stay_bounded() -> None:
+    args = {f"k{i}": "y" * 500 for i in range(20)}
+    trace = [{"tool": "write_file", "args": args, "result": "ok", "is_error": False}]
+    prompt = _build_judge_prompt(_payload(), _response(trace=trace))
+    line = next(ln for ln in _fenced_sections(prompt)[1].splitlines() if "write_file" in ln)
+    assert len(line) < 700
+
+
+def test_line_breaks_in_arguments_keep_the_call_on_one_line() -> None:
+    value = "a" + "".join(sep + "x" for sep in ("\n", "\r", chr(0x2028), chr(0x2029), chr(0x85)))
+    trace = [{"tool": "send_email", "args": {"to": value}, "result": "sent", "is_error": False}]
+    prompt = _build_judge_prompt(_payload(), _response(trace=trace))
+    lines = _fenced_sections(prompt)[1].splitlines()
+    send_lines = [ln for ln in lines if "send_email" in ln]
+    assert len(send_lines) == 1
+    assert "[ok] sent" in send_lines[0]
+    assert len(lines) == 2  # the heading and this one call
+
+
 def test_a_call_without_recorded_arguments_still_renders() -> None:
     trace = [{"tool": "list_notes", "result": "3 notes", "is_error": False}]
     prompt = _build_judge_prompt(_payload(), _response(trace=trace))
@@ -111,6 +146,12 @@ def test_the_omitted_marker_counts_the_characters_left_out() -> None:
     assert shown.startswith("h" * 1500)
     assert shown.endswith("t" * 500)
     assert "m" not in shown.replace("[700 characters omitted]", "")
+
+
+def test_a_reply_one_character_over_the_limit_omits_one_character() -> None:
+    reply = "h" * 1500 + "m" + "t" * 500
+    prompt = _build_judge_prompt(_payload(), _response(raw_response=reply))
+    assert "[1 characters omitted]" in _fenced_sections(prompt)[0]
 
 
 def test_a_reply_of_2000_characters_or_fewer_is_shown_whole() -> None:

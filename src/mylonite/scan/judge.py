@@ -266,8 +266,19 @@ def _claims_landed_but_took_no_action(response: AdapterResponse) -> bool:
     return took_no_action(response)
 
 
+#: Per-value cap on a call's rendered arguments, applied before the per-call cap so a
+#: long early value can't push a later one (a destination, say) out of view.
+_JUDGE_ARG_VALUE_CAP: Final = 120
 #: Per-call cap on the rendered arguments in the judge's trace summary.
-_JUDGE_ARGS_CAP: Final = 300
+_JUDGE_ARGS_CAP: Final = 600
+#: Line breaks that would split one call's line in two; escaped after rendering.
+_LINE_BREAKS: Final = {
+    "\n": "\\n",
+    "\r": "\\r",
+    "\u2028": "\\u2028",
+    "\u2029": "\\u2029",
+    "\x85": "\\u0085",
+}
 #: Per-call cap on the rendered result; the recording shim already cuts results here.
 _JUDGE_RESULT_CAP: Final = 800
 #: A final reply longer than head + tail is shown as its head and tail only.
@@ -275,14 +286,40 @@ _JUDGE_REPLY_HEAD: Final = 1500
 _JUDGE_REPLY_TAIL: Final = 500
 
 
+def _cap_arg_values(value: object, depth: int = 0) -> object:
+    """Cut every string key and value to ``_JUDGE_ARG_VALUE_CAP``, recursively."""
+
+    def cut(text: str) -> str:
+        return text if len(text) <= _JUDGE_ARG_VALUE_CAP else text[:_JUDGE_ARG_VALUE_CAP] + "…"
+
+    if isinstance(value, str):
+        return cut(value)
+    if depth >= 8:
+        return cut(str(value))
+    if isinstance(value, dict):
+        return {cut(str(k)): _cap_arg_values(v, depth + 1) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_cap_arg_values(v, depth + 1) for v in value]
+    return value
+
+
 def _render_call_args(args: object) -> str:
-    """Compact JSON of one call's recorded (already redacted) arguments, capped."""
+    """Compact JSON of one call's recorded (already redacted) arguments, capped.
+
+    Each value is cut first, so every key and the start of every value stays
+    visible; the whole call is then bounded by ``_JUDGE_ARGS_CAP``. Line breaks
+    are escaped so a call always renders on one line.
+    """
     if args is None:
         return ""
     try:
-        text = json.dumps(args, separators=(",", ":"), ensure_ascii=False, default=str)
+        text = json.dumps(
+            _cap_arg_values(args), separators=(",", ":"), ensure_ascii=False, default=str
+        )
     except (TypeError, ValueError):
         text = str(args)
+    for raw, escaped in _LINE_BREAKS.items():
+        text = text.replace(raw, escaped)
     if len(text) > _JUDGE_ARGS_CAP:
         text = text[:_JUDGE_ARGS_CAP] + "…"
     return text

@@ -36,8 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reply. A send whose recipient lived only in its arguments looked the same
   whether it went to the user or elsewhere, so the judge could decline a
   landed attack and the attempt read RESISTED. Each call now shows its
-  redacted arguments as compact JSON (about 300 characters) and up to 800
-  characters of result. A reply over 2,000 characters shows its first 1,500
+  redacted arguments as compact JSON, each value cut at 120 characters so a
+  long early value can't hide a later recipient, and up to 800 characters of
+  result. A reply over 2,000 characters shows its first 1,500
   and last 500 characters with a `[N characters omitted]` marker. The number
   of model calls is unchanged. See
   [Reading results](docs/reading-results.md).
