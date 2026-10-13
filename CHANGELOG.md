@@ -96,6 +96,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   seed, and merges two reviewers' labels with the maintainer's into
   `labels.jsonl`, with Cohen's kappa and each reviewer's gold-set score.
 
+- **A workflow template for running the judge benchmark privately.**
+  `verification/judge_bench/ci/judge-bench.yml` runs a `pilot`, `collect`
+  or `measure` phase from a manual dispatch or a push to `judge-bench`, with
+  read-only permissions, SHA-pinned actions and the request ceiling on every
+  model call, and uploads its outputs as an artifact.
+
 ## [0.12.1] - 2026-10-10
 
 ### Fixed
