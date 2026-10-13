@@ -168,6 +168,13 @@ never ran are not counted as decided, and any attempt where neither mechanism re
 verdict is listed separately as `reached no verdict`. The line reads persisted fields
 only, so `mylonite report <scan-dir>` shows the same breakdown offline.
 
+The LLM judge sees the request, the agent's final reply and each recorded tool call. For
+each call it is shown the arguments (the same redacted copy the trace keeps, as compact
+JSON up to about 300 characters) and the result (up to 800 characters). A reply longer
+than 2,000 characters is shown as its first 1,500 and last 500 characters with a
+`[N characters omitted]` marker between them, so what the agent says at the end of a long
+reply still reaches the judge.
+
 An LLM-judge "success" that the agent's own trace contradicts counts as an LLM-judge
 verdict that is not a finding. The judge's reason names a tool the agent never called, or
 a destination no call carried, and the agent did nothing beyond the attack's own plant and
