@@ -136,7 +136,9 @@ captured pytest's own output, the detail appends a redacted excerpt of it (at mo
 around 600 characters, pytest's own `INTERNALERROR`/`E` lines first) so you can see
 *why* pytest failed — a plugin mismatch, a broken fixture path, a real assertion — rather
 than just the bare exit code. Any secret-shaped string in that excerpt is masked the same
-way the rest of the CLI's output is.
+way the rest of the CLI's output is. For a collection error or an internal pytest error,
+the run result's own detail carries the same excerpt, so any caller of the runner sees
+the cause too.
 
 With `--iterations 1` the flakiness leg has nothing to compare, because one run per build
 gives a rate of 0% or 100% by construction. The panel then shows that leg as
