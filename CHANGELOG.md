@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A generated test no longer fails to collect on Windows because another
+  process cleaned up its temp files.** The pytest run behind a generated test
+  now limits its directory walk to the test's own folder (`--confcutdir`).
+  Before, a temp path returned in Windows short form made pytest collect every
+  parent folder up to the drive root, and a temp directory vanishing mid-scan
+  turned a passing test into a collection error.
+
 - **An attempt whose seed names an unregistered predicate now reads NOT
   TESTED when its tool calls were not recorded.** Nothing checks a seed's
   predicate name before a scan starts. On an attempt with no recorded
