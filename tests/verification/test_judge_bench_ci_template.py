@@ -95,5 +95,8 @@ def test_agents_rest_target_starts_the_shim_and_authorizes_its_family() -> None:
         Path(__file__).resolve().parents[2] / "verification" / "third_party" / "agents_rest.yaml"
     )
     family = yaml.safe_load(target_file.read_text(encoding="utf-8"))["family"]
-    assert "verification/third_party/agents_rest.yaml" in collect
-    assert f"--authorize {family}" in collect
+    # The REST arguments are only passed inside the target conditional.
+    after_if = collect.split('if [ "$TARGET" = "agents-rest" ]; then', 1)[1]
+    guarded = after_if.split("\nfi\n", 1)[0]
+    assert "verification/third_party/agents_rest.yaml" in guarded
+    assert f"--authorize {family}" in guarded

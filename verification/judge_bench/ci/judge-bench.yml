@@ -117,7 +117,7 @@ jobs:
         run: |
           docker run -d --name ollama -p 11434:11434 ollama/ollama:0.35.0@sha256:9c1dc45ea758396139ec0adfa52947714c61f8d1e4537a6e2daef8138e7a64a9
           for _ in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 2; done
-          curl -sf http://127.0.0.1:11434/api/pull -d '{"name":"llama3.2:3b","stream":false}' >/dev/null
+          curl -sf --max-time 600 http://127.0.0.1:11434/api/pull -d '{"name":"llama3.2:3b","stream":false}' >/dev/null
           # The agent gets its own virtualenv: its openai-agents pin needs a newer
           # `openai` than the LiteLLM Mylonite uses.
           python -m venv "$RUNNER_TEMP/shim-venv"
