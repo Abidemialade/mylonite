@@ -35,6 +35,11 @@ on:
       mylonite_ref:
         description: "Mylonite ref (branch, tag or SHA) to run"
         default: main
+      target:
+        description: "reference (both kitchen-sink twins) | agents-rest (the Agents SDK REST target over a local Ollama model)"
+        default: reference
+        type: choice
+        options: [reference, agents-rest]
   push:
     branches: [judge-bench]
 
@@ -63,6 +68,7 @@ jobs:
       SCANS: ${{ inputs.scans || '1' }}
       MAX_REQUESTS: ${{ inputs.max_requests || '300' }}
       MYLONITE_REF: ${{ inputs.mylonite_ref || 'main' }}
+      TARGET: ${{ inputs.target || 'reference' }}
     steps:
       - name: Validate inputs
         run: |
@@ -98,12 +104,40 @@ jobs:
           python -m pip install -e "./mylonite[dev]"
           python -m pip install -e ./mylonite/reference_targets/mcp_kitchen_sink
 
+      # The third-party campaign's REST target (verification/third_party/agents_rest.yaml):
+      # the OpenAI Agents SDK behind its disclosed shim, with the agent's own inference
+      # on an in-runner Ollama model, so the target costs nothing. Every attempt against
+      # a rest target is decided by the LLM judge, which is the population measured here.
+      - name: Start the REST target
+        if: env.PHASE != 'measure' && env.TARGET == 'agents-rest'
+        working-directory: mylonite
+        env:
+          OLLAMA_API_BASE: http://127.0.0.1:11434
+          MYLONITE_TPV_OLLAMA_MODEL: llama3.2:3b
+        run: |
+          docker run -d --name ollama -p 11434:11434 ollama/ollama:0.35.0@sha256:9c1dc45ea758396139ec0adfa52947714c61f8d1e4537a6e2daef8138e7a64a9
+          for _ in $(seq 1 30); do curl -sf http://127.0.0.1:11434/api/tags >/dev/null && break; sleep 2; done
+          curl -sf http://127.0.0.1:11434/api/pull -d '{"name":"llama3.2:3b","stream":false}' >/dev/null
+          # The agent gets its own virtualenv: its openai-agents pin needs a newer
+          # `openai` than the LiteLLM Mylonite uses.
+          python -m venv "$RUNNER_TEMP/shim-venv"
+          "$RUNNER_TEMP/shim-venv/bin/python" -m pip install --quiet "openai-agents[litellm]==0.22.3" "fastapi==0.142.2" "uvicorn==0.54.0"
+          nohup "$RUNNER_TEMP/shim-venv/bin/python" -m uvicorn verification.third_party.shims.openai_agents_ollama_shim:app \
+            --host 127.0.0.1 --port 8099 > "$RUNNER_TEMP/shim.log" 2>&1 &
+          for _ in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:8099/docs && break; sleep 1; done
+          curl -sf -o /dev/null http://127.0.0.1:8099/docs
+
       - name: Collect captures
         if: env.PHASE != 'measure'
         working-directory: mylonite
         run: |
+          targets=()
+          if [ "$TARGET" = "agents-rest" ]; then
+            # The authorization value must equal the target file's family.
+            targets=(--target verification/third_party/agents_rest.yaml --authorize tpv-agents-sdk-ollama)
+          fi
           set +e
-          python -m verification.judge_bench.collect \
+          python -m verification.judge_bench.collect "${targets[@]}" \
             --model "$MODEL" --scans "$SCANS" \
             --max-llm-requests "$MAX_REQUESTS" \
             --out "$RUNNER_TEMP/judge-bench/collect"
