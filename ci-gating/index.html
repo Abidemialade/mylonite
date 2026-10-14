@@ -1,0 +1,3047 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Open-source framework for AI-layer security testing.">
+      
+      
+      
+        <link rel="canonical" href="https://abidemialade.github.io/mylonite/ci-gating/">
+      
+      
+        <link rel="prev" href="../http-agent/">
+      
+      
+        <link rel="next" href="../model-upgrade/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Gate CI - Mylonite</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#ci-gating" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="Mylonite" class="md-header__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Mylonite
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Gate CI
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="Mylonite" class="md-nav__button md-logo" aria-label="Mylonite" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Mylonite
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/Abidemialade/mylonite" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    Abidemialade/mylonite
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Get started
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Get started
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../choose-a-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Choose a model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../install-windows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installing on Windows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quarry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Try it — the reference app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../upgrading-to-0.12/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Upgrading from 0.10.x/0.11.x
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The journey
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    The journey
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/1-try/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    1. Try it
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/2-choose-a-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    2. Choose a model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/3-point-at-your-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    3. Point at your app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/4-find/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    4. Find
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/5-prove/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    5. Prove
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/6-commit-the-gate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    6. Commit the gate
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../journey/7-re-prove/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    7. Re-prove
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test-your-app/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test your own app
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../http-agent/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Test a plain HTTP agent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gate CI
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Gate CI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-end-to-end-flow-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The end-to-end flow (local)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The end-to-end flow (local)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#gating-every-finding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gating every finding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-finding-you-havent-fixed-yet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A finding you haven't fixed yet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#budget-exhaustion-and-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Budget exhaustion and findings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#w3-or-w4-with-no-effect_probe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        W3 or W4 with no effect_probe
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pre-flight-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pre-flight order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-gate-touches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gate touches
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-path-length" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows path length
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adopting-it-in-github-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adopting it in GitHub CI
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Adopting it in GitHub CI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites-gate-open-pr-assumes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites gate --open-pr assumes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-reusable-action" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The reusable Action
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#other-ci-systems-jenkins-gitlab" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other CI systems (Jenkins, GitLab, …)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Other CI systems (Jenkins, GitLab, …)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-live-gate-costs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a live gate costs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#provider-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#supply-chain-pinning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supply-chain pinning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optional-extra-llm-request-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional: extra LLM request headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#surfacing-findings-in-the-security-tab" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Surfacing findings in the Security tab
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-to-go-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where to go next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model-upgrade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Re-validate on a new model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reading-results/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reading the results
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    How it works
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    How it works
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../weakness-classes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Weakness classes & how attacks work
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../attack-modes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Attack modes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../validation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The validation engine
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testkit/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    The testkit API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../verification/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Independent verification
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Known limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../standards-mapping/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Standards mapping
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../target-file/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    target.yaml reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reason-codes/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reason codes
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture & modules
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../plugin-authoring/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Plugin authoring
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../claims/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Claims register
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_7" >
+        
+          
+          <label class="md-nav__link" for="__nav_7" id="__nav_7_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Operating
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_7_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_7">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Operating
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../enterprise-networking/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Enterprise networking
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../self-hosted-models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Self-hosted models (Ollama/vLLM)
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Security & responsible use
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../threat-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Threat model
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-end-to-end-flow-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The end-to-end flow (local)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The end-to-end flow (local)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#gating-every-finding" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Gating every finding
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exit codes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-finding-you-havent-fixed-yet" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        A finding you haven't fixed yet
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#budget-exhaustion-and-findings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Budget exhaustion and findings
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#w3-or-w4-with-no-effect_probe" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        W3 or W4 with no effect_probe
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pre-flight-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pre-flight order
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-gate-touches" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gate touches
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#windows-path-length" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Windows path length
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adopting-it-in-github-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Adopting it in GitHub CI
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Adopting it in GitHub CI">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites-gate-open-pr-assumes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Prerequisites gate --open-pr assumes
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#the-reusable-action" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The reusable Action
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#other-ci-systems-jenkins-gitlab" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Other CI systems (Jenkins, GitLab, …)
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Other CI systems (Jenkins, GitLab, …)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-live-gate-costs" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What a live gate costs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#provider-keys" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider keys
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#supply-chain-pinning" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Supply-chain pinning
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#optional-extra-llm-request-headers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Optional: extra LLM request headers
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#surfacing-findings-in-the-security-tab" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Surfacing findings in the Security tab
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#where-to-go-next" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Where to go next
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="ci-gating">CI gating<a class="headerlink" href="#ci-gating" title="Permanent link">&para;</a></h1>
+<p><code>mylonite gate</code> runs the whole flow — find an exploit, write a regression test,
+validate it against the differential oracle, and (opt-in) open a PR that gates
+CI on it.</p>
+<h2 id="the-end-to-end-flow-local">The end-to-end flow (local)<a class="headerlink" href="#the-end-to-end-flow-local" title="Permanent link">&para;</a></h2>
+<p>Against your own app this drives a real agent and makes real model calls, so budget
+minutes and API spend rather than seconds.</p>
+<div class="admonition tip">
+<p class="admonition-title">Sizing <code>--max-llm-calls</code></p>
+<p>Every seed is guaranteed a floor of the budget before the rest is shared, so a
+large tool surface cannot let the first few seeds drain the pool and leave the
+others untried. Probes that chain two tools cost two or three calls each, so a
+server with many egress or action tools wants a larger budget than the default
+of 50. If the budget still runs out, the whole scan aborts (exit code 3) and
+each seed that had not finished becomes a NOT TESTED row with
+<a href="../reason-codes/#myl-nt-019"><code>MYL-NT-019</code></a>, so its class cannot read resisted.
+An attack module that fails to load is reported the same way, with
+<a href="../reason-codes/#myl-nt-015"><code>MYL-NT-015</code></a>, so the gate does not pass on a
+scan that never ran its classes.</p>
+<p><strong><code>--max-llm-calls</code> is therefore a floor-adjusted budget, not a hard ceiling.</strong>
+Worst case is <code>cap + (seeds - 1) × max(2, cap ÷ seeds)</code> — with <code>--max-llm-calls
+50</code> against a surface that synthesises 100 seeds, up to roughly 250 calls. That
+is deliberate: the alternative is that the seeds which happen to start last
+make no call at all, and a probe that never ran is indistinguishable from a
+target that resisted. Size CI spend against the worst case, not the flag value.</p>
+<p><strong>The budget bounds only <code>gate</code>'s scan phase.</strong> <code>--help</code> already says so ("LLM
+call budget for the scan phase"). Validation — re-driving each kept finding
+against both twins, <code>--iterations</code> times, plus a metamorphic robustness pass —
+happens <em>after</em> the scan and has no call budget of its own; on most runs it
+makes the majority of the calls.</p>
+<p>The formula depends on which kind of target is being gated:</p>
+<ul>
+<li><strong>The bundled reference agent</strong> — <code>iterations</code> full differential drives
+  (raw twin + guarded twin, so <code>× 2</code>), plus 7 built-in metamorphic
+  re-paraphrasings of the same attack — each <em>also</em> driven against both
+  twins (another <code>× 2</code>) to check the finding survives rewording, not just
+  the literal payload. So one finding costs roughly <code>(iterations + 7) × 2</code>
+  re-drives, each itself several LLM calls (customiser, planner, judge).
+  At the default <code>--iterations 3</code> that's <code>(3 + 7) × 2 = 20</code> re-drives for
+  ONE finding — a two-finding scan is roughly 40, not one.</li>
+<li><strong>Your own target</strong> — there is no in-repo guarded twin and no
+  metamorphic pass, so the cost is flatter: <code>iterations</code> re-drives of the
+  real target, plus another <code>iterations</code> re-drives of a boundary-guarded
+  twin <em>only when</em> a guard adapter is configured (the default unless
+  <code>--fast</code>). At the default <code>--iterations 3</code> that's 3 re-drives per
+  finding with no guard configured, or 6 with one.</li>
+</ul>
+<p>Either way, every finding a scan proves is gated now, not just the first,
+so this cost scales with findings, not just <code>--iterations</code>. Size CI
+spend against the whole <code>gate</code> run — scan plus validation — not against
+<code>--max-llm-calls</code> alone.</p>
+<p><strong>For a hard limit, set <code>MYLONITE_MAX_LLM_REQUESTS</code></strong> (or pass the global
+<code>--max-llm-requests N</code> option before <code>gate</code>). It counts every request the
+whole <code>gate</code> run sends — scan, validation and retries — and never sends one
+past the limit. Hitting it stops the run with exit <code>3</code> and a NOT TESTED
+result: no test is generated or validated past that point, and the run
+never reads as a pass. Size it from a run's <code>llm:</code> lines plus headroom for
+retries.</p>
+<p><strong><code>scan</code>, <code>validate</code> and <code>gate</code> each print one line estimating this before
+any call is sent</strong> — a call-count range built from this same formula (seed
+count after filters, <code>--iterations</code>, twins, metamorphic re-drives), plus
+the ceiling above when one is set. It never prices the run: no provider
+carries a price yet, so the line says cost is unknown rather than
+guessing one. A <code>--dry-run</code> scan makes no call and skips the line. Just
+above it, a short run plan names the model, the system-prompt source, the
+consequential tools the run may drive and the <code>never_call</code> list, then says
+to run against a test instance, never production (see
+<a href="../cli-reference/"><code>scan</code></a>).</p>
+</div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># against the bundled reference agent</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>mylonite<span class="w"> </span>gate<span class="w"> </span>reference:vulnerable
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># against your own MCP app</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>mylonite<span class="w"> </span>scan<span class="w"> </span>--command<span class="w"> </span><span class="s2">"python"</span><span class="w"> </span>--arg<span class="w"> </span><span class="s2">"-m"</span><span class="w"> </span>--arg<span class="w"> </span><span class="s2">"your.server"</span><span class="w"> </span>--scaffold<span class="w"> </span>target.yaml
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>mylonite<span class="w"> </span>gate<span class="w"> </span>--target-file<span class="w"> </span>target.yaml<span class="w"> </span>--authorize<span class="w"> </span>custom<span class="w"> </span>--open-pr
+</code></pre></div>
+<p><code>gate</code> does not auto-wire a <code>seed_arm</code>. <code>scan</code> does: for a target that declares W2
+without one, <code>scan</code> looks for a store-and-recall pair on the live server and uses it.
+<code>gate</code> refuses the same target instead, because W2 has nothing to plant with. For such a
+target, run <code>mylonite scan --target-file target.yaml --authorize &lt;family&gt;</code> first. When it
+wires a <code>seed_arm</code>, it writes the wired target to <code>.mylonite/scans/&lt;timestamp&gt;/target.yaml</code>;
+pass that file to <code>gate --target-file</code>.</p>
+<h3 id="gating-every-finding">Gating every finding<a class="headerlink" href="#gating-every-finding" title="Permanent link">&para;</a></h3>
+<p>A scan often turns up more than one weakness. <code>gate</code> generates and validates
+<strong>every</strong> finding the scan proves, in deterministic order (sorted by pattern id),
+and commits every KEPT one's test to a single branch behind a single PR:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>2 findings: validating each (about 2x the single-finding validation cost)
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>1 kept, 1 rejected
+</code></pre></div>
+<p><code>gate</code> never commits an unproven finding. A finding whose validation passed
+but had no passing differential or effect leg (or a black-box keep that rests on
+the LLM judge alone) reads <strong>STABLE, NOT PROVEN</strong>. <code>gate</code> treats it as a
+candidate:</p>
+<ul>
+<li>no test, exploit or report for it is written to the gate directory or
+  committed; its evidence goes to the <code>-rej</code> folder next to <code>--out</code>, with its
+  validation report;</li>
+<li>the console prints one line per candidate, with the reason and how to get it
+  proven: declare <code>control_env</code> and drop <code>--fast</code>, or declare an <code>effect_probe</code>,
+  then re-run <code>gate</code>. A finding on a black-box <code>rest</code> target can't be proven
+  this way, so <code>gate</code> never commits one;</li>
+<li>when another finding was kept, <code>PR_BODY.md</code> lists the candidates under
+  "Candidates (not proven, not committed)";</li>
+<li>an earlier kept test, exploit and fixtures with the same id stay in place,
+  byte for byte;</li>
+<li>with nothing kept, no PR is opened and <code>gate</code> exits <code>10</code>.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>3 findings: validating each (about 3x the single-finding validation cost)
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>1 kept, 1 not proven (candidates, not committed), 1 rejected
+</code></pre></div>
+<h3 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h3>
+<p><code>gate</code>'s exit code tells a CI script what the run produced:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>The scan ran and found nothing to gate.</td>
+</tr>
+<tr>
+<td><code>9</code></td>
+<td>At least one proven finding was kept; its gate test is written (and committed with <code>--open-pr</code>).</td>
+</tr>
+<tr>
+<td><code>10</code></td>
+<td>Nothing was kept, but at least one finding is a STABLE, NOT PROVEN candidate. No test was written.</td>
+</tr>
+<tr>
+<td><code>5</code></td>
+<td>Every finding that reached a verdict was rejected.</td>
+</tr>
+</tbody>
+</table>
+<p>An aborted scan still wins over all of these (see
+<a href="#budget-exhaustion-and-findings">Budget exhaustion and findings</a>). The full table
+is in <a href="../reading-results/#exit-codes-for-ci">Reading the results</a>.</p>
+<p><strong>Upgrading:</strong> <code>gate</code> used to exit <code>0</code> both for a kept finding and for a clean
+run. A kept finding now exits <code>9</code>. A CI script that treated <code>0</code> as "gated" needs
+to check for <code>9</code>; one that treats any non-zero exit as a failure now fails when
+<code>gate</code> keeps a finding, which is the point of a gate. The scaffolded discovery
+workflow and <code>gate-action</code> read these codes: <code>0</code>, <code>9</code> and <code>10</code> are a <em>successful</em>
+run (a <code>::notice::</code> for <code>0</code>/<code>9</code>, a <code>::warning::</code> for <code>10</code> naming how to prove each
+candidate), and only <code>1</code>-<code>8</code> fails the job — an infrastructure problem (config,
+budget, provider, the PR step itself), not a result of the scan. <code>gate-action</code>
+also exposes the raw <code>exit-code</code> and a <code>result</code> output (<code>clean</code>/<code>kept</code>/
+<code>candidates</code>), and an opt-in <code>fail-on</code> input (<code>none</code> by default, or <code>kept</code>/
+<code>candidates</code>) for a caller that wants a red signal on a specific result — see
+<a href="#the-reusable-action">The reusable Action</a>.</p>
+<p>A finding that was generated and validated but not kept is still named in
+<code>PR_BODY.md</code>, with the reason, under "Other findings (not gated)" — it isn't
+silently dropped the way it used to be. If a generator or validator failure hits
+one finding specifically, the rest are still gated; only a run where <em>every</em>
+finding fails the same way falls back to the old single-finding exit codes (<code>6</code>
+generate failed, <code>7</code> validate failed).</p>
+<p>The branch name reflects how many findings it carries: gating exactly one kept
+finding keeps the historical <code>mylonite/gate-&lt;pattern_id&gt;</code>; gating several uses
+<code>mylonite/gate-&lt;hash&gt;</code>, a short stable hash of the kept pattern ids. Both keep the
+<code>mylonite/gate-</code> prefix, so anything that matches on it (a branch-protection rule,
+a script) keeps working either way.</p>
+<h3 id="a-finding-you-havent-fixed-yet">A finding you haven't fixed yet<a class="headerlink" href="#a-finding-you-havent-fixed-yet" title="Permanent link">&para;</a></h3>
+<p><code>gate</code> commits the test for a finding that still works on your app as a
+<strong>pending fix</strong>, so the gate PR doesn't turn CI red the day it merges. The test
+carries one extra line, <code>@testkit.pending_fix(...)</code>, and moves through three
+states:</p>
+<ol>
+<li><strong>Not fixed yet.</strong> The attack still lands, so the test is an expected
+   failure (<code>xfail</code>) and the check stays green. <code>pytest -ra</code> lists it as
+   <code>XFAIL ... pending fix: ...</code>.</li>
+<li><strong>Fixed.</strong> No re-drive attempt lands and resistance is confirmed on at
+   least one of them (3 attempts by default), so the test passes and the
+   check fails on purpose with: <em>The attack did not land
+   on any re-drive attempt this run. If your fix has landed, remove the
+   <code>@testkit.pending_fix(...)</code> line above this test.</em> An attack that lands
+   rarely can still resist three attempts, so if you haven't shipped a fix,
+   re-run the check first. If some attempts were inconclusive (the agent
+   made no tool calls), the summary also shows a <code>RedriveInconclusiveWarning</code>
+   saying on how many attempts resistance was confirmed; treat that pass as
+   thinner and re-run before removing the marker. Under
+   <code>filterwarnings = ["error"]</code> that warning fails the test; see
+   <a href="../testkit/#re-drive-attempts-and-what-they-cost">Re-drive attempts</a> for the
+   one-line filter that keeps it a warning.</li>
+<li><strong>Marker removed.</strong> The test is a regular gate. It passes while the fix
+   holds and fails the check if the attack works again.</li>
+</ol>
+<p>This applies to findings on your own target that the gate re-drives with
+<code>testkit.assert_target_resists</code>. A control-efficacy test
+(<code>assert_control_holds</code>) and a test against the bundled reference agent
+already pass on your current build, so they are committed without the marker.
+<code>pytest -m mylonite_pending_fix</code> lists every test still waiting on a fix. A
+check that never reached a verdict (a missing fixture, an unresolved model, a
+target that didn't start) still fails; only the attack landing counts as "not
+fixed yet". The <code>PR_BODY.md</code> "How this is gated" section says which tests are
+pending.</p>
+<h3 id="budget-exhaustion-and-findings">Budget exhaustion and findings<a class="headerlink" href="#budget-exhaustion-and-findings" title="Permanent link">&para;</a></h3>
+<p><code>--max-llm-calls</code> bounds the <em>scan</em> phase (see the sizing box above). If the
+budget runs out mid-scan but the scan already proved a real finding, <code>gate</code> still
+generates, validates, and opens or prints the PR for that finding — nothing is
+thrown away. The run's exit code is still the scan's own: <strong><code>3</code></strong>, not <code>0</code> or <code>9</code> — the
+same "abort always wins" rule <code>scan</code> follows on its own (see
+<a href="../reading-results/#exit-codes-for-ci">Reading the results</a>). Treat exit <code>3</code> from
+<code>gate</code> as "check <code>PR_BODY.md</code> before you decide this was just an infrastructure
+failure", not as a reason to discard the run.</p>
+<p>The error line carries reason code <code>[MYL-ABT-001]</code>. The other abort and
+incomplete-coverage errors <code>gate</code> prints carry codes the same way; look each one
+up in <a href="../reason-codes/">Reason codes</a>.</p>
+<p>If a custom target does not come up while <code>gate</code> is validating a finding, <code>gate</code>
+stops with one <code>[MYL-ABT-006]</code> line and exit <code>2</code>. The line says how many runs had
+finished, that later findings were not validated, and where the scan results are.</p>
+<h3 id="w3-or-w4-with-no-effect_probe">W3 or W4 with no <code>effect_probe</code><a class="headerlink" href="#w3-or-w4-with-no-effect_probe" title="Permanent link">&para;</a></h3>
+<p>On a custom target that declares W3 or W4 and no <code>effect_probe</code>, nothing reads the
+target's own state, so each of those classes reads NOT TESTED
+(<a href="../reason-codes/#myl-nt-017"><code>MYL-NT-017</code></a>) unless an attempt fires. A gate that finds
+nothing there exits <strong><code>2</code></strong> ("Coverage was incomplete"), not <code>0</code> ("nothing to gate").
+<strong>Upgrading:</strong> a gate you committed against such a target before this change turns red.
+Add an <code>effect_probe</code> to the target file (re-run <code>mylonite scan --scaffold</code> to get a
+proposed one), or remove W3/W4 from <code>weakness_classes</code>.</p>
+<h3 id="pre-flight-order">Pre-flight order<a class="headerlink" href="#pre-flight-order" title="Permanent link">&para;</a></h3>
+<p><code>gate</code> runs its pre-flight checks in this order, all before any LLM call:</p>
+<ol>
+<li>The repository checks, each exiting <code>8</code>: a <code>--base</code> that is empty, contains
+   whitespace or starts with <code>-</code>; with <code>--open-pr</code> or <code>--workflows</code>, an output
+   directory outside the repository; with <code>--open-pr</code>, a working tree with staged
+   files or uncommitted changes to tracked files.</li>
+<li>On Windows without long paths, the output path check, exiting <code>2</code> (see
+   <a href="#windows-path-length">Windows path length</a>).</li>
+<li>The target, <code>--authorize</code>, model, provider key and uncoverable-class checks, each
+   exiting <code>2</code>.</li>
+</ol>
+<p>So when both kinds of problem are present, the exit-<code>8</code> error is the one you see first.</p>
+<p>For a custom (<code>--target-file</code>) target, <code>gate</code> then calibrates the declared
+<code>effect_probe</code> — real writes proving it can see a change — once, before its scan
+phase runs. This is the same calibration <code>scan</code>/<code>validate</code>/<code>ablate</code> each run on
+their own path; see <a href="../target-file/#calibration">Calibration</a> for what
+<code>calibration.controls</code> permits and <a href="../reason-codes/">Reason codes</a> for what an
+uncalibrated probe reads as.</p>
+<h3 id="what-gate-touches">What <code>gate</code> touches<a class="headerlink" href="#what-gate-touches" title="Permanent link">&para;</a></h3>
+<p><strong>By default, nothing outside its own output directory.</strong> <code>gate</code> writes
+<code>.mylonite/gate/</code> — the generated test, the exploit JSON, the validation report,
+your <code>target.yaml</code> and <code>PR_BODY.md</code> — and then prints the exact <code>git</code> and <code>gh</code>
+commands to commit and open the PR yourself, with every path rendered using <code>/</code>
+(on Windows too) so the printed <code>git add</code>/<code>--body-file</code> paths run as printed in
+cmd, PowerShell or bash alike. With neither flag below, your repository is not
+modified: no branch, no commit, no workflow files.</p>
+<p>Each finding gets a short, stable id: its weakness class and six hex digits
+of a hash of its pattern id, for example <code>w2-1a2b3c</code>. Its test is
+<code>test_w2-1a2b3c.py</code> and the exploit it loads is <code>exploit_w2-1a2b3c.json</code>. The
+full pattern id is in the test's docstring and the exploit JSON, <code>gate</code> prints
+which pattern each test gates, and a multi-finding PR body has a table mapping
+each pattern id to its test.</p>
+<p>One finding is written straight into <code>.mylonite/gate/</code>, and on the reference
+target its replay recordings sit beside it in <code>.mylonite/gate/fixtures/</code>. With
+two or more, each kept finding gets its own folder, <code>.mylonite/gate/&lt;id&gt;/</code>,
+holding its test, exploit JSON, validation report and, on the reference target,
+the <code>fixtures/</code> its test replays. With <code>--target-file</code>, each finding folder also
+gets its own redacted <code>target.yaml</code>, because the test loads the file from its
+own folder. <code>pytest .mylonite/gate/</code> runs every kept test; on the reference
+target it runs offline, with no provider key. A rejected finding's files,
+recordings included, move to <code>.mylonite/gate-rej/&lt;id&gt;/</code> and are never
+committed.</p>
+<p>Gate dirs written by earlier versions, with folders and tests named after the
+full pattern id, keep replaying unchanged. When you upgrade, re-run <code>gate</code> with
+<code>--workflows</code>, or change the <code>mylonite==</code> pin in your committed gate workflows
+to the new version, before committing new tests: an older pin cannot replay
+the new recordings, so those tests would fail in CI on their first run. <code>gate</code>
+prints a warning naming the workflow file when it finds an older pin. A new
+run into the same <code>--out</code> writes the short-id layout beside the old (full
+pattern id) folders and leaves them alone, so <code>pytest .mylonite/gate/</code> then
+runs both; delete the old folders once the new tests are committed.</p>
+<p><strong>Reusing <code>--out</code> for a finding this run keeps again is safe: nothing is lost.</strong>
+If the same finding id does not keep this time, its earlier KEPT test, exploit
+and recordings are put back exactly as they were, never overwritten and never
+left half-rewritten. If a different finding happens to land on the same short
+id in one run, the second one gets a numbered folder (<code>w2-1a2b3c-2</code>) instead of
+colliding with the first.</p>
+<p><strong><code>gate</code> never deletes anything from <code>--out</code>, including a finding this run
+never finds at all.</strong> "Not found again" is not evidence a finding is fixed —
+a flaky planner miss, a NOT TESTED or aborted attempt, or a target file that
+now declares a narrower <code>weakness_classes</code> can all make a real, still-live
+finding vanish from one run's own result without the weakness being gone.
+Instead, each earlier kept finding this run did not touch — identified by its
+own naming and an <code>exploit_*.json</code> record inside, never a file of yours that
+merely sits nearby — is named in a report at the end of the run: "left in
+place, not re-proven this run." When the scan itself was partial or aborted,
+the report says so, since that run may simply not have reached the finding
+yet. Delete a leftover's folder (or, for a single finding, its root-level
+test and exploit files) yourself once you've confirmed the weakness is
+fixed. A manual <code>git add .mylonite/gate</code> can still pick up a leftover you
+haven't deleted — stage with the printed command instead (see below).</p>
+<h3 id="windows-path-length">Windows path length<a class="headerlink" href="#windows-path-length" title="Permanent link">&para;</a></h3>
+<p><strong><code>gate</code> refuses an output directory Windows cannot hold before it calls a model
+or starts your target.</strong> Without long paths enabled, Windows caps a file path at
+259 characters. <code>gate</code> works out the longest path it could write under <code>--out</code>
+(a folder per finding, rejected findings included) and, if that is over the
+limit, prints one line naming the path, its length and how many characters to
+cut from <code>--out</code>, then exits <code>2</code>. After the scan it checks again with the real
+findings, before any validation. Linux, macOS and Windows with long paths on
+skip the check.</p>
+<p>With the default <code>.mylonite/gate</code>, a project path of up to 200 characters fits:
+the deepest file, <code>.mylonite/gate-rej/&lt;id&gt;/fixtures/&lt;recording&gt;.json</code>, uses 58
+of the 259. CI runs a two-finding gate from a 200-character project root with
+long paths off. To go deeper, pass a shorter <code>--out</code> or enable long paths
+(<code>LongPathsEnabled</code> in the registry, plus <code>git config core.longpaths true</code> for
+teammates who clone the gate). Replay recordings are named by the first 12 hex
+digits of their key (17 characters); recordings made by earlier versions keep
+their 64-digit names and still replay.</p>
+<p><code>gate</code> redacts secret-shaped values in the exploit JSON, the validation report
+and <code>PR_BODY.md</code> (its evidence lines and the optional LLM suggestion) before it
+writes them. A key the target echoed into its reply, a tool result or a
+validator error shows up there as <code>***REDACTED***</code>. The recorded replay files
+under <code>fixtures/</code> (written for the bundled reference agent) are redacted the
+same way before they are written, and they still replay offline. These files
+use <code>cache_key_version: 3</code> in <code>fixtures/_meta.json</code>: a stored reply, and the
+target's echo of a value the model introduced, are keyed in redacted form, and
+every other secret-shaped value in the conversation (including a key the target
+leaked and the model then forwarded) is keyed by its content through a slow
+salted hash. Two runs whose tool output differs only inside a secret-shaped
+value never share a recording, and neither the files nor their names hold a
+secret-shaped value or a fast hash of one. A short or unshaped credential is
+hashed into the key like any other text; see
+<a href="../limitations/#13-recorded-fixtures-and-guessable-secrets">Limitations</a>.</p>
+<p>A re-run of <code>gate</code> replaces the finding's own <code>fixtures/</code> folder and puts the
+earlier folder, test and exploit back if the run does not keep or stops on an
+error. A <code>fixtures/</code> that is a symlink or junction fails that finding with one
+line; gate never follows or deletes it. <code>validate</code> checks its <code>fixtures/</code>
+folder before the first model call and exits 2 with one line when the folder
+was recorded in an older format (<code>cache_key_version</code> 1 or 2), names a version
+Mylonite does not know, has a damaged <code>_meta.json</code>, or holds recordings with
+no <code>_meta.json</code>; delete that folder and run again.</p>
+<p>An older folder replays when its <code>_meta.json</code> names its <code>cache_key_version</code>.
+One that holds recordings and no <code>_meta.json</code> fails replay with a message
+rather than guessing how it was keyed: add <code>{"cache_key_version": 2}</code> (<code>1</code>
+for the oldest sets) as its <code>_meta.json</code>, or re-record it. Fixtures recorded
+before this release were not redacted; re-gate them, or review them before
+you share them.</p>
+<p>Separately from redaction, any target-controlled text quoted in
+<code>PR_BODY.md</code> — a tool name, an argument, an evidence value, a validator's
+evidence detail, the "Located at" locus — is quoted as a Markdown inline
+code span the value's own content cannot break out of: the fence is always
+longer than the longest backtick run already in the value, a value
+starting or ending with a backtick gets a padding space, and control
+characters are stripped first. A value containing its own backtick can no
+longer close the span early and render the rest of the value as Markdown.
+The same quoting carries through to the SARIF message and the JSON
+bundle's <code>label</code> field, since both render from the same locus/evidence
+data <code>PR_BODY.md</code> does. A few sites quote a target-controlled tool name
+inside an <em>existing</em> fence or indented block instead of giving it its own
+span — a recommendation's <code>invariant</code> line, and the W1 description-pin's
+YAML <code>config_snippet</code>, which a real control parses back out and must keep
+the tool name as a literal key — so those strip only control characters
+(in particular the newline, which could otherwise de-indent the line or
+start one that closes the surrounding fence) rather than adding a nested
+span.</p>
+<p>Two flags opt in to the rest, independently:</p>
+<ul>
+<li><strong><code>--open-pr</code></strong> creates the branch, commits the gate directory, pushes, and
+  opens the PR via <code>gh</code>. If <code>gh</code> is missing or unauthenticated it still commits
+  and prints the remaining two commands. Once the commit exists, <code>gate</code> checks
+  out the branch you started on (or, on a detached HEAD, the same commit),
+  whether the PR opened or the push or <code>gh</code> step failed. The gate branch is
+  kept, and the output names it: "The gate branch 'mylonite/gate-…' is kept
+  with the committed gate output; you are back on 'main'." The committed gate
+  output now lives on that branch, so it leaves your working tree; run
+  <code>git checkout &lt;gate branch&gt;</code> to look at it.</li>
+<li><strong><code>--workflows</code></strong> scaffolds the two <code>.github/workflows/</code> templates described
+  below — this writes to disk whether or not <code>--open-pr</code> is also set, <strong>but
+  only once this run has kept at least one finding.</strong> A workflow wires in the
+  test <code>gate</code> just committed, so a run that keeps nothing (a clean scan, every
+  finding rejected, or only STABLE, NOT PROVEN candidates) writes no workflow
+  file at all; the summary says so plainly, naming why, instead of exiting as
+  if nothing had been asked. When something is kept, the printed summary lists
+  the workflow file(s) it wrote, rather than claiming nothing outside the
+  output directory changed.</li>
+</ul>
+<p>Both are off by default. Writing into someone's repository is an action you ask
+for, not one you opt out of.</p>
+<blockquote>
+<p><strong>Changed in 0.8.5.</strong> <code>gate</code> previously created a branch and a commit on every
+run, and scaffolded the workflow templates unless you passed <code>--no-workflows</code>.
+If you relied on that, add <code>--open-pr</code> and <code>--workflows</code> explicitly.</p>
+</blockquote>
+<p>The PR body is itself a result surface (see <a href="../reading-results/#the-gating-pr">Reading the results</a>).
+Every finding section follows one order — <strong>verdict, impact, fix, proof</strong> — so the facts
+a reviewer needs most read top to bottom instead of being scattered by finding shape. It
+states the guarded-twin claim only for a <code>KEPT</code> validation; any other verdict is named
+with its reason, and "your own safeguard stopped it" is said only when the differential
+measured a real <code>control_env</code>, never Mylonite's boundary stand-in. It carries:</p>
+<ul>
+<li><strong>A verdict, a severity and a one-sentence impact</strong> — <code>KEPT</code> / <code>STABLE, NOT PROVEN</code> /
+  <code>REJECTED</code> with why; <code>High</code> / <code>Medium</code> / <code>Low</code>; and a deterministic, plain-language
+  sentence naming what an attacker gets from this weakness class (the same sentence for
+  every finding of that class). A multi-finding gate PR lists the most severe finding
+  first.</li>
+<li><strong>Located at</strong> — the exact locus to fix (which tool description / returned content /
+  action handler / system-prompt line).</li>
+<li><strong>The proven fix</strong> — an evidence-anchored recommendation naming the actual tool and
+  argument that landed the exploit (your own tool for a <code>--target-file</code> app; the
+  reference app's tool for the bundled <code>reference:*</code> targets), as a fenced code sketch
+  (never a diff — Mylonite doesn't assert it knows your file layout) tiered
+  deterministic/probabilistic/detective. It is always a <em>suggestion</em> — Mylonite proves
+  and gates the weakness; it never claims to have patched your code.</li>
+<li><strong>The differential proof</strong> — the fires/resists numbers and the <code>kept</code> formula, so a
+  reviewer sees <em>why the test is trustworthy</em>, not just that it exists. The per-seed kill
+  matrix marks a seed this test never ran as "not run" rather than lumping it in with a
+  genuine miss, with a legend explaining each mark. At <code>--iterations 1</code> the flakiness
+  leg reads "not measured (1 run per build)", never a pass, because one run per build
+  has nothing to compare; the default <code>--iterations 3</code> measures it.</li>
+<li><strong>A reviewer checklist</strong> — four lines to confirm against your own app before merging:
+  the proof level, the planner model, whether the prompt was declared or Mylonite's
+  generic default, and the run counts behind the proof.</li>
+<li><strong>Compliance</strong> — the OWASP-LLM/ASI · MITRE ATLAS · NIST tags.</li>
+<li><strong>Inline annotations</strong> — a best-effort GitHub check-run annotation on the offending
+  prompt line, when the AI layer is a committed file.</li>
+<li><strong>Which repository secrets to add</strong> — when the target file has secret-shaped
+  fields (headers, <code>env:</code>), the committed <code>target.yaml</code> replaces them with
+  <code>${MYLONITE_TARGET_...}</code> placeholders; the PR body and the console both name
+  the repository secrets those placeholders need before the scaffolded gate
+  workflow (or your own) can load the file in CI.</li>
+</ul>
+<p>The recommendation's confidence is degraded, not silently kept at full strength, when the
+effect probe didn't settle the finding on its own: <code>unprobed</code> (no <code>effect_probe</code>
+declared), <code>errored</code>, <code>deferred</code> or <code>false</code> (the probe confirmed nothing on a finding the
+tool-call trace decided), and <code>unattributed</code> (the state change, or its absence, could not
+be tied to that attempt — see <a href="../target-file/#effect-attribution">Effect attribution</a>)
+each lower it one step, so a PR body never reads a weaker signal as a fully-confirmed one.</p>
+<p>For a custom target the gate proves the finding <strong>differentially by default</strong> (the
+control-efficacy check). <code>--fast</code> skips that leg, so <code>gate</code> keeps a finding only when
+an <code>effect_probe</code> proves it; otherwise the finding is a candidate, no test is written,
+and <code>gate</code> exits <code>10</code>.</p>
+<h2 id="adopting-it-in-github-ci">Adopting it in GitHub CI<a class="headerlink" href="#adopting-it-in-github-ci" title="Permanent link">&para;</a></h2>
+<p>Add one secret — <code>MYLONITE_API_KEY</code> (your provider key) — and the two
+scaffolded workflows. Both map that one secret to the credential variable
+your chosen model's provider actually needs (<code>ANTHROPIC_API_KEY</code>,
+<code>OPENAI_API_KEY</code>, …), computed when <code>gate --workflows</code> wrote them — see
+<a href="#provider-keys">Provider keys</a> below for what that means if you later
+switch providers. If your target file has secret-shaped fields (a header,
+an <code>env:</code> entry), add one repository secret per <code>${MYLONITE_TARGET_...}</code>
+placeholder too — <code>gate</code> names the exact variables in its console output and
+<code>PR_BODY.md</code> the first time it writes a redacted <code>target.yaml</code>. The
+scaffolded workflows already map each one to <code>${{ secrets.&lt;NAME&gt; }}</code> in the
+step that runs the gate. GitHub renders a secret you haven't added as an empty
+string, and an empty value counts as set when the target file is expanded, so
+on its own a missing secret would launch your server with an empty credential
+and the gate test could pass for the wrong reason. To stop that, each workflow
+runs a "Check the target secrets are set" step first, which fails the job on
+the first empty one with <code>secret &lt;NAME&gt; is empty - add it under repository
+secrets</code>.
+Outside these workflows (a local run, another CI system), an empty
+<code>MYLONITE_TARGET_*</code> variable is used as given, so export real values.</p>
+<ul>
+<li>
+<p><strong><code>mylonite-gate.yml</code></strong> runs on every PR. It re-drives your agent (bounded:
+  deterministic effect-probe, small model, 1 iteration) and fails the check on
+  a regression. It sets <code>MYLONITE_LIVE_TARGET=1</code> for you (see
+  <a href="../validation/">The validation engine</a>) — without that variable the committed
+  test for a custom target is <em>skipped</em>, not run. It also sets
+  <code>MYLONITE_REQUIRE_GATE_RUN=1</code>, which makes the job fail if a Mylonite gate test
+  was skipped or none was collected, so the check can only go green by running
+  the gate. <code>pytest -ra</code> prints the reason if it does. A pending-fix test that
+  ran and failed as expected counts as a run, not a skip. A
+  <code>@pytest.mark.xfail</code> you add by hand does not: it can hide a check that never
+  reached a verdict, so it still fails the job.</p>
+<p>The re-drive carries a <strong>hard call budget and a wall-clock timeout</strong>. It is
+scoped to the single already-known pattern, so a healthy run is a customiser
+call, a few planner turns and a judge call; overrunning the bound means
+something is wrong — a hung MCP server, a stalled provider — not that the
+work was large. Without those bounds the only backstop is your CI platform's
+job cap, which on GitHub-hosted runners is <strong>six hours</strong>.</p>
+<p>Two things worth knowing before you make this a required check. It calls a
+live model, so it is <strong>not bit-for-bit deterministic</strong> the way a unit test
+is — budget for the occasional re-run rather than treating a single red as
+proof of regression. And it is the one path in the product that spends money
+on every PR; the nightly discovery job is where the expensive work belongs.
+- <strong><code>mylonite-discovery.yml</code></strong> runs nightly or on demand. It does the expensive
+  full discovery and opens a fresh gating PR when it finds a new exploit. It
+  also needs a repository <strong>variable</strong> — <code>vars.MYLONITE_AUTHORIZE</code> — set to
+  the same value your own <code>--authorize</code> would need (the target's declared
+  <code>scope</code>, or its <code>family</code> if no scope is declared; see
+  <a href="../target-file/">target.yaml</a>); the workflow passes it to
+  <code>mylonite gate --authorize</code> through an environment variable, so a value
+  holding a quote or <code>;</code> stays one argument.</p>
+</li>
+</ul>
+<p><strong>Both workflows are hardened the same way every workflow in this
+repository is.</strong> Every action is pinned by commit SHA, with the tag as a
+comment (a moved tag would run new code in your CI the next time the job
+fires). Each job sets <code>concurrency:</code> — the per-PR gate cancels a
+superseded run on the same ref, the nightly discovery job serializes
+instead so one run never races a PR it is in the middle of opening — and a
+<code>timeout-minutes:</code> so a hung provider or MCP server fails the job instead of
+riding your CI platform's much larger default cap. Each job also sets
+<code>MYLONITE_REDRIVE_ATTEMPTS</code> explicitly rather than leaving it to the
+default: <code>1</code> on <code>mylonite-gate.yml</code> (the per-PR job already explained
+above spends real money on every PR, so it takes the cheaper, less
+conclusive bound) and <code>3</code> on <code>mylonite-discovery.yml</code> (the nightly job,
+where the fuller signal is worth the extra re-drives). See <a href="#what-a-live-gate-costs">What a live
+gate costs</a> for the trade-off either number makes.</p>
+<p><strong>Neither workflow leaves a write-capable credential on disk while your
+target runs.</strong> Both checkouts set <code>persist-credentials: false</code>, so
+<code>actions/checkout</code>'s default token never lands in <code>.git/config</code> where your
+target's own process (an <code>npx</code>/<code>uvx</code> MCP server, started by <code>mylonite gate</code>
+in the same job) could read it. <code>mylonite-gate.yml</code> never pushes, so it
+needs nothing further. <code>mylonite-discovery.yml</code> does push the gate branch
+and open the PR, in the same step that runs the target — right before that
+push, it runs <code>gh auth setup-git</code>, which points git's credential helper at
+<code>gh</code> rather than writing a token to disk; <code>gh</code> itself reads <code>GH_TOKEN</code> (the
+built-in <code>secrets.GITHUB_TOKEN</code>), already scoped to that one step, only at
+the moment a push actually needs it.</p>
+<p><strong>If your target launches with <code>npx</code>/<code>node</code> or <code>uvx</code>/<code>uv</code>,</strong> the scaffolded
+workflow adds a Node or <code>uv</code> setup step automatically — read from the
+target file's own <code>command:</code> at the time <code>gate --workflows</code> ran. A hosted
+runner has neither preinstalled the way it has Python, so without this the
+job would fail to launch your target with no clearer message than "command
+not found".</p>
+<p><strong>A bundled MCP target (<code>mcp:&lt;family&gt;[:scope]</code>, no <code>--target-file</code>) refuses
+<code>--open-pr</code>/<code>--workflows</code> outright, before the scan starts.</strong> It has no
+<code>target.yaml</code> of its own, so the committed test's <code>target.yaml</code> load would
+fail every time CI re-drives it. <code>gate</code> checks for this up front — before any
+model call or target launch — rather than spend a whole run only to refuse at
+the end. Run <code>mylonite scan --scaffold</code> first to write one, then gate with
+<code>--target-file &lt;path&gt;</code> instead. Dropping <code>--open-pr</code>/<code>--workflows</code> still
+gates a bundled target and writes its artefacts locally, unchanged.</p>
+<p><strong>No default model, so both workflows pin the one <code>gate --workflows</code> used —
+but what that controls is NOT the same in each.</strong> There is no default
+provider or model — a live command stops rather than guessing one (see "No
+model chosen at all?" in <a href="../cli-reference/">the CLI reference</a>). Both
+workflows set <code>MYLONITE_MODEL: ${{ vars.MYLONITE_MODEL || '&lt;model&gt;' }}</code>,
+where <code>&lt;model&gt;</code> is the exact value the run that scaffolded them resolved,
+but only <strong><code>mylonite-discovery.yml</code></strong> actually reads that variable:
+its <code>mylonite gate --target-file ... --open-pr</code> step is a LIVE invocation,
+and <code>MYLONITE_MODEL</code> is exactly what chooses its model (the same env var
+<code>--model</code>/<code>mylonite.yaml</code> would otherwise need to win over). Add a
+repository <strong>variable</strong> named <code>MYLONITE_MODEL</code> to change the model the
+<em>discovery</em> workflow drives, without editing the file; leave it unset and
+the baked-in literal keeps that job working exactly as scaffolded.</p>
+<p><strong><code>mylonite-gate.yml</code>'s per-PR job does NOT read <code>MYLONITE_MODEL</code> at all.</strong>
+It runs <code>pytest</code> against the already-committed test, which re-drives the
+finding against the model recorded with it at <code>gate</code>/<code>generate</code> time (the
+exploit's own execution-context metadata, or a sibling <code>scan_report.json</code>)
+— never an environment variable. The variable is still set in that
+workflow's <code>env:</code> block (for consistency, and in case a future committed
+test ever needs it as a fallback), but today it is inert there. Re-run
+<code>gate --workflows</code> after choosing a different <code>--model</code> to re-bake the
+discovery workflow's literal; a per-PR test's model only changes when the
+finding itself is re-proven against a different one (<code>mylonite validate
+--model ...</code>, then re-committing).</p>
+<p>Both workflows install the Mylonite release that wrote them:
+<code>pip install "mylonite==X.Y.Z"</code>, where <code>X.Y.Z</code> is the version that ran
+<code>gate --workflows</code>. A new Mylonite release never changes what your CI runs until
+you change that line, or re-run <code>gate --workflows</code> with the new version.</p>
+<h3 id="prerequisites-gate-open-pr-assumes">Prerequisites <code>gate --open-pr</code> assumes<a class="headerlink" href="#prerequisites-gate-open-pr-assumes" title="Permanent link">&para;</a></h3>
+<p><code>mylonite gate --open-pr</code> shells out to <code>git</code>/<code>gh</code> directly (no GitHub API
+client), so it inherits a few real preconditions the scaffolded workflows
+satisfy automatically but a local or non-GitHub run must provide itself:</p>
+<ul>
+<li><strong>A git repository.</strong> <code>gate --open-pr</code> (and <code>--workflows</code>) resolves the repo
+  root with <code>git rev-parse --show-toplevel</code>, so it works from any subdirectory —
+  the gate output and the scaffolded workflows land at the repo root either way,
+  not wherever you happened to run it from. Outside a git repository entirely,
+  it fails fast with a named error, before any scan/LLM spend.</li>
+<li><strong>A clean working tree.</strong> <code>--open-pr</code> switches branch and runs <code>git commit</code>,
+  which commits everything staged. So <code>gate</code> refuses, before any LLM call, when
+  files are staged or tracked files have uncommitted changes; commit, stash or
+  unstage them first. Untracked files are fine: <code>gate</code> stages only the files it
+  wrote.</li>
+<li><strong>The right PR base.</strong> The PR targets your repository's default branch:
+  <code>origin/HEAD</code>, else the branch your current branch tracks, else <code>main</code>. Pass
+  <code>--base &lt;branch&gt;</code> to target another branch. The printed <code>gh pr create</code>
+  command uses the same base. Running from a feature branch? Pass <code>--base</code>:
+  the gate branch is cut from the commit you have checked out, so against the
+  default branch the PR also carries your feature branch's unmerged commits.</li>
+<li><strong>A gate branch from an earlier run.</strong> If the gate branch (<code>mylonite/gate-…</code>)
+  already exists — a re-run that re-found the same finding — <code>gate</code> does not
+  touch it: no checkout, no new commit, no push, no delete. It checks <code>origin</code>
+  first (<code>git ls-remote --exit-code --heads</code>), before creating anything: a
+  nightly discovery job is almost always a fresh clone, so the branch from an
+  earlier run usually lives only there. It also still checks for the branch
+  locally, for a persistent workspace (a self-hosted runner) that already has
+  it. Either way it reports the finding as already proposed and exits <code>9</code>,
+  the same as a freshly kept one; see that branch (or its PR) instead of
+  opening a new one. A missing <code>origin</code> or an unreachable remote is never
+  read as "already proposed" — it falls through to the normal flow. A
+  <code>checkout -b</code> or <code>push</code> failure for any OTHER reason (a locked ref, a hook,
+  a real conflict) still stops <code>gate</code> on exit code <code>8</code>.</li>
+<li><strong><code>.mylonite/gate/</code> (or your configured <code>--out</code>) must actually be
+  committed.</strong> <code>gate</code> writes the test, the exploit, and your <code>target.yaml</code>
+  there, then commits and pushes them as part of the PR — but if <em>your</em> repo's
+  own <code>.gitignore</code> has a blanket <code>.mylonite/</code> rule (a natural pattern to add,
+  and what Mylonite's own repo uses for its dev artefacts), <code>git add</code> refuses
+  the explicitly-named ignored path and <code>gate --open-pr</code> fails loudly with a
+  git error (rolling back the half-created branch) rather than opening an
+  empty PR — verified against <code>gate.pr.open_or_print_pr</code> directly.
+  Confusing either way: make sure your <code>.gitignore</code> does <strong>not</strong> ignore the
+  gate output directory.</li>
+</ul>
+<p>A failure in any of these is reported as a named error on <strong>exit code 8</strong>, not
+a traceback, and the findings, the generated test and the validation report are
+all written to <code>--out</code> <em>before</em> any git command runs — so a git failure costs
+you no evidence. If the failure comes after the commit (the push or <code>gh</code>
+step), the evidence is on the kept gate branch the error names, and you are
+back on your original branch. Re-run the printed <code>git</code>/<code>gh</code> commands by hand
+once the precondition is fixed.</p>
+<h3 id="the-reusable-action">The reusable Action<a class="headerlink" href="#the-reusable-action" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Abidemialade/mylonite/gate-action@v0.12.1</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">  </span><span class="nt">with</span><span class="p">:</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="nt">target-file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.mylonite/gate/target.yaml</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="nt">authorize</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ vars.MYLONITE_AUTHORIZE }}</span><span class="w">   </span><span class="c1"># your target's scope, or family if no scope</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic/claude-haiku-4-5</span><span class="w">           </span><span class="c1"># no default -- pick one: see "Choose a model"</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="nt">api-key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ secrets.MYLONITE_API_KEY }}</span><span class="w">    </span><span class="c1"># mapped automatically to the model's provider</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="nt">open-pr</span><span class="p">:</span><span class="w"> </span><span class="s">"true"</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="c1"># llm-headers: ${{ secrets.MYLONITE_LLM_HEADERS }}   # optional</span>
+</code></pre></div>
+<p>The action also configures a git identity before it calls <code>mylonite gate
+--open-pr</code> (a hosted runner has none by default, so the commit would
+otherwise fail), and sets up Node or installs <code>uv</code> on its own when your
+target file's <code>command:</code> needs one.</p>
+<p><strong>The action's own step succeeds on <code>gate</code>'s exit <code>0</code>, <code>9</code> and <code>10</code></strong> — the
+same mapping the scaffolded discovery workflow uses — and fails only on <code>1</code>-<code>8</code>
+(an infrastructure problem). It prints a <code>::notice::</code> for a clean or kept run
+and a <code>::warning::</code> for a candidates-only one, and sets two outputs: <code>exit-code</code>
+(the raw code) and <code>result</code> (<code>clean</code>, <code>kept</code> or <code>candidates</code>; unset on an
+infrastructure failure, which fails the step directly). A caller that wants a
+red check on a specific result reads the output —
+<code>steps.&lt;id&gt;.outputs.result == 'kept'</code> — or sets the optional <code>fail-on</code> input
+(<code>none</code> by default, or <code>kept</code>/<code>candidates</code>) to have the step itself exit
+non-zero on that result:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Abidemialade/mylonite/gate-action@v0.12.1</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gate</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">with</span><span class="p">:</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">    </span><span class="nt">target-file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">.mylonite/gate/target.yaml</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">    </span><span class="nt">authorize</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ vars.MYLONITE_AUTHORIZE }}</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">    </span><span class="nt">model</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">anthropic/claude-haiku-4-5</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="w">    </span><span class="nt">api-key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${{ secrets.MYLONITE_API_KEY }}</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="w">    </span><span class="nt">fail-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">kept</span><span class="w">   </span><span class="c1"># turn this job red when a proven finding was gated</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">echo "${{ steps.gate.outputs.result }}"</span>
+</code></pre></div>
+<p><strong>The tag is the release.</strong> The action lives in this repository
+(<code>gate-action/action.yml</code>), so every Mylonite release tag <code>vX.Y.Z</code> is also an
+action tag, and <code>gate-action@vX.Y.Z</code> installs exactly <code>mylonite==X.Y.Z</code>. Tags
+before v0.10.2 predate the pin and install the latest release. To upgrade,
+change the tag. <code>scripts/prepare_release.py</code> bumps the action's pin and
+the tag on this page with the version, and the release job refuses a tag whose
+pin does not match.</p>
+<p><strong><code>mode</code> and <code>runs-on</code> are deprecated.</strong> <code>mode</code> was never read; <code>runs-on</code> fed
+<code>--runs-on</code>, but the action never passes <code>--workflows</code>, so it had nothing to
+scaffold a runner label into. Both inputs still exist for backward
+compatibility — the action does not write workflow files in CI — but a
+non-default value now logs a <code>::warning::</code> in the job log instead of being
+silently accepted and silently ignored.</p>
+<h2 id="other-ci-systems-jenkins-gitlab">Other CI systems (Jenkins, GitLab, …)<a class="headerlink" href="#other-ci-systems-jenkins-gitlab" title="Permanent link">&para;</a></h2>
+<p>The committed gate is a plain <code>pytest</code> file with no GitHub dependency, so it should run
+anywhere that meets the preconditions below. <strong>GitHub Actions is the only configuration we
+test</strong>, so treat other systems as supported-but-unverified.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">MYLONITE_LIVE_TARGET</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pytest<span class="w"> </span>.mylonite/gate
+</code></pre></div>
+<p><strong>The environment variable is required.</strong> Without it the live test is skipped and <code>pytest</code>
+exits <strong>0</strong>. <code>mylonite generate</code> prints this exact command for that reason. To make the job
+fail rather than pass when the gate test did not run, also set
+<code>MYLONITE_REQUIRE_GATE_RUN=1</code> in the CI job — the same check the scaffolded GitHub workflow
+enables:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">MYLONITE_LIVE_TARGET</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="nv">MYLONITE_REQUIRE_GATE_RUN</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pytest<span class="w"> </span>.mylonite/gate<span class="w"> </span>-ra
+</code></pre></div>
+<p>With it set, the session fails if any <code>mylonite_security</code> test was skipped or if none was
+collected; tests without that marker are never inspected. Leave it unset for local runs,
+where a keyless skip is the intended default. You also need:</p>
+<ul>
+<li><code>mylonite</code> and <code>pytest</code> installed</li>
+<li>the scan artefacts (the exploit JSON and <code>target.yaml</code>) co-located with the test:
+  <code>exploit_&lt;id&gt;.json</code> in a gate dir, <code>exploit_&lt;pattern_id&gt;.json</code> from <code>generate</code></li>
+<li>a provider key</li>
+<li>network egress to both the model provider and your MCP server</li>
+</ul>
+<p>Only the bundled reference/replay test runs offline unconditionally; a gate against your
+own app always re-drives the real target.</p>
+<h3 id="what-a-live-gate-costs">What a live gate costs<a class="headerlink" href="#what-a-live-gate-costs" title="Permanent link">&para;</a></h3>
+<p>A live gate test re-drives your app up to 3 times. It fails on the first attempt the
+attack lands on. An inconclusive attempt (the agent made no tool calls, say) uses up one
+attempt and the next one runs. The test passes when no attempt landed and at least one
+resisted, and errors if every attempt was inconclusive, so a passing check is the expensive
+case:</p>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Attack lands on attempt 1</th>
+<th>Every attempt resists</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>assert_target_resists</code></td>
+<td>1 re-drive</td>
+<td>3 re-drives</td>
+</tr>
+<tr>
+<td><code>assert_control_holds</code></td>
+<td>1 raw + 1 guarded</td>
+<td>1 raw + 3 guarded</td>
+</tr>
+</tbody>
+</table>
+<p>Each re-drive is one seed: about a customiser call, a few agent turns and a judge call,
+capped at 12 model calls and 180 seconds. To spend less on every pull request and keep the
+full check on a schedule, set the number of attempts per job:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># every pull request: one attempt</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="nv">MYLONITE_LIVE_TARGET</span><span class="o">=</span><span class="m">1</span><span class="w"> </span><span class="nv">MYLONITE_REDRIVE_ATTEMPTS</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pytest<span class="w"> </span>.mylonite/gate
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># nightly: the default 3</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="nv">MYLONITE_LIVE_TARGET</span><span class="o">=</span><span class="m">1</span><span class="w"> </span>pytest<span class="w"> </span>.mylonite/gate
+</code></pre></div>
+<p>The scaffolded <code>mylonite-gate.yml</code>/<code>mylonite-discovery.yml</code> already set this
+for you — <code>1</code> on the per-PR job, <code>3</code> on the nightly one — so you only need
+the commands above on another CI system or a local override.</p>
+<p>One attempt proves less: an attack that lands 40% of the time resists a single re-drive
+60% of the time. A test that passes <code>attempts=</code> itself keeps that number whatever the
+variable says.</p>
+<p>What does <em>not</em> port: opening the gating PR, inline check-run annotations, and Security-tab
+SARIF upload all use the <code>gh</code> CLI and GitHub APIs. On other CI, run the test as the gate and
+surface results through your own reporting — <code>mylonite report --sarif</code> still emits standard
+SARIF 2.1.0 if your platform ingests it.</p>
+<h3 id="provider-keys">Provider keys<a class="headerlink" href="#provider-keys" title="Permanent link">&para;</a></h3>
+<p>There is no default provider. The scaffolded workflows map the one
+<code>MYLONITE_API_KEY</code> secret to the credential variable the model <code>gate
+--workflows</code> resolved actually needs — <code>ANTHROPIC_API_KEY</code> for an
+Anthropic model, <code>OPENAI_API_KEY</code> for an OpenAI one, and so on, read from
+the approved-provider registry at the time the workflow was written, never
+hardcoded to one provider.</p>
+<p><strong>That mapping is baked in, not re-computed at CI time.</strong> Setting a
+repository <code>MYLONITE_MODEL</code> variable to a model from a <em>different</em>
+provider (see above) changes which model the <em>discovery</em> workflow drives,
+but <strong>not</strong> which credential variable it exports — the workflow still only
+ever sets the one baked in when it was scaffolded. Switching providers
+needs a fresh <code>gate --workflows</code> run (with the new model) to re-bake both
+the model fallback and the key mapping together; a repository variable
+alone is enough only for staying on the same provider's other models.</p>
+<p>A model whose provider needs more than one credential variable (Bedrock's
+access-key pair, or Vertex, which has no bare key at all) makes <code>gate
+--workflows</code> refuse to scaffold at all, naming why — a single
+<code>MYLONITE_API_KEY</code> secret can't express either case. Write that workflow by
+hand instead. The same holds for a <strong>local</strong> model (Ollama, vLLM): there is
+no key to map, and a hosted GitHub runner can't reach it regardless, so
+scaffolding would only produce CI that can never pass.</p>
+<p><strong>A provider that needs more than its bare key — but still has exactly
+one — is not refused; the extra variables are emitted alongside it.</strong>
+Azure needs its endpoint and API version beyond <code>AZURE_API_KEY</code>: the
+scaffolded workflow exports both as repository <strong>variables</strong>
+(<code>${{ vars.AZURE_API_BASE }}</code>, <code>${{ vars.AZURE_API_VERSION }}</code> — a URL and
+a version string aren't secret-shaped), read from the same approved-
+provider registry as the key mapping. Set both repository variables
+before the workflow's first live run.</p>
+<h3 id="supply-chain-pinning">Supply-chain pinning<a class="headerlink" href="#supply-chain-pinning" title="Permanent link">&para;</a></h3>
+<p>Both the scaffolded workflows and <code>gate-action</code> cap and pin their LiteLLM
+install: <code>pyproject.toml</code> bounds the floor-only range Mylonite itself
+depends on, and a <code>mylonite-constraints.txt</code> (vendored next to the
+templates and the action) pins the exact tested release the install step
+applies with <code>pip install -c mylonite-constraints.txt</code>. This is an exact
+pin, not a hash lock (<code>--require-hashes</code> needs a network resolve across
+every package in the tree) — raise the pin alongside <code>pyproject.toml</code>'s own
+floor when you upgrade deliberately, not by letting the range drift.</p>
+<h3 id="optional-extra-llm-request-headers">Optional: extra LLM request headers<a class="headerlink" href="#optional-extra-llm-request-headers" title="Permanent link">&para;</a></h3>
+<p>Set a <code>MYLONITE_LLM_HEADERS</code> repository secret (<code>NAME=VALUE</code> pairs,
+comma- or newline-separated — e.g. a provider workspace id your account
+needs on every request) and both scaffolded workflows, and the reusable
+Action's <code>llm-headers</code> input, pass it straight through as an environment
+variable, never through a command-line flag. Leave it unset if you don't
+need one.</p>
+<h3 id="surfacing-findings-in-the-security-tab">Surfacing findings in the Security tab<a class="headerlink" href="#surfacing-findings-in-the-security-tab" title="Permanent link">&para;</a></h3>
+<p>Emit SARIF from a scan or validation and upload it so AI-layer findings land in the
+GitHub <strong>Security tab</strong> alongside every other code-scanning result:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">mylonite report .mylonite/generated/&lt;dir&gt; --sarif mylonite.sarif</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">github/codeql-action/upload-sarif@v3</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">  </span><span class="nt">with</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">{</span><span class="nt"> sarif_file</span><span class="p">:</span><span class="w"> </span><span class="nv">mylonite.sarif</span><span class="w"> </span><span class="p p-Indicator">}</span>
+</code></pre></div>
+<p>Behind a corporate network? See
+<a href="../enterprise-networking/">Enterprise &amp; air-gapped networking</a>.</p>
+<h2 id="where-to-go-next">Where to go next<a class="headerlink" href="#where-to-go-next" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../quickstart/">Quickstart</a> — install, the commands that work today, and the
+  scan → generate → validate flow.</li>
+<li><a href="../validation/">The validation engine</a> — why a validated test is worth
+  committing, and why the CI gate runs offline.</li>
+<li><a href="../enterprise-networking/">Enterprise &amp; air-gapped networking</a> — self-hosted
+  runners, internal model gateways, and TLS-inspecting proxies.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.sections", "navigation.expand", "content.code.copy", "toc.follow"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
