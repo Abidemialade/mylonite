@@ -130,6 +130,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The judge-bench workflow template can collect from the REST target.**
+  `verification/judge_bench/ci/judge-bench.yml` takes a `target` input:
+  `reference` (both kitchen-sink twins) or `agents-rest`, the third-party
+  campaign's Agents SDK target on a local Ollama model. Every attempt
+  against it is decided by the LLM judge. See
+  [Measuring the LLM judge itself](docs/verification.md#measuring-the-llm-judge-itself).
+
 - **A harness that measures the LLM judge against a fixed bar.**
   `scripts/measure_judge.py` runs labelled cases through the same judge a scan
   uses. It reports accuracy and missed attacks as two-sided Wilson 95%

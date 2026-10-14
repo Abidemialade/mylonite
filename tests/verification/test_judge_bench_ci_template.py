@@ -78,3 +78,22 @@ def test_outputs_are_uploaded_always() -> None:
     path = upload["with"]["path"]
     for name in ("captures.jsonl", "spend.json", "cases/", "fixtures/", "measure/"):
         assert name in path
+
+
+def test_agents_rest_target_starts_the_shim_and_authorizes_its_family() -> None:
+    """The REST option starts the campaign's own target and authorizes it by the
+    family its target file declares, which is what `scan` requires."""
+    inputs = _workflow()["on"]["workflow_dispatch"]["inputs"]
+    assert inputs["target"]["options"] == ["reference", "agents-rest"]
+    assert inputs["target"]["default"] == "reference"
+    steps = {s.get("name"): s for s in _steps()}
+    start = steps["Start the REST target"]
+    assert "agents-rest" in start["if"]
+    assert "openai_agents_ollama_shim:app" in start["run"]
+    collect = steps["Collect captures"]["run"]
+    target_file = (
+        Path(__file__).resolve().parents[2] / "verification" / "third_party" / "agents_rest.yaml"
+    )
+    family = yaml.safe_load(target_file.read_text(encoding="utf-8"))["family"]
+    assert "verification/third_party/agents_rest.yaml" in collect
+    assert f"--authorize {family}" in collect
