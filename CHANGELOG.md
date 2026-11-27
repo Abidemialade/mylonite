@@ -37,6 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   way they skip a failed or unreadable judge call. See
   [Validation](docs/validation.md).
 
+- **`mylonite report examples/reference_validation` now exits 0.** The
+  recording script wrote a `provenance` key into `validation_report.json`, which
+  `ValidationReport` rejects, so the committed example could not be exported
+  with `--json` or `--sarif`. Provenance now sits in `provenance.json` beside
+  the report.
 - **The verification harness no longer counts an abstention as "the judge
   agreed the attack was resisted".** `score_transcript` built a `CaseResult`
   with `detected_exploited=False` for every transcript the judge actually

@@ -1,0 +1,5 @@
+{
+  "iterations": 1,
+  "model": "ollama_chat/qwen3:4b-instruct-2507-q4_K_M",
+  "provider": "ollama"
+}
