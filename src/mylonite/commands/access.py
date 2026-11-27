@@ -129,14 +129,17 @@ def _run_drill(grant: Grant, app_id: int, pem: str) -> DrillResult:
     )
 
 
-def _print(findings: list[Finding], drill: DrillResult, out: Path, code: int) -> None:
+def _print(
+    findings: list[Finding], drill: DrillResult, out: Path, code: int, not_tested: int
+) -> None:
     counted = [f for f in findings if f.status in ("over_grant", "escalation")]
     echo(f"{len(counted)} finding(s) against the intent; {len(findings) - len(counted)} note(s).")
     for f in findings:
         echo(f"{f.status.upper()} {f.code} {f.subject}: {f.change}")
     echo(f"revocation drill: {drill.status} ({drill.reason})")
     echo(f"report written to {out / 'report.md'} and {out / 'report.json'}")
-    echo("result: FAIL" if code else "result: PASS")
+    result = "FINDINGS" if code else "PASS"
+    echo(f"result: {result} ({not_tested} items not tested; see report.md)")
 
 
 def _draft(
@@ -317,5 +320,5 @@ def access(
     except OSError as exc:
         raise _refuse(f"could not write the report under {out}: {exc.strerror or exc}") from None
     code = exit_code(report)
-    _print(list(report.findings), drill, out, code)
+    _print(list(report.findings), drill, out, code, len(report.not_tested))
     raise typer.Exit(code=code)

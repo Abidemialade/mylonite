@@ -512,3 +512,84 @@ def test_draft_needs_identity_flags(runner, tmp_path, no_network):
     no_slug = [*no_kind, "--identity-kind", "github_app"]
     assert runner.invoke(app, no_slug).exit_code == EXIT_CONFIG
     assert not target.exists() and no_network.requests == []
+
+
+# -- the drill does not run on a mismatched or incomplete installation ---------
+
+
+def _drill_args(intent: Path, out: Path, app_id: int) -> list[str]:
+    return [
+        *ARGS(intent),
+        "--app-id",
+        str(app_id),
+        "--app-key-env",
+        "APP_KEY_PATH",
+        "--out",
+        str(out),
+    ]
+
+
+@pytest.fixture
+def drill_recorder(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> _Recorder:
+    key_path = tmp_path / "key.pem"
+    key_path.write_text(_private_key_pem(), encoding="utf-8")
+    monkeypatch.setenv("APP_KEY_PATH", str(key_path))
+    recorder = _Recorder()
+    monkeypatch.setattr(
+        access_cmd, "_drill_transport", lambda: httpx.MockTransport(recorder.handler)
+    )
+    return recorder
+
+
+def test_app_id_differing_from_the_installation_skips_the_drill(
+    runner, intent_file, matching_github, drill_recorder, tmp_path
+):
+    out = tmp_path / "out"
+    result = runner.invoke(app, _drill_args(intent_file, out, APP_ID + 1))
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    data = json.loads((out / "report.json").read_text(encoding="utf-8"))
+    assert data["drill"]["status"] == "not_tested"
+    assert data["drill"]["reason"] == (
+        f"--app-id {APP_ID + 1} does not match the installation's app id {APP_ID}"
+    )
+    assert not any(r.url.path.endswith("/access_tokens") for r in drill_recorder.requests)
+    assert drill_recorder.requests == []
+
+
+def test_installation_without_an_id_skips_the_drill(
+    runner, intent_file, matching_github, drill_recorder, tmp_path, monkeypatch
+):
+    from dataclasses import replace
+
+    real = access_cmd.read_app_grant
+
+    def without_id(owner: GitHubClient, org: str, slug: str):
+        return replace(real(owner, org, slug), installation_id=None)
+
+    monkeypatch.setattr(access_cmd, "read_app_grant", without_id)
+    out = tmp_path / "out"
+    result = runner.invoke(app, _drill_args(intent_file, out, APP_ID))
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    data = json.loads((out / "report.json").read_text(encoding="utf-8"))
+    assert data["drill"]["status"] == "not_tested"
+    assert data["drill"]["reason"] == "the installation has no id to mint a token for"
+    assert drill_recorder.requests == []
+
+
+# -- the console summary --------------------------------------------------------
+
+
+def test_summary_line_carries_the_not_tested_count(runner, intent_file, matching_github, tmp_path):
+    result = runner.invoke(app, [*ARGS(intent_file), "--out", str(tmp_path)])
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    count = len(json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))["not_tested"])
+    assert f"result: PASS ({count} items not tested; see report.md)" in result.output
+
+
+def test_summary_line_says_findings_on_an_over_grant(
+    runner, intent_file, over_granted_github, tmp_path
+):
+    result = runner.invoke(app, [*ARGS(intent_file), "--no-drill", "--out", str(tmp_path)])
+    assert result.exit_code == EXIT_FINDINGS
+    assert "result: FINDINGS (" in result.output
+    assert "FAIL" not in result.output

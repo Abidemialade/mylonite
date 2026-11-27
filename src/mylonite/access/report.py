@@ -26,7 +26,8 @@ __all__ = [
     "to_markdown",
 ]
 
-# (item, reason) rows that are always listed, after the collected ones.
+# (item, reason) rows every report carries, with <organisation> filled in. A
+# collected row with the same item name replaces the fixed one.
 _FIXED_NOT_TESTED = (
     ("required review", "not checked in this version"),
     ("approval for destructive actions", "not checked in this version"),
@@ -80,6 +81,14 @@ def build_report(
     collected = {*grant.not_tested, *extra_not_tested}
     if drill.status == "not_tested":
         collected.add(NotTested("revocation drill", drill.reason))
+    seen = {n.item for n in collected}
+    org = intent.organisation
+    for item, reason in _FIXED_NOT_TESTED:
+        fixed = NotTested(
+            item.replace("<organisation>", org), reason.replace("<organisation>", org)
+        )
+        if fixed.item not in seen:
+            collected.add(fixed)
     sorted_findings = sorted(
         findings, key=lambda f: (f.status, f.code, f.subject, f.detail, f.change)
     )
@@ -186,14 +195,6 @@ def to_markdown(report: AccessReport) -> str:
         "|---|---|",
     ]
     lines += [f"| {_cell(n.item)} | {_cell(n.reason)} |" for n in report.not_tested]
-    seen = {n.item for n in report.not_tested}
-    for item, reason in _FIXED_NOT_TESTED:
-        if item.replace("<organisation>", org) in seen:
-            continue
-        shown = code_span(org, table=True)
-        lines.append(
-            f"| {item.replace('<organisation>', shown)} | {reason.replace('<organisation>', shown)} |"
-        )
     lines += [
         "",
         "## About this report",

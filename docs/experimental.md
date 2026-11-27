@@ -157,13 +157,19 @@ itself, with `DELETE /installation/token`. Nothing else is changed.
 **Output:** `report.md` and `report.json` under `--out`, with a digest of the
 inputs and a "not tested" list. Exit `0` when the grant matches the intent and
 the drill held or did not run; `1` on an over-grant, an escalation, or a drill
-that did not hold; `2` on a refused intent, a missing variable or a token
-GitHub refuses.
+that did not hold or came back `invalid`; `2` on a refused intent, a missing
+variable or a token GitHub refuses. The last console line gives the result and
+the not-tested count, for example
+`result: PASS (12 items not tested; see report.md)`.
 
 **What it does not test:** the drill does not run for a classic token (it can
 only be revoked by hand in GitHub settings), without the App's private key,
-with `--no-drill`, or when the intent sets `controls.revocation: not_expected`.
-The report then lists the drill as not tested, with that reason. Fine-grained
+with `--no-drill`, when the intent sets `controls.revocation: not_expected`,
+when `--app-id` differs from the installation's app id, or when GitHub returns
+no installation id to mint a token for. The report then lists the drill as not
+tested, with that reason. For a classic token, the branch-rule bypass check
+lists each ruleset's bypass actors as not tested: whether the token's user is
+covered by a role or team needs membership data this version does not read. Fine-grained
 tokens, classic branch protection, required review, approval for destructive
 actions and what the agent did in real runs are not checked in this version;
 the report lists each one.

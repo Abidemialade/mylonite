@@ -116,7 +116,7 @@ def test_not_tested_always_lists_the_fixed_rows() -> None:
         "what the agent did in real runs",
         "fine-grained tokens",
         "the model provider's key",
-        "anything outside `my-test-org`",
+        "anything outside my-test-org",
         "rulesets",
     ):
         assert row in text
@@ -278,3 +278,30 @@ def test_json_strips_control_characters_inside_grant_tuples() -> None:
     data = json.loads(raw)["grant"]
     assert data["scopes"] == ["repox"]
     assert data["repos"][0]["name"] == "my-test-org/ab"
+
+
+def test_fixed_rows_are_part_of_the_report_and_the_json() -> None:
+    items = {n.item: n.reason for n in REPORT_CLEAN.not_tested}
+    assert items["anything outside my-test-org"] == "the run is limited to my-test-org"
+    assert items["required review"] == "not checked in this version"
+    data = json.loads(to_json(REPORT_CLEAN))
+    assert [(n["item"], n["reason"]) for n in data["not_tested"]] == [
+        (n.item, n.reason) for n in REPORT_CLEAN.not_tested
+    ]
+    assert not any("<organisation>" in n.item + n.reason for n in REPORT_CLEAN.not_tested)
+
+
+def test_markdown_lists_exactly_the_report_not_tested_rows() -> None:
+    text = to_markdown(REPORT_CLEAN)
+    section = text.split("## Not tested", 1)[1].split("## About this report", 1)[0]
+    rows = [line for line in section.splitlines() if line.startswith("| ") and "Item" not in line]
+    assert len(rows) == len(REPORT_CLEAN.not_tested)
+
+
+def test_collected_row_replaces_the_fixed_row_in_the_json_too() -> None:
+    extra = (NotTested("attribution", "checked by hand"),)
+    report = build_report(INTENT, GRANT, [], HELD, extra, **VERSIONS)
+    data = json.loads(to_json(report))
+    assert [n["reason"] for n in data["not_tested"] if n["item"] == "attribution"] == [
+        "checked by hand"
+    ]

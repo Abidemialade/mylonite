@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   private key (`--app-id` with `--app-key-env`), it also drills revocation:
   one minted token is revoked and must stop working while a second, left
   alone, keeps working. It writes `report.md` and `report.json` with an input
-  digest and a "not tested" list, and exits `1` on any finding. It runs only
+  digest and a "not tested" list, and exits `1` on any finding; the console's
+  last line gives the result and how many items were not tested. It runs only
   with `MYLONITE_EXPERIMENTAL=1`, an approved intent, and `--authorize` equal
   to the intent's organisation; the only write is revoking the drill's own
   tokens. `--draft-intent PATH` writes an unapproved intent file from the
