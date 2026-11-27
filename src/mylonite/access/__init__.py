@@ -1,5 +1,15 @@
 """Compare a coding agent's real GitHub grant with an owner-approved intent file."""
 
+from mylonite.access.github_client import GitHubClient, GitHubError
+from mylonite.access.grants import (
+    Grant,
+    GrantError,
+    Level,
+    NotTested,
+    RepoGrant,
+    read_app_grant,
+    read_classic_token_grant,
+)
 from mylonite.access.intent import (
     ControlsIntent,
     EscalationIntent,
@@ -14,10 +24,19 @@ from mylonite.access.intent import (
 __all__ = [
     "ControlsIntent",
     "EscalationIntent",
+    "GitHubClient",
+    "GitHubError",
+    "Grant",
+    "GrantError",
     "Identity",
     "Intent",
     "IntentError",
+    "Level",
+    "NotTested",
+    "RepoGrant",
     "RepoIntent",
     "load_intent",
+    "read_app_grant",
+    "read_classic_token_grant",
     "require_approved",
 ]
