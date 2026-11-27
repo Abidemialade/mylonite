@@ -52,6 +52,7 @@ _OWNER_NEEDED = (
     "could not list the organisation's app installations: the owner token needs "
     "organisation-owner access"
 )
+_NO_APP_ID = "GitHub returned no app id for the installation"
 
 
 def _read_error(exc: GitHubError) -> GrantError:
@@ -225,11 +226,31 @@ def read_app_grant(owner: GitHubClient, org: str, app_slug: str) -> Grant:
     installation_id = row.get("id")
     if not isinstance(installation_id, int):
         raise GrantError(f"the installation of {app_slug} in {org} has no id")
-    raw_perms = row.get("permissions")
-    permissions = (
-        {str(k): str(v) for k, v in raw_perms.items()} if isinstance(raw_perms, dict) else {}
+    row_notes: list[NotTested] = []
+    raw_app_id = row.get("app_id")
+    app_id = (
+        raw_app_id if isinstance(raw_app_id, int) and not isinstance(raw_app_id, bool) else None
     )
-    selection = row.get("repository_selection")
+    if app_id is None:
+        row_notes.append(NotTested("branch-rule bypass", _NO_APP_ID))
+    raw_perms = row.get("permissions")
+    if isinstance(raw_perms, dict):
+        permissions = {str(k): str(v) for k, v in raw_perms.items()}
+    else:
+        permissions = {}
+        row_notes.append(
+            NotTested("app permissions", "GitHub returned no permissions for the installation")
+        )
+    raw_selection = row.get("repository_selection")
+    selection: Literal["all", "selected"] | None = None
+    if raw_selection == "all":
+        selection = "all"
+    elif raw_selection == "selected":
+        selection = "selected"
+    else:
+        row_notes.append(
+            NotTested("repository selection", "GitHub returned an unknown repository_selection")
+        )
     try:
         listed = owner.get_all(
             f"/user/installations/{installation_id}/repositories", key="repositories"
@@ -242,17 +263,16 @@ def read_app_grant(owner: GitHubClient, org: str, app_slug: str) -> Grant:
         RepoGrant(name=str(r["full_name"]), level=level, private=bool(r.get("private")))
         for r in inside
     )
-    app_id = row.get("app_id")
     plan, plan_note = _read_plan(owner, org)
-    not_tested = nameless + plan_note
+    not_tested = tuple(row_notes) + nameless + plan_note
     return Grant(
         identity_kind="github_app",
         identity_label=app_slug,
-        app_id=app_id if isinstance(app_id, int) else None,
+        app_id=app_id,
         installation_id=installation_id,
         scopes=(),
         permissions=permissions,
-        repository_selection=selection if selection in ("all", "selected") else None,
+        repository_selection=selection,
         repos=repos,
         repos_outside_org=outside,
         plan=plan,

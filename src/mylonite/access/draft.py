@@ -23,6 +23,8 @@ _HEADER = (
     "then fill in approved_by and approved_on."
 )
 _ADMIN_NOTE = "  # the grant is admin, which is higher than write"
+_NONE_NOTE = "  # the grant gives no contents access"
+_NOTES = {"admin": _ADMIN_NOTE, "none": _NONE_NOTE}
 
 
 def _q(text: str) -> str:
@@ -44,12 +46,15 @@ def draft_intent_yaml(grant: Grant, organisation: str) -> str:
     if grant.identity_kind == "github_app":
         lines.append(f"  app_slug: {_q(grant.identity_label)}")
 
-    repos = sorted((r for r in grant.repos if r.level != "none"), key=lambda r: r.name)
+    # A repository the grant reaches with no contents access is written as
+    # read, the lowest level an intent can hold, so an approved, unchanged
+    # draft does not report it as not intended.
+    repos = sorted(grant.repos, key=lambda r: r.name)
     if repos:
         lines.append("repositories:")
         for repo in repos:
-            access = "read" if repo.level == "read" else "write"
-            note = _ADMIN_NOTE if repo.level == "admin" else ""
+            access = "write" if repo.level in ("write", "admin") else "read"
+            note = _NOTES.get(repo.level, "")
             lines.append(f"  - name: {_q(repo.name)}")
             lines.append(f"    access: {access}{note}")
     else:

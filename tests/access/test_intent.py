@@ -98,3 +98,20 @@ def test_missing_file_and_bad_yaml_give_one_line(tmp_path):
     with pytest.raises(IntentError) as exc:
         load_intent(write(tmp_path, "intent_version: [0"))
     assert "\n" not in str(exc.value)
+
+
+def test_organisation_prefix_is_case_insensitive_and_keeps_the_spelling(tmp_path):
+    text = VALID_APP.replace("organisation: my-test-org", "organisation: My-Test-Org")
+    intent = load_intent(write(tmp_path, text))
+    assert intent.organisation == "My-Test-Org"
+    assert intent.repositories[0].name == "my-test-org/service-a"
+
+
+def test_duplicate_repository_names_are_refused(tmp_path):
+    text = VALID_APP.replace(
+        "    access: write\n",
+        "    access: write\n  - name: my-test-org/SERVICE-A\n    access: read\n",
+        1,
+    )
+    with pytest.raises(IntentError, match=r"duplicate.*my-test-org/SERVICE-A"):
+        load_intent(write(tmp_path, text))

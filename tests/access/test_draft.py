@@ -16,7 +16,7 @@ from tests.access.test_compare import (
     with_scopes,
 )
 
-from mylonite.access.compare import escalation_findings
+from mylonite.access.compare import compare_grant, escalation_findings
 from mylonite.access.draft import draft_intent_yaml
 from mylonite.access.grants import RepoGrant
 from mylonite.access.intent import IntentError, load_intent, require_approved
@@ -101,3 +101,30 @@ def test_hostile_repository_name_cannot_inject_yaml(tmp_path: Path) -> None:
 def test_draft_is_deterministic_under_reordering() -> None:
     flipped = replace(GRANT_MATCHING, repos=tuple(reversed(GRANT_MATCHING.repos)))
     assert draft_intent_yaml(flipped, ORG) == draft_intent_yaml(GRANT_MATCHING, ORG)
+
+
+def test_draft_round_trips_when_authorize_and_github_spell_the_org_differently(
+    tmp_path: Path,
+) -> None:
+    grant = replace(GRANT_MATCHING, repos=(RepoGrant("MyOrg/x", "write", True),))
+    intent = load_intent(write(tmp_path, draft_intent_yaml(grant, "myorg")))
+    assert intent.organisation == "myorg"
+    assert [r.name for r in intent.repositories] == ["MyOrg/x"]
+
+
+def test_a_repo_with_no_contents_access_is_drafted_as_read_with_a_comment(
+    tmp_path: Path,
+) -> None:
+    grant = replace(
+        GRANT_MATCHING,
+        repos=(
+            RepoGrant(f"{ORG}/docs", "none", False),
+            RepoGrant(f"{ORG}/service-a", "write", True),
+        ),
+    )
+    text = draft_intent_yaml(grant, ORG)
+    assert "    access: read  # the grant gives no contents access" in text
+    intent = load_intent(write(tmp_path, text))
+    approved = intent.model_copy(update={"approved_by": "owner", "approved_on": date(2026, 11, 27)})
+    assert [r.name for r in approved.repositories] == [f"{ORG}/docs", f"{ORG}/service-a"]
+    assert "REPO_NOT_INTENDED" not in [f.code for f in compare_grant(approved, grant)]

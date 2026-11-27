@@ -58,12 +58,18 @@ class Intent(BaseModel):
 
     @model_validator(mode="after")
     def _check_consistency(self) -> Intent:
-        prefix = self.organisation + "/"
+        # GitHub organisation names are case-insensitive; keep the file's spelling.
+        prefix = (self.organisation + "/").casefold()
+        seen: set[str] = set()
         for repo in self.repositories:
-            if not repo.name.startswith(prefix):
+            if not repo.name.casefold().startswith(prefix):
                 raise ValueError(
                     f"repository {repo.name} is outside the organisation {self.organisation}"
                 )
+            key = repo.name.casefold()
+            if key in seen:
+                raise ValueError(f"repository {repo.name} is listed more than once (duplicate)")
+            seen.add(key)
         if self.identity.kind == "github_app" and not self.identity.app_slug:
             raise ValueError("identity.app_slug is required when kind is github_app")
         return self

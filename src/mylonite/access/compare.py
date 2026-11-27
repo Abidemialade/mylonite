@@ -226,7 +226,7 @@ def _workflow_write(grant: Grant) -> Finding | None:
             change="Lower the app's workflows permission to read or remove it.",
         )
     scopes = {s.casefold() for s in grant.scopes}
-    if not {"repo", "workflow"} <= scopes:
+    if "workflow" not in scopes or not scopes & {"repo", "public_repo"}:
         return None
     return Finding(
         code="ESC_WORKFLOW_WRITE",
@@ -279,6 +279,9 @@ def _repo_bypass(
     reader: GitHubClient, grant: Grant, repo: RepoGrant
 ) -> tuple[list[Finding], list[NotTested]]:
     item = f"branch-rule bypass on {repo.name}"
+    if grant.identity_kind == "github_app" and grant.app_id is None:
+        # Without the App's id no bypass actor can be matched to it.
+        return [], [NotTested(item, "GitHub returned no app id for the installation")]
     base = f"/repos/{repo.name}/rulesets"
     try:
         listed = reader.get_all(base)
