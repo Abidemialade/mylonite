@@ -1,10 +1,10 @@
 # Experimental commands
 
-`check` and `ablate` are hidden — they don't show up in the top-level help
-listing — and neither one runs unless you set `MYLONITE_EXPERIMENTAL=1`.
+`check`, `ablate` and `access` are hidden — they don't show up in the top-level help
+listing — and none of them runs unless you set `MYLONITE_EXPERIMENTAL=1`.
 Without it, each exits with a one-line message telling you to set the
 variable. They may change shape or be removed in a later release — don't
-build a CI step on either yet.
+build a CI step on any of them yet.
 
 ```bash
 export MYLONITE_EXPERIMENTAL=1          # bash/zsh
@@ -105,3 +105,71 @@ MYLONITE_EXPERIMENTAL=1 mylonite ablate --target-file app.yaml --authorize my-ap
 A control that comes back `no-attack` has nothing to attribute — it is not the same as
 "untested": the attack ran and simply never reproduced on this surface, so there is no
 result for that control to earn or lose.
+
+## `access` — compare a coding agent's GitHub grant with its intent
+
+`access` reads what a coding agent can really reach in a GitHub test
+organisation and compares it with an intent file the organisation's owner
+approved. Every repository, permission or scope the agent holds beyond the
+intent is a finding, and each finding names the configuration change that
+clears it. For a GitHub App it can also drill revocation: it mints two
+installation tokens, revokes one, and checks that the revoked token stops
+working while the other still works.
+
+```bash
+export OWNER_TOKEN=...            # an organisation owner's token, used read-only
+export APP_KEY_PATH=./app-key.pem # the App's private key file, for the drill
+MYLONITE_EXPERIMENTAL=1 mylonite access --intent intent.yaml --authorize my-test-org \
+  --owner-token-env OWNER_TOKEN --app-id 123456 --app-key-env APP_KEY_PATH
+```
+
+To start an intent file from the agent's current grant, run
+`mylonite access --draft-intent intent.yaml --authorize my-test-org
+--identity-kind github_app --app-slug my-agent --owner-token-env OWNER_TOKEN`
+(for a classic token, `--identity-kind classic_token --token-env NAME`). It
+writes the repositories, permissions or scopes the agent holds today, with
+`approved_by` empty and no `approved_on`, so `access` refuses the file until
+you edit it and approve it. Both escalation fields are written as `forbidden`,
+and an `admin` level is written as `write` with a comment saying so. It
+refuses to overwrite an existing file, sends no write, and runs no drill.
+
+It runs only when the intent file is approved (`approved_by` and
+`approved_on` set), says `environment: test`, and names the same organisation
+as `--authorize`. All three are checked before any request is sent.
+
+Options: `--intent PATH` and `--authorize ORG` (both required);
+`--token-env NAME` (the agent's classic token, for a `classic_token`
+identity); `--owner-token-env NAME` (an owner's token, for a `github_app`
+identity); `--app-id ID` with `--app-key-env NAME` (a variable holding the
+path to the App's private key; give both or neither); `--no-drill`;
+`--out DIR` (default `./mylonite-access/`). Tokens and the key path come only
+from environment variables. A missing variable is named, never shown, and no
+token text is printed or written to the report.
+
+**What it reads:** token scopes, App permissions, the repositories the agent
+can reach and its level on each, repository rulesets and their bypass lists,
+and the organisation's plan tier. It never reads file contents. Repositories
+outside the organisation are counted, never named.
+
+**The one write:** the drill revokes the installation tokens it minted
+itself, with `DELETE /installation/token`. Nothing else is changed.
+
+**Output:** `report.md` and `report.json` under `--out`, with a digest of the
+inputs and a "not tested" list. Exit `0` when the grant matches the intent and
+the drill held or did not run; `1` on an over-grant, an escalation, or a drill
+that did not hold or came back `invalid`; `2` on a refused intent, a missing
+variable or a token GitHub refuses. The last console line gives the result and
+the not-tested count, for example
+`result: PASS (12 items not tested; see report.md)`.
+
+**What it does not test:** the drill does not run for a classic token (it can
+only be revoked by hand in GitHub settings), without the App's private key,
+with `--no-drill`, when the intent sets `controls.revocation: not_expected`,
+when `--app-id` differs from the installation's app id, or when GitHub returns
+no installation id to mint a token for. The report then lists the drill as not
+tested, with that reason. For a classic token, the branch-rule bypass check
+lists each ruleset's bypass actors as not tested: whether the token's user is
+covered by a role or team needs membership data this version does not read. Fine-grained
+tokens, classic branch protection, required review, approval for destructive
+actions and what the agent did in real runs are not checked in this version;
+the report lists each one.

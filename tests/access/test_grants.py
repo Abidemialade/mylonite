@@ -8,6 +8,7 @@ from tests.access.conftest import Route, mock_client
 
 from mylonite.access.grants import (
     GrantError,
+    NotTested,
     read_app_grant,
     read_classic_token_grant,
 )
@@ -280,3 +281,61 @@ def test_app_outside_repo_counted_and_mixed_case_org_matches():
     assert [r.name for r in grant.repos] == ["My-Test-ORG/service-a"]
     assert grant.repos_outside_org == 1
     assert "other-org" not in repr(grant)
+
+
+# -- a malformed installation row is never read as clean --------------------------
+
+
+def _inst(**overrides):
+    row = {
+        "id": 77,
+        "app_id": 12,
+        "app_slug": "my-coding-agent",
+        "repository_selection": "selected",
+        "permissions": {"contents": "write", "metadata": "read"},
+    }
+    row.update(overrides)
+    return [{k: v for k, v in row.items() if v is not _DROP}]
+
+
+_DROP = object()
+
+
+@pytest.mark.parametrize("app_id", [_DROP, None, "12", True])
+def test_installation_without_an_integer_app_id_is_not_tested(app_id):
+    routes = _app_routes(installations=_inst(app_id=app_id))
+    grant = read_app_grant(mock_client(routes), ORG, "my-coding-agent")
+    assert grant.app_id is None
+    assert (
+        NotTested("branch-rule bypass", "GitHub returned no app id for the installation")
+        in grant.not_tested
+    )
+
+
+@pytest.mark.parametrize("permissions", [_DROP, None, ["contents"], "write"])
+def test_installation_without_a_permissions_mapping_is_not_tested(permissions):
+    routes = _app_routes(installations=_inst(permissions=permissions))
+    grant = read_app_grant(mock_client(routes), ORG, "my-coding-agent")
+    assert grant.permissions == {}
+    assert (
+        NotTested("app permissions", "GitHub returned no permissions for the installation")
+        in grant.not_tested
+    )
+
+
+@pytest.mark.parametrize("selection", [_DROP, None, "some", "ALL"])
+def test_unknown_repository_selection_is_not_tested(selection):
+    routes = _app_routes(installations=_inst(repository_selection=selection))
+    grant = read_app_grant(mock_client(routes), ORG, "my-coding-agent")
+    assert grant.repository_selection is None
+    assert (
+        NotTested("repository selection", "GitHub returned an unknown repository_selection")
+        in grant.not_tested
+    )
+
+
+def test_a_well_formed_installation_adds_no_row_notes():
+    grant = read_app_grant(mock_client(_app_routes()), ORG, "my-coding-agent")
+    assert {n.item for n in grant.not_tested}.isdisjoint(
+        {"branch-rule bypass", "app permissions", "repository selection"}
+    )

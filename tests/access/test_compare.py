@@ -548,3 +548,19 @@ def test_no_repositories_makes_no_ruleset_calls() -> None:
     findings, not_tested = escalation_findings(INTENT_APP, grant, mock_client({}))
     assert findings == []
     assert [n.item for n in not_tested] == ["classic branch protection bypass"]
+
+
+def test_app_with_no_app_id_is_not_tested_on_every_repo_and_reads_no_rulesets() -> None:
+    grant = replace(GRANT_MATCHING, app_id=None)
+    findings, not_tested = escalation_findings(INTENT_APP, grant, mock_client({}))
+    assert findings == []
+    reason = "GitHub returned no app id for the installation"
+    for repo in (f"{ORG}/docs", f"{ORG}/service-a"):
+        assert NotTested(f"branch-rule bypass on {repo}", reason) in not_tested
+
+
+def test_classic_workflow_escalation_fires_with_public_repo(reader: GitHubClient) -> None:
+    findings, _ = escalation_findings(
+        INTENT_CLASSIC, with_scopes(GRANT_CLASSIC, "public_repo", "workflow"), reader
+    )
+    assert "ESC_WORKFLOW_WRITE" in codes(findings)

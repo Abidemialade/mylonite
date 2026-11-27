@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`mylonite access` (experimental, hidden) compares a coding agent's real
+  GitHub grant with an owner-approved intent file.** It reads the agent's
+  repositories, levels, App permissions or token scopes, and ruleset bypass
+  lists in a test organisation, and reports each over-grant and escalation
+  with the configuration change that clears it. For a GitHub App given its
+  private key (`--app-id` with `--app-key-env`), it also drills revocation:
+  one minted token is revoked and must stop working while a second, left
+  alone, keeps working. It writes `report.md` and `report.json` with an input
+  digest and a "not tested" list, and exits `1` on any finding; the console's
+  last line gives the result and how many items were not tested. It runs only
+  with `MYLONITE_EXPERIMENTAL=1`, an approved intent, and `--authorize` equal
+  to the intent's organisation; the only write is revoking the drill's own
+  tokens. `--draft-intent PATH` writes an unapproved intent file from the
+  agent's current grant, so an owner can trim it and approve it instead of
+  writing one from scratch; it never overwrites a file. See
+  [Experimental commands](docs/experimental.md).
+
 ### Fixed
 
 - **A generated test no longer fails to collect on Windows because another

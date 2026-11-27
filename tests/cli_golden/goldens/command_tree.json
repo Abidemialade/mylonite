@@ -162,6 +162,168 @@
         }
       ]
     },
+    "access": {
+      "epilog": null,
+      "help": "Compare a coding agent's real GitHub grant with an owner-approved intent file.\n\nReads grants, scopes, repository names and rule names; never file contents.\nThe one write is revoking an installation token the drill minted itself.",
+      "hidden": true,
+      "name": "access",
+      "params": [
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "The GitHub App's ID, for the revocation drill.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "app_id",
+          "opts": [
+            "--app-id"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "int"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Variable holding the path to the App's private key file, for the drill.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "app_key_env",
+          "opts": [
+            "--app-key-env"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "str"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "With --draft-intent and github_app: the App's slug.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "app_slug",
+          "opts": [
+            "--app-slug"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "str"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Must equal the intent's organisation. Asserts you own that test organisation.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "authorize",
+          "opts": [
+            "--authorize"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "str"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Write an unapproved intent file from the current grant, in place of --intent.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "draft_intent",
+          "opts": [
+            "--draft-intent"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "path"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "With --draft-intent: github_app or classic_token.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "identity_kind",
+          "opts": [
+            "--identity-kind"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "str"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "The owner-approved intent file (YAML).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "intent_path",
+          "opts": [
+            "--intent"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "path"
+        },
+        {
+          "default": "False",
+          "envvar": null,
+          "help": "Skip the revocation drill.",
+          "is_flag": true,
+          "multiple": false,
+          "name": "no_drill",
+          "opts": [
+            "--no-drill"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "bool"
+        },
+        {
+          "default": "'mylonite-access'",
+          "envvar": null,
+          "help": "Directory for report.md and report.json.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "out",
+          "opts": [
+            "--out"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "str"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Variable holding an organisation owner's token, used read-only (GitHub App).",
+          "is_flag": false,
+          "multiple": false,
+          "name": "owner_token_env",
+          "opts": [
+            "--owner-token-env"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "str"
+        },
+        {
+          "default": "None",
+          "envvar": null,
+          "help": "Variable holding the agent's classic token.",
+          "is_flag": false,
+          "multiple": false,
+          "name": "token_env",
+          "opts": [
+            "--token-env"
+          ],
+          "required": false,
+          "secondary_opts": [],
+          "type": "str"
+        }
+      ]
+    },
     "check": {
       "epilog": null,
       "help": "Static structural pre-check of a target's tool surface: no LLM, no API key, no spend.\n\nConnects to the target ONCE (`describe()` — exactly what `scan --scaffold`\nalready does) and reports structural exposure from the tool schemas alone:\nconsequential tools with no approval-shaped sibling, descriptions that\nsteer the agent, tools taking an apparent network destination, content-\nprocessing tools that could carry an indirect-injection payload, unpinned\ntool descriptions (rug-pull exposure), and which weakness classes the\nsurface suggests. Every finding is a HINT to confirm, never a verdict —\nthe differential oracle (`scan`/`gate`) is what proves an attack actually\nlands. Belongs in CI stage 1, next to lint: cheap enough to run on every\npush, unlike the live stages that spend LLM budget.\n\nMakes no writes at all and takes no ``--authorize``. To run the\ncalibration controls (real writes proving a declared ``effect_probe`` can\nsee a change — see ``docs/target-file.md#calibration``), run\n``scan``/``gate``/``validate`` with ``--authorize`` against the same\n``--target-file``; those are the commands that drive the target live.",
