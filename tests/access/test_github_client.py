@@ -77,7 +77,21 @@ def test_get_all_reads_items_under_a_key():
     assert [i["id"] for i in items] == [7, 8]
 
 
-def test_get_all_stops_at_fifty_pages():
+@pytest.mark.parametrize(
+    "body",
+    [{"total_count": 0}, {"installations": None}, {"installations": {"id": 7}}],
+)
+def test_get_all_refuses_an_object_without_the_key_list(body):
+    client = mock_client({("GET", "/orgs/acme/installations"): httpx.Response(200, json=body)})
+    with pytest.raises(GitHubError) as info:
+        client.get_all("/orgs/acme/installations", key="installations")
+    assert info.value.status == 200
+    assert info.value.path == "/orgs/acme/installations"
+    assert "installations" in str(info.value)
+    assert "/orgs/acme/installations" in str(info.value)
+
+
+def test_get_all_raises_past_fifty_pages_instead_of_truncating():
     calls = 0
 
     def handle(request: httpx.Request) -> httpx.Response:
@@ -91,8 +105,63 @@ def test_get_all_stops_at_fifty_pages():
         )
 
     client = mock_client({("GET", "/user/repos"): handle})
-    assert len(client.get_all("/user/repos")) == 50
+    with pytest.raises(GitHubError) as info:
+        client.get_all("/user/repos")
     assert calls == 50
+    assert info.value.status is None
+    assert info.value.path == "/user/repos"
+    assert "not read in full" in str(info.value)
+
+
+def test_get_all_reads_exactly_fifty_pages_without_error():
+    def handle(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params.get("page", "1"))
+        headers = {}
+        if page < 50:
+            headers["Link"] = f'<{BASE}/user/repos?per_page=100&page={page + 1}>; rel="next"'
+        return httpx.Response(200, json=[{"id": page}], headers=headers)
+
+    client = mock_client({("GET", "/user/repos"): handle})
+    assert len(client.get_all("/user/repos")) == 50
+
+
+def test_get_all_raises_github_error_on_invalid_json():
+    client = mock_client({("GET", "/user/repos"): httpx.Response(200, content=b"<html>")})
+    with pytest.raises(GitHubError) as info:
+        client.get_all("/user/repos")
+    assert info.value.status == 200
+    assert info.value.path == "/user/repos"
+
+
+@pytest.mark.parametrize(
+    "bad_path",
+    ["https://evil.example/x", "//evil.example/x", "user", "", "/x?u=http://evil.example"],
+)
+def test_get_and_get_all_refuse_a_non_api_path_before_any_request(bad_path):
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=[])
+
+    client = GitHubClient("ghp_" + "p" * 36, transport=httpx.MockTransport(handler))
+    with pytest.raises(GitHubError) as info:
+        client.get(bad_path)
+    assert info.value.status is None
+    with pytest.raises(GitHubError):
+        client.get_all(bad_path)
+    assert seen == []
+
+
+def test_delete_own_installation_token_raises_on_network_failure():
+    def handle(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down", request=request)
+
+    client = mock_client({("DELETE", "/installation/token"): handle}, token="ghs_" + "d" * 36)
+    with pytest.raises(GitHubError) as info:
+        client.delete_own_installation_token()
+    assert info.value.status is None
+    assert info.value.path == "/installation/token"
 
 
 def test_get_all_refuses_a_next_link_to_another_host():
@@ -111,6 +180,28 @@ def test_get_all_refuses_a_next_link_to_another_host():
     with pytest.raises(GitHubError):
         client.get_all("/user/repos")
     assert sent_elsewhere == []
+
+
+@pytest.mark.parametrize(
+    "next_link",
+    [
+        "http://api.github.com/user/repos?page=2",
+        "https://api.github.com:8443/user/repos?page=2",
+    ],
+)
+def test_get_all_refuses_a_next_link_with_another_scheme_or_port(next_link):
+    calls = 0
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json=[{"id": 1}], headers={"Link": f'<{next_link}>; rel="next"'})
+
+    client = mock_client({("GET", "/user/repos"): handle})
+    with pytest.raises(GitHubError) as info:
+        client.get_all("/user/repos")
+    assert "another host" in str(info.value)
+    assert calls == 1
 
 
 def test_get_all_raises_on_non_200():
@@ -204,6 +295,28 @@ def test_mint_installation_token_raises_on_non_201():
     with pytest.raises(GitHubError) as info:
         client.post_mint_installation_token(42)
     assert info.value.status == 404
+    assert info.value.path == "/app/installations/42/access_tokens"
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(201, content=b"<html>not json</html>"),
+        httpx.Response(201, json={"expires_at": "x"}),
+        httpx.Response(201, json={"token": ""}),
+        httpx.Response(201, json={"token": 123}),
+        httpx.Response(201, json=["ghs_" + "l" * 36]),
+    ],
+)
+def test_mint_installation_token_raises_on_a_201_without_a_usable_token(response):
+    client = mock_client(
+        {("POST", "/app/installations/42/access_tokens"): response},
+        token="eyJ" + "j" * 40,
+        bearer_is_jwt=True,
+    )
+    with pytest.raises(GitHubError) as info:
+        client.post_mint_installation_token(42)
+    assert info.value.status == 201
     assert info.value.path == "/app/installations/42/access_tokens"
 
 

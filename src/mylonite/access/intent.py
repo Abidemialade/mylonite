@@ -79,6 +79,8 @@ def load_intent(path: Path) -> Intent:
         raw = Path(path).read_text(encoding="utf-8")
     except OSError as exc:
         raise IntentError(f"cannot read intent file {path}: {exc.strerror or exc}") from exc
+    except UnicodeDecodeError:
+        raise IntentError(f"intent file {path} is not valid UTF-8 text") from None
     try:
         data = yaml.safe_load(raw)
     except yaml.YAMLError as exc:

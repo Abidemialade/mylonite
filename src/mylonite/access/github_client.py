@@ -120,20 +120,36 @@ class GitHubClient:
                 path=path,
             ) from None
 
+    @staticmethod
+    def _require_api_path(path: str) -> None:
+        """Refuse anything but a path on the API host, before any request."""
+        if not path.startswith("/") or path.startswith("//") or "://" in path:
+            raise GitHubError(
+                "GitHub call refused: the path must start with a single '/'",
+                status=None,
+                path=path,
+            )
+
     def get(self, path: str, *, params: dict[str, str] | None = None) -> httpx.Response:
         """GET ``path``; return the response whatever its status.
 
-        Raises :class:`GitHubError` only when no response arrives.
+        Raises :class:`GitHubError` when no response arrives, or before any
+        request when ``path`` is not an API path starting with ``/``.
         """
+        self._require_api_path(path)
         return self._send("GET", path, path=path, params=params)
 
     def get_all(self, path: str, *, key: str | None = None) -> list[dict[str, Any]]:
         """GET every page of a list endpoint, following ``Link: rel="next"``.
 
         ``key`` names the field holding the list when the endpoint wraps it in
-        an object. Stops after 50 pages. Raises :class:`GitHubError` on any
-        non-200 page, or on a next link that leaves the API host.
+        an object. Raises :class:`GitHubError` on any non-200 page, a page
+        that is not JSON, an object page without a ``key`` list, a next link
+        that leaves the API host (scheme, host and port), a ``path``
+        that does not start with ``/``, or a listing longer than 50 pages
+        (it is never truncated silently).
         """
+        self._require_api_path(path)
         items: list[dict[str, Any]] = []
         response = self._send("GET", path, path=path, params={"per_page": str(PER_PAGE)})
         for page in range(1, MAX_PAGES + 1):
@@ -143,8 +159,26 @@ class GitHubClient:
                     status=response.status_code,
                     path=path,
                 )
-            body = response.json()
-            chunk = body.get(key, []) if key is not None and isinstance(body, dict) else body
+            try:
+                body = response.json()
+            except ValueError:
+                raise GitHubError(
+                    f"GitHub GET {path} returned a page that is not JSON",
+                    status=response.status_code,
+                    path=path,
+                ) from None
+            if key is not None and isinstance(body, dict):
+                chunk = body.get(key)
+                if not isinstance(chunk, list):
+                    # A missing or non-list key is a changed or broken
+                    # response, never an empty listing.
+                    raise GitHubError(
+                        f"GitHub GET {path} returned an object without a {key} list",
+                        status=response.status_code,
+                        path=path,
+                    )
+            else:
+                chunk = body
             if not isinstance(chunk, list):
                 raise GitHubError(
                     f"GitHub GET {path} did not return a list",
@@ -153,8 +187,15 @@ class GitHubClient:
                 )
             items.extend(item for item in chunk if isinstance(item, dict))
             next_url = response.links.get("next", {}).get("url")
-            if not next_url or page == MAX_PAGES:
+            if not next_url:
                 break
+            if page == MAX_PAGES:
+                raise GitHubError(
+                    f"GitHub GET {path} listing exceeded {MAX_PAGES} pages"
+                    " and was not read in full",
+                    status=None,
+                    path=path,
+                )
             url = httpx.URL(next_url)
             if (url.scheme, url.host, url.port) != (
                 self._base.scheme,
@@ -201,6 +242,8 @@ class GitHubClient:
 
         Returns the status code (204 on success). Never raises on a 401 or
         404, so cleanup can call it on a token that is already revoked.
+        Raises :class:`GitHubError` (``status`` ``None``) when no response
+        arrives, for example on a network failure.
         """
         path = "/installation/token"
         return int(self._send("DELETE", path, path=path).status_code)

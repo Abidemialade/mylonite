@@ -75,6 +75,23 @@ def test_unapproved_intent_is_refused(tmp_path):
         require_approved(intent)
 
 
+def test_intent_without_approved_on_is_refused(tmp_path):
+    intent = load_intent(write(tmp_path, VALID_APP.replace("approved_on: 2026-12-01\n", "")))
+    assert intent.approved_on is None
+    with pytest.raises(IntentError, match="not approved"):
+        require_approved(intent)
+
+
+def test_intent_file_that_is_not_utf8_gives_one_line(tmp_path):
+    path = tmp_path / "intent.yaml"
+    path.write_bytes(b"intent_version: 0\napproved_by: \xff\xfe\x80\n")
+    with pytest.raises(IntentError) as exc:
+        load_intent(path)
+    assert "UTF-8" in str(exc.value)
+    assert "\n" not in str(exc.value)
+    assert exc.value.__cause__ is None
+
+
 def test_missing_file_and_bad_yaml_give_one_line(tmp_path):
     with pytest.raises(IntentError):
         load_intent(tmp_path / "absent.yaml")
