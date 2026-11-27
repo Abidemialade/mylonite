@@ -123,6 +123,16 @@ MYLONITE_EXPERIMENTAL=1 mylonite access --intent intent.yaml --authorize my-test
   --owner-token-env OWNER_TOKEN --app-id 123456 --app-key-env APP_KEY_PATH
 ```
 
+To start an intent file from the agent's current grant, run
+`mylonite access --draft-intent intent.yaml --authorize my-test-org
+--identity-kind github_app --app-slug my-agent --owner-token-env OWNER_TOKEN`
+(for a classic token, `--identity-kind classic_token --token-env NAME`). It
+writes the repositories, permissions or scopes the agent holds today, with
+`approved_by` empty and no `approved_on`, so `access` refuses the file until
+you edit it and approve it. Both escalation fields are written as `forbidden`,
+and an `admin` level is written as `write` with a comment saying so. It
+refuses to overwrite an existing file, sends no write, and runs no drill.
+
 It runs only when the intent file is approved (`approved_by` and
 `approved_on` set), says `environment: test`, and names the same organisation
 as `--authorize`. All three are checked before any request is sent.

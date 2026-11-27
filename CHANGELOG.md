@@ -20,7 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   digest and a "not tested" list, and exits `1` on any finding. It runs only
   with `MYLONITE_EXPERIMENTAL=1`, an approved intent, and `--authorize` equal
   to the intent's organisation; the only write is revoking the drill's own
-  tokens. See [Experimental commands](docs/experimental.md).
+  tokens. `--draft-intent PATH` writes an unapproved intent file from the
+  agent's current grant, so an owner can trim it and approve it instead of
+  writing one from scratch; it never overwrites a file. See
+  [Experimental commands](docs/experimental.md).
 
 ### Fixed
 

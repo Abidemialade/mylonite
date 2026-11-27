@@ -453,3 +453,62 @@ def test_drill_runs_with_the_app_key_and_holds(
     assert "held" in result.output
     body = result.output + "".join(p.read_text(encoding="utf-8") for p in out.iterdir())
     assert "PRIVATE KEY" not in body and str(key_path) not in body
+
+
+# -- --draft-intent ------------------------------------------------------------
+
+
+def DRAFT_ARGS(target: Path) -> list[str]:
+    return [
+        "access",
+        "--draft-intent",
+        str(target),
+        "--authorize",
+        ORG,
+        "--identity-kind",
+        "github_app",
+        "--app-slug",
+        APP_SLUG,
+        "--owner-token-env",
+        "OWNER_TOKEN",
+    ]
+
+
+def test_draft_writes_an_unapproved_file_and_exits_zero(runner, tmp_path, matching_github):
+    from mylonite.access.intent import IntentError, load_intent, require_approved
+
+    target = tmp_path / "draft.yaml"
+    result = runner.invoke(app, DRAFT_ARGS(target))
+    assert result.exit_code == EXIT_SUCCESS, result.output
+    intent = load_intent(target)
+    assert [r.name for r in intent.repositories] == [f"{ORG}/service-a"]
+    with pytest.raises(IntentError, match="not approved"):
+        require_approved(intent)
+    assert not (tmp_path / "mylonite-access").exists()
+    assert "o" * 36 not in result.output
+
+
+def test_draft_refuses_to_overwrite(runner, tmp_path, matching_github):
+    target = tmp_path / "intent.yaml"
+    target.write_text("keep", encoding="utf-8")
+    result = runner.invoke(app, DRAFT_ARGS(target))
+    assert result.exit_code == EXIT_CONFIG
+    assert target.read_text(encoding="utf-8") == "keep"
+
+
+def test_draft_and_intent_are_exclusive(runner, tmp_path, intent_file, no_network):
+    result = runner.invoke(app, [*DRAFT_ARGS(tmp_path / "d.yaml"), "--intent", str(intent_file)])
+    assert result.exit_code == EXIT_CONFIG
+    assert not (tmp_path / "d.yaml").exists()
+    assert no_network.requests == []
+
+
+def test_draft_needs_identity_flags(runner, tmp_path, no_network):
+    target = tmp_path / "d.yaml"
+    base = ["access", "--draft-intent", str(target), "--owner-token-env", "OWNER_TOKEN"]
+    assert runner.invoke(app, base).exit_code == EXIT_CONFIG
+    no_kind = [*base, "--authorize", ORG]
+    assert runner.invoke(app, no_kind).exit_code == EXIT_CONFIG
+    no_slug = [*no_kind, "--identity-kind", "github_app"]
+    assert runner.invoke(app, no_slug).exit_code == EXIT_CONFIG
+    assert not target.exists() and no_network.requests == []

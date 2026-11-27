@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 import typer
@@ -28,6 +28,7 @@ import typer
 from mylonite._cli_io import echo, echo_err
 from mylonite._redaction import mask_registered_values, register_masked_value
 from mylonite.access.compare import Finding, compare_grant, escalation_findings
+from mylonite.access.draft import draft_intent_yaml
 from mylonite.access.drill import DrillResult, not_tested_drill, run_revocation_drill
 from mylonite.access.github_client import GitHubClient, GitHubError
 from mylonite.access.grants import Grant, GrantError, read_app_grant, read_classic_token_grant
@@ -138,18 +139,79 @@ def _print(findings: list[Finding], drill: DrillResult, out: Path, code: int) ->
     echo("result: FAIL" if code else "result: PASS")
 
 
+def _draft(
+    path: Path,
+    organisation: str,
+    kind: str | None,
+    app_slug: str | None,
+    token_env: str | None,
+    owner_token_env: str | None,
+) -> None:
+    """Write an unapproved intent file that mirrors the agent's current grant."""
+    if kind not in ("github_app", "classic_token"):
+        raise _refuse("--draft-intent needs --identity-kind github_app or classic_token")
+    identity: Literal["github_app", "classic_token"] = (
+        "github_app" if kind == "github_app" else "classic_token"
+    )
+    if identity == "github_app" and not app_slug:
+        raise _refuse("--draft-intent with github_app needs --app-slug")
+    if path.exists():
+        raise _refuse(f"{path} already exists; --draft-intent never overwrites a file")
+    var = owner_token_env if identity == "github_app" else token_env
+    if var is None:
+        flag = "--owner-token-env" if identity == "github_app" else "--token-env"
+        raise _refuse(f"a {identity} draft needs {flag} NAME")
+    flag = "--owner-token-env" if identity == "github_app" else "--token-env"
+    reader = _make_client(_env_value(var, flag))
+    try:
+        if identity == "classic_token":
+            grant = read_classic_token_grant(reader, organisation)
+        else:
+            grant = read_app_grant(reader, organisation, app_slug or "")
+    except GrantError as exc:
+        raise _refuse(f"could not read the grant with the token in {var}: {exc}") from None
+    except GitHubError as exc:
+        raise _refuse(" ".join(str(exc).split())) from None
+    finally:
+        reader.close()
+    text = mask_registered_values(draft_intent_yaml(grant, organisation))
+    try:
+        with path.open("x", encoding="utf-8") as handle:
+            handle.write(text)
+    except OSError as exc:
+        raise _refuse(f"could not write {path}: {exc.strerror or exc}") from None
+    echo(f"draft intent written to {path}; it is not approved.")
+    echo("Remove what the agent should not have, then fill in approved_by and approved_on.")
+    raise typer.Exit(code=0)
+
+
 def access(
     intent_path: Annotated[
-        Path,
+        Path | None,
         typer.Option("--intent", help="The owner-approved intent file (YAML)."),
-    ],
+    ] = None,
     authorize: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--authorize",
             help="Must equal the intent's organisation. Asserts you own that test organisation.",
         ),
-    ],
+    ] = None,
+    draft_intent: Annotated[
+        Path | None,
+        typer.Option(
+            "--draft-intent",
+            help="Write an unapproved intent file from the current grant, in place of --intent.",
+        ),
+    ] = None,
+    identity_kind: Annotated[
+        str | None,
+        typer.Option("--identity-kind", help="With --draft-intent: github_app or classic_token."),
+    ] = None,
+    app_slug: Annotated[
+        str | None,
+        typer.Option("--app-slug", help="With --draft-intent and github_app: the App's slug."),
+    ] = None,
     token_env: Annotated[
         str | None,
         typer.Option("--token-env", help="Variable holding the agent's classic token."),
@@ -186,6 +248,14 @@ def access(
     Reads grants, scopes, repository names and rule names; never file contents.
     The one write is revoking an installation token the drill minted itself.
     """
+    if draft_intent is not None:
+        if intent_path is not None:
+            raise _refuse("--draft-intent and --intent cannot be used together")
+        if authorize is None:
+            raise _refuse("--draft-intent needs --authorize ORG")
+        _draft(draft_intent, authorize, identity_kind, app_slug, token_env, owner_token_env)
+    if intent_path is None or authorize is None:
+        raise _refuse("--intent and --authorize are both required")
     # 1. Intent, approval and authorization: no network yet.
     intent = _load(intent_path, authorize)
 
