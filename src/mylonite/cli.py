@@ -484,7 +484,8 @@ def _load_api_key_file(path: Path) -> None:
     if var is None:
         echo_err(
             "--api-key-file: couldn't infer the provider from the key shape. Use a "
-            "dotenv file with a KEY=VALUE line instead (e.g. ANTHROPIC_API_KEY=…), "  # allow-literal: example
+            "dotenv file with a KEY=VALUE line instead (your provider's API key "
+            "variable and the key), "
             "or pass --env-file."
         )
         raise typer.Exit(code=EXIT_CONFIG)

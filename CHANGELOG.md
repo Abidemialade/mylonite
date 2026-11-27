@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   way they skip a failed or unreadable judge call. See
   [Validation](docs/validation.md).
 
+- **`--api-key-file` no longer suggests `ANTHROPIC_API_KEY` as the example.**
+  When it cannot tell which provider a bare key belongs to, the error now asks
+  for your provider's own key variable. A test fails if any other user-facing
+  string in `src/` names one provider's key outside the provider registry.
 - **`mylonite report examples/reference_validation` now exits 0.** The
   recording script wrote a `provenance` key into `validation_report.json`, which
   `ValidationReport` rejects, so the committed example could not be exported
