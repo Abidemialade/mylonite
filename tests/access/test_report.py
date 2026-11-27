@@ -164,6 +164,22 @@ def test_exit_codes() -> None:
     assert exit_code(build_report(INTENT, GRANT, [info], HELD, (), **VERSIONS)) == EXIT_SUCCESS
 
 
+def test_an_escalation_finding_exits_with_findings() -> None:
+    escalation = Finding("ESC_WORKFLOW_WRITE", "escalation", "my-test-org/app", "d", "c")
+    report = build_report(INTENT, GRANT, [escalation], HELD, (), **VERSIONS)
+    assert exit_code(report) == EXIT_FINDINGS
+
+
+def test_summary_without_approved_on_says_an_unknown_date() -> None:
+    intent = INTENT.model_copy(update={"approved_on": None})
+    report = build_report(intent, GRANT, [], HELD, (), **VERSIONS)
+    expected = (
+        "Compared with the intent approved by A. Owner on an unknown date. "
+        "This result is only as good as that file."
+    )
+    assert expected in to_markdown(report)
+
+
 ESC = chr(0x1B)
 BIDI = chr(0x202E)
 LSEP = chr(0x2028)
@@ -217,8 +233,7 @@ def test_hostile_values_stay_inside_code_spans() -> None:
         assert raw not in outside
     assert not _BAD_CHARS.search(text.replace("\n", ""))
     held = next(line for line in text.splitlines() if line.startswith("Revocation drill"))
-    assert "line one\\|x" not in held or "`" in held
-    assert "line one" in held and "line two" in held and "x\nline" not in text
+    assert held == "Revocation drill: held. `line one|xline two [31m<b>`"
 
 
 def test_a_backslash_cannot_let_a_pipe_split_the_cell() -> None:
@@ -250,3 +265,16 @@ def test_collected_not_tested_replaces_the_fixed_row() -> None:
     text = to_markdown(build_report(INTENT, GRANT, [], HELD, extra, **VERSIONS))
     assert text.count("attribution") == 1
     assert "checked by hand" in text
+
+
+def test_json_strips_control_characters_inside_grant_tuples() -> None:
+    grant = replace(
+        GRANT,
+        scopes=("repo" + ESC + "x",),
+        repos=(RepoGrant("my-test-org/a" + ESC + "b", "read", True),),
+    )
+    raw = to_json(build_report(INTENT, grant, [], HELD, (), **VERSIONS))
+    assert ESC not in raw and "\u001b" not in raw
+    data = json.loads(raw)["grant"]
+    assert data["scopes"] == ["repox"]
+    assert data["repos"][0]["name"] == "my-test-org/ab"

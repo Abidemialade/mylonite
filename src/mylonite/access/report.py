@@ -102,7 +102,7 @@ def _clean(value: Any) -> Any:
         return strip_controls(value)
     if isinstance(value, dict):
         return {strip_controls(k): _clean(v) for k, v in value.items()}
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_clean(v) for v in value]
     return value
 
