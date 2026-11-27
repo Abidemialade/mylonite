@@ -39,6 +39,7 @@ EXAMPLE_DIR = Path(__file__).resolve().parents[2] / "examples" / "reference_vali
 GUARDED_FIXTURES = EXAMPLE_DIR / "fixtures"
 DIFFERENTIAL_FIXTURES = EXAMPLE_DIR / "differential_fixtures"
 REPORT_PATH = EXAMPLE_DIR / "validation_report.json"
+PROVENANCE_PATH = EXAMPLE_DIR / "provenance.json"
 
 #: Strategies whose perturbation is a pure function of the payload. A recorded
 #: differential can only be replayed if every probe it made is reproducible, so
@@ -222,12 +223,30 @@ def test_the_committed_report_names_its_provenance() -> None:
     """The artefact has to say what produced it, and agree with the fixtures it
     sits beside — otherwise the reader cannot tell what the proof is a proof
     about."""
-    provenance = _committed_report()["provenance"]
+    provenance = json.loads(PROVENANCE_PATH.read_text(encoding="utf-8"))
     differential = _meta(DIFFERENTIAL_FIXTURES)
 
     assert provenance["provider"] == differential["provider"]
     assert provenance["model"] == differential["model"]
     assert provenance["iterations"] == differential["iterations"]
+
+
+def test_report_loads_the_committed_example(tmp_path: Path) -> None:
+    """`mylonite report` must accept the committed example, plain, --json and
+    --sarif. The recorder's provenance lives beside the report, not in it."""
+    from typer.testing import CliRunner
+
+    from mylonite.cli import app
+
+    runner = CliRunner()
+    assert runner.invoke(app, ["report", str(EXAMPLE_DIR)]).exit_code == 0
+    json_out = tmp_path / "out.json"
+    sarif_out = tmp_path / "out.sarif"
+    result = runner.invoke(
+        app, ["report", str(EXAMPLE_DIR), "--json", str(json_out), "--sarif", str(sarif_out)]
+    )
+    assert result.exit_code == 0, result.output
+    assert json_out.is_file() and sarif_out.is_file()
 
 
 def test_the_committed_report_carries_no_credential_shaped_keys() -> None:

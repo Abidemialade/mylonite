@@ -484,7 +484,8 @@ def _load_api_key_file(path: Path) -> None:
     if var is None:
         echo_err(
             "--api-key-file: couldn't infer the provider from the key shape. Use a "
-            "dotenv file with a KEY=VALUE line instead (e.g. ANTHROPIC_API_KEY=…), "  # allow-literal: example
+            "dotenv file with a KEY=VALUE line instead (your provider's API key "
+            "variable and the key), "
             "or pass --env-file."
         )
         raise typer.Exit(code=EXIT_CONFIG)
@@ -1976,92 +1977,94 @@ def _validate_custom(
 
     target_registry.clear_runtime_targets()
     target_registry.register_target(spec)
-
-    # Calibrate the effect probe before it's trusted (--authorize matched above).
-    if spec.transport != "rest":
-        _calibrate_custom_target_now(build_adapter_for_spec(spec, scope=tf.scope, model=model))
-    # `cw`/`plan` were already resolved above, before the preflight -- reused
-    # here rather than recomputed (it's pure, so recomputing would be
-    # harmless, but reuse makes the single resolution point obvious).
-    if plan.banner:
-        for line in plan.banner.split("\n"):
-            echo_err(f"validate: {line}")
-    if not randomize_exfil:
-        echo_err(
-            "note: --no-randomize-exfil is set, so the result only proves the target blocks the "
-            "one demo literal, not exfil to ANY attacker address. Drop it (randomization is the "
-            "default for custom targets) to avoid 'teaching to the test'."
-        )
-
-    effective_planner_model = planner_model or model
-
-    def _factory() -> Any:
-        return build_adapter_for_spec(
-            spec, scope=tf.scope, model=effective_planner_model, intent=plan.raw
-        )
-
-    guarded_factory: Any = None
-    if plan.control_weakness is not None:
-
-        def _guarded() -> Any:
-            return build_adapter_for_spec(
-                spec, scope=tf.scope, model=effective_planner_model, intent=plan.guarded
+    try:
+        # Calibrate the effect probe before it's trusted (--authorize matched above).
+        if spec.transport != "rest":
+            _calibrate_custom_target_now(build_adapter_for_spec(spec, scope=tf.scope, model=model))
+        # `cw`/`plan` were already resolved above, before the preflight -- reused
+        # here rather than recomputed (it's pure, so recomputing would be
+        # harmless, but reuse makes the single resolution point obvious).
+        if plan.banner:
+            for line in plan.banner.split("\n"):
+                echo_err(f"validate: {line}")
+        if not randomize_exfil:
+            echo_err(
+                "note: --no-randomize-exfil is set, so the result only proves the target blocks the "
+                "one demo literal, not exfil to ANY attacker address. Drop it (randomization is the "
+                "default for custom targets) to avoid 'teaching to the test'."
             )
 
-        guarded_factory = _guarded
+        effective_planner_model = planner_model or model
 
-    if plan.guarded_is_server_layer:
-        twin_kind = "real server-layer twin"
-    elif plan.guarded.input_frame:
-        twin_kind = "input data-framing guard"
-    elif plan.control_weakness is not None:
-        twin_kind = "synthetic boundary twin"
-    else:
-        twin_kind = "none (differential not applicable to a black-box target)"
-    echo_err(
-        f"validate re-drives the REAL target {spec.family!r} live — {iterations} runs "
-        f"+ multi-judge consensus + effect probe (guarded side: {twin_kind})."
-    )
-    if (
-        plan.control_weakness is not None
-        and not plan.guarded_is_server_layer
-        and not plan.guarded.input_frame
-    ):
-        bar = "=" * 74
+        def _factory() -> Any:
+            return build_adapter_for_spec(
+                spec, scope=tf.scope, model=effective_planner_model, intent=plan.raw
+            )
+
+        guarded_factory: Any = None
+        if plan.control_weakness is not None:
+
+            def _guarded() -> Any:
+                return build_adapter_for_spec(
+                    spec, scope=tf.scope, model=effective_planner_model, intent=plan.guarded
+                )
+
+            guarded_factory = _guarded
+
+        if plan.guarded_is_server_layer:
+            twin_kind = "real server-layer twin"
+        elif plan.guarded.input_frame:
+            twin_kind = "input data-framing guard"
+        elif plan.control_weakness is not None:
+            twin_kind = "synthetic boundary twin"
+        else:
+            twin_kind = "none (differential not applicable to a black-box target)"
         echo_err(
-            f"{bar}\n"
-            "BOUNDARY-PROXY CAVEAT: the guarded side is a SYNTHETIC control Mylonite\n"
-            "applies at the adapter boundary, NOT your server's own guard. A kept\n"
-            "finding proves a canonical control WOULD be load-bearing for this model --\n"
-            "not that your implementation is. For the strong, server-side claim, declare\n"
-            "control_env in your target.yaml (see docs/concepts.md).\n"
-            f"{bar}"
+            f"validate re-drives the REAL target {spec.family!r} live — {iterations} runs "
+            f"+ multi-judge consensus + effect probe (guarded side: {twin_kind})."
         )
+        if (
+            plan.control_weakness is not None
+            and not plan.guarded_is_server_layer
+            and not plan.guarded.input_frame
+        ):
+            bar = "=" * 74
+            echo_err(
+                f"{bar}\n"
+                "BOUNDARY-PROXY CAVEAT: the guarded side is a SYNTHETIC control Mylonite\n"
+                "applies at the adapter boundary, NOT your server's own guard. A kept\n"
+                "finding proves a canonical control WOULD be load-bearing for this model --\n"
+                "not that your implementation is. For the strong, server-side claim, declare\n"
+                "control_env in your target.yaml (see docs/concepts.md).\n"
+                f"{bar}"
+            )
 
-    validator = DifferentialValidator(
-        iterations=iterations,
-        provider=provider,
-        model=model,
-        planner_model=planner_model,
-        customiser_model=customiser_model,
-        judge_model=judge_model,
-        target_adapter_factory=_factory,
-        guarded_adapter_factory=guarded_factory,
-        control_weakness=plan.control_weakness,
-        randomize_exfil=randomize_exfil,
-        guarded_is_server_layer=plan.guarded_is_server_layer,
-        control_context=plan.control_context,
-        iteration_timeout_s=iteration_timeout_s,
-        guard_mode=plan.guard_mode,
-        progress_cb=lambda msg: echo_err(f"  … {msg}"),
-    )
-    from mylonite.plugins._reference.reference_validator import build_target_or_raise
-    from mylonite.scan._llm import llm_scope
-
-    with llm_scope(policy=policy):
-        return validator.validate(
-            generated, build_target_or_raise(_factory), ReferenceVulnerableOracle()
+        validator = DifferentialValidator(
+            iterations=iterations,
+            provider=provider,
+            model=model,
+            planner_model=planner_model,
+            customiser_model=customiser_model,
+            judge_model=judge_model,
+            target_adapter_factory=_factory,
+            guarded_adapter_factory=guarded_factory,
+            control_weakness=plan.control_weakness,
+            randomize_exfil=randomize_exfil,
+            guarded_is_server_layer=plan.guarded_is_server_layer,
+            control_context=plan.control_context,
+            iteration_timeout_s=iteration_timeout_s,
+            guard_mode=plan.guard_mode,
+            progress_cb=lambda msg: echo_err(f"  … {msg}"),
         )
+        from mylonite.plugins._reference.reference_validator import build_target_or_raise
+        from mylonite.scan._llm import llm_scope
+
+        with llm_scope(policy=policy):
+            return validator.validate(
+                generated, build_target_or_raise(_factory), ReferenceVulnerableOracle()
+            )
+    finally:
+        target_registry.clear_runtime_targets()
 
 
 def _locate_generated(target: Path) -> tuple[Path, Path]:

@@ -278,8 +278,13 @@ async def verify_red_set(*, provider: str, model: str, pattern_id: str, red_dir:
     print(f"[red] offline replay of {red_dir} fires {pattern_id} with every lookup hit")
 
 
+def _provenance(*, provider: str, model: str, iterations: int) -> dict[str, object]:
+    """The committed `provenance.json`: what produced the recording."""
+    return {"provider": provider, "model": model, "iterations": iterations}
+
+
 def _redacted_report(
-    report: object, *, provider: str, model: str, iterations: int
+    report: object,
 ) -> dict[str, object]:
     """The committed `validation_report.json`.
 
@@ -287,11 +292,12 @@ def _redacted_report(
     committed verdict matches the one it re-derives — not just that both say
     KEPT. Deliberately excludes the raw per-iteration payload bodies and model
     replies: the artefact is a proof of the verdict, not a transcript dump, and
-    recorded model output already lives in the fixture files.
+    recorded model output already lives in the fixture files. Provenance is not
+    part of it: `ValidationReport` forbids extra keys, so `provenance.json`
+    sits beside it (see `_provenance`).
     """
     dumped = report.model_dump(mode="json")  # type: ignore[attr-defined]
     return {
-        "provenance": {"provider": provider, "model": model, "iterations": iterations},
         "test_filename": dumped["test_filename"],
         "kept": dumped["kept"],
         "gating_formula": dumped["gating_formula"],
@@ -445,10 +451,12 @@ def _main(argv: list[str] | None = None) -> int:
         )
     )
     (example_dir / "validation_report.json").write_text(
+        json.dumps(_redacted_report(report), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (example_dir / "provenance.json").write_text(
         json.dumps(
-            _redacted_report(
-                report, provider=args.provider, model=args.model, iterations=args.iterations
-            ),
+            _provenance(provider=args.provider, model=args.model, iterations=args.iterations),
             indent=2,
             sort_keys=True,
         )

@@ -4,10 +4,7 @@ Each case drives ``mylonite report --sarif --json`` on a directory a real run
 wrote:
 
 - ``examples/reference_validation/``: a validation of the reference twins that
-  was kept with a passing build and differential leg (KEPT). Its report carries
-  a top-level ``provenance`` key the recording script adds, which
-  ``ValidationReport`` does not accept, so the test copies the report and
-  exploit without that key.
+  was kept with a passing build and differential leg (KEPT). Read directly.
 - ``tests/fixtures/report_verdicts/rejected_not_reproduced/``: a validation of
   a custom target (the public MCP "everything" server) on a hosted model, where
   the attack reproduced 0/3 and the run was rejected. Copied unchanged from the
@@ -57,22 +54,10 @@ def _export(artefact_dir: Path, tmp_path: Path) -> tuple[dict[str, Any], dict[st
     return results[0], findings[0]
 
 
-def _kept_dir(tmp_path: Path) -> Path:
-    """The recorded KEPT validation, minus the recorder's ``provenance`` key."""
-    out = tmp_path / "kept"
-    out.mkdir()
-    report = json.loads((KEPT_DIR / "validation_report.json").read_text(encoding="utf-8"))
-    report.pop("provenance", None)
-    (out / "validation_report.json").write_text(json.dumps(report), encoding="utf-8")
-    for exploit in KEPT_DIR.glob("exploit_*.json"):
-        (out / exploit.name).write_bytes(exploit.read_bytes())
-    return out
-
-
 def test_recorded_kept_validation_is_an_error_with_severity_and_claim(tmp_path: Path) -> None:
     from mylonite._twin_fidelity import PROOF_CLAIM_BOUNDARY, PROOF_CLAIM_SERVER
 
-    result, finding = _export(_kept_dir(tmp_path), tmp_path)
+    result, finding = _export(KEPT_DIR, tmp_path)
     assert result["level"] == "error"
     assert result["properties"]["verdict"] == "KEPT"
     assert "security-severity" in result["properties"]
