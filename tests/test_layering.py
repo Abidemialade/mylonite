@@ -31,6 +31,7 @@ _TIER = {
     "contracts": 0,
     "scan": 1,
     "plugins": 1,
+    "access": 1,
     "gate": 2,
     "report": 2,
     "cli": 3,
