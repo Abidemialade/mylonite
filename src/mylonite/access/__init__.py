@@ -1,6 +1,13 @@
 """Compare a coding agent's real GitHub grant with an owner-approved intent file."""
 
 from mylonite.access.compare import Finding, compare_grant, escalation_findings
+from mylonite.access.drill import (
+    ArmResult,
+    DrillResult,
+    mint_app_jwt,
+    not_tested_drill,
+    run_revocation_drill,
+)
 from mylonite.access.github_client import GitHubClient, GitHubError
 from mylonite.access.grants import (
     Grant,
@@ -23,7 +30,9 @@ from mylonite.access.intent import (
 )
 
 __all__ = [
+    "ArmResult",
     "ControlsIntent",
+    "DrillResult",
     "EscalationIntent",
     "Finding",
     "GitHubClient",
@@ -40,7 +49,10 @@ __all__ = [
     "compare_grant",
     "escalation_findings",
     "load_intent",
+    "mint_app_jwt",
+    "not_tested_drill",
     "read_app_grant",
     "read_classic_token_grant",
     "require_approved",
+    "run_revocation_drill",
 ]
