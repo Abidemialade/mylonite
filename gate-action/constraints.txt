@@ -27,7 +27,7 @@
 # test_the_vendored_litellm_pin_satisfies_pyprojects_own_range, which keep
 # this file and gate-action/constraints.txt identical and check the pin
 # against pyproject.toml's own specifier.
-litellm==1.104.0
+litellm==1.105.0
 # Pinned for the same reason as litellm above -- a target launched via
 # uvx/uv otherwise installs whatever uv PyPI serves that day.
-uv==0.12.23
+uv==0.13.0
