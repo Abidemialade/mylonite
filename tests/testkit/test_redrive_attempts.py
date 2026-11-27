@@ -560,6 +560,11 @@ def _pytest(tmp_path: Path, extra: tuple[str, ...] = ()) -> subprocess.Completed
             "-rA",
             "-p",
             "no:cacheprovider",
+            # The consumer project has no async tests. Without this, whatever
+            # pytest-asyncio is installed loads into it, and 1.5's startup
+            # deprecation warning fails the `-W error` runs before any test.
+            "-p",
+            "no:asyncio",
             "-o",
             "addopts=",
             "--rootdir",
