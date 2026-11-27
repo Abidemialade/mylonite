@@ -43,6 +43,7 @@ from mylonite._cli_io import (
 )
 from mylonite._experimental import hidden_command as _hidden_experimental_command
 from mylonite._paths import path_for_shell
+from mylonite.commands.access import access
 from mylonite.commands.check import check
 from mylonite.commands.llm_ceiling import CeilingGuardGroup, apply_request_ceiling
 from mylonite.commands.llm_headers import LLMHeaderOption, apply_llm_headers
@@ -3676,3 +3677,4 @@ def ablate(
 # Registered via a function call, not a decorator, because `commands/check.py`
 # needs `mylonite.cli._discover_run_config`, imported lazily in the function body.
 _hidden_experimental_command(app, "check")(check)
+_hidden_experimental_command(app, "access")(access)

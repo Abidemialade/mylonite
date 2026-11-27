@@ -183,6 +183,11 @@ a stale fixture would otherwise make the vulnerable side look guarded. See
 > documented here. It still exists, but it's hidden and needs `MYLONITE_EXPERIMENTAL=1` —
 > see [experimental.md](experimental.md).
 
+> **`access` is experimental.** It compares a coding agent's real GitHub grant with an
+> owner-approved intent file and can drill GitHub App token revocation. It is hidden and
+> needs `MYLONITE_EXPERIMENTAL=1` — see
+> [experimental.md](experimental.md#access-compare-a-coding-agents-github-grant-with-its-intent).
+
 ## `scan` — find weaknesses
 
 Run the exploit-finding loop against a target.
