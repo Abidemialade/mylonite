@@ -291,6 +291,10 @@ testpaths = ["tests", "reference_targets/mcp_kitchen_sink/tests"]
 # in tests without installing it.
 pythonpath = ["."]
 asyncio_mode = "auto"
+# pytest-asyncio 1.5 warns at startup when this is unset, and `filterwarnings =
+# error` turns that warning into an INTERNALERROR that stops every test job.
+# "function" is the scope the suite has always run with.
+asyncio_default_fixture_loop_scope = "function"
 python_classes = ["Test*"]
 python_files = ["test_*.py"]
 filterwarnings = [
