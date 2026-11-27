@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   way they skip a failed or unreadable judge call. See
   [Validation](docs/validation.md).
 
+- **`validate --target-file` no longer leaves its target registered when it
+  fails.** `ablate` already cleared the runtime target registry on the way out;
+  `validate` did not, so a failed run could leak its target into the next call
+  in the same process (an embedding or a test run).
 - **`--api-key-file` no longer suggests `ANTHROPIC_API_KEY` as the example.**
   When it cannot tell which provider a bare key belongs to, the error now asks
   for your provider's own key variable. A test fails if any other user-facing

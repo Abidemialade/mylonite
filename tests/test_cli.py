@@ -6970,6 +6970,11 @@ def test_gate_and_validate_produce_identical_twin_plans(
         _validate_custom(
             gen, target_yaml, 1, "anthropic", "anthropic/m", fast=False, authorize="myapp-server"
         )
+        # `_validate_custom` now clears the registry on exit (#244); the stubbed
+        # validator never called its factories, so re-register the target here.
+        from mylonite.plugins._mcp.target_file import build_target_spec, load_target_file
+
+        target_registry.register_target(build_target_spec(load_target_file(target_yaml)))
         validate_raw_env = validate_captured["target_adapter_factory"]()._launch_env
         validate_guarded_env = validate_captured["guarded_adapter_factory"]()._launch_env
 
