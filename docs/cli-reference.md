@@ -184,7 +184,9 @@ a stale fixture would otherwise make the vulnerable side look guarded. See
 > see [experimental.md](experimental.md).
 
 > **`access` is experimental.** It compares a coding agent's real GitHub grant with an
-> owner-approved intent file and can drill GitHub App token revocation. It is hidden and
+> owner-approved intent file and can drill GitHub App token revocation. Its last console
+> line gives the result and the not-tested count, for example
+> `result: PASS (12 items not tested; see report.md)`. It is hidden and
 > needs `MYLONITE_EXPERIMENTAL=1` — see
 > [experimental.md](experimental.md#access-compare-a-coding-agents-github-grant-with-its-intent).
 
