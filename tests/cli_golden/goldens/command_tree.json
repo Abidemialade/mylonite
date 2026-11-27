@@ -18,7 +18,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -32,7 +32,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -46,7 +46,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "1",
@@ -60,7 +60,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "IntParamType"
+          "type": "int"
         },
         {
           "default": "None",
@@ -74,7 +74,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "2",
@@ -88,7 +88,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "IntParamType"
+          "type": "int"
         },
         {
           "default": "None",
@@ -102,7 +102,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -116,7 +116,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "False",
@@ -130,7 +130,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -144,7 +144,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -158,7 +158,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         }
       ]
     },
@@ -180,7 +180,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -194,7 +194,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -208,7 +208,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -222,7 +222,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         }
       ]
     },
@@ -244,7 +244,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -258,7 +258,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -272,7 +272,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         }
       ]
     },
@@ -294,7 +294,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -308,7 +308,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -322,7 +322,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -336,7 +336,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "False",
@@ -350,7 +350,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "3",
@@ -364,7 +364,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "IntParamType"
+          "type": "int"
         },
         {
           "default": "None",
@@ -378,7 +378,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "False",
@@ -392,7 +392,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -406,7 +406,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "IntParamType"
+          "type": "int"
         },
         {
           "default": "None",
@@ -420,7 +420,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "False",
@@ -434,7 +434,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -448,7 +448,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -462,7 +462,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "False",
@@ -476,7 +476,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -490,7 +490,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -506,7 +506,7 @@
           "secondary_opts": [
             "--no-randomize-exfil"
           ],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -520,7 +520,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "'ubuntu-latest'",
@@ -534,7 +534,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -548,7 +548,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -562,7 +562,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "False",
@@ -578,7 +578,7 @@
           "secondary_opts": [
             "--no-workflows"
           ],
-          "type": "BoolParamType"
+          "type": "bool"
         }
       ]
     },
@@ -600,7 +600,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -614,7 +614,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "False",
@@ -628,7 +628,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -642,7 +642,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -656,7 +656,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -670,7 +670,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "False",
@@ -684,7 +684,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         }
       ]
     },
@@ -713,7 +713,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -727,7 +727,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -741,7 +741,7 @@
           ],
           "required": true,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         }
       ]
     },
@@ -763,7 +763,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -777,7 +777,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -791,7 +791,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -805,7 +805,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -819,7 +819,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "False",
@@ -833,7 +833,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -847,7 +847,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "False",
@@ -861,7 +861,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -875,7 +875,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "3",
@@ -889,7 +889,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "IntParamType"
+          "type": "int"
         },
         {
           "default": "None",
@@ -903,7 +903,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "IntParamType"
+          "type": "int"
         },
         {
           "default": "None",
@@ -917,7 +917,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -931,7 +931,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -945,7 +945,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -959,7 +959,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -973,7 +973,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -989,7 +989,7 @@
           "secondary_opts": [
             "--no-randomize-exfil"
           ],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -1003,7 +1003,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -1017,7 +1017,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -1031,7 +1031,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -1045,7 +1045,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -1059,7 +1059,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -1073,7 +1073,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -1087,7 +1087,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -1101,7 +1101,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -1115,7 +1115,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -1129,7 +1129,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -1143,7 +1143,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         }
       ]
     },
@@ -1165,7 +1165,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -1179,7 +1179,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "False",
@@ -1193,7 +1193,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "120.0",
@@ -1207,7 +1207,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "FloatParamType"
+          "type": "float"
         },
         {
           "default": "5",
@@ -1221,7 +1221,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "IntParamType"
+          "type": "int"
         },
         {
           "default": "None",
@@ -1235,7 +1235,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -1249,7 +1249,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -1263,7 +1263,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "False",
@@ -1277,7 +1277,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -1293,7 +1293,7 @@
           "secondary_opts": [
             "--no-randomize-exfil"
           ],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
           "default": "None",
@@ -1307,7 +1307,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -1321,7 +1321,7 @@
           ],
           "required": true,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -1335,7 +1335,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         }
       ]
     },
@@ -1365,7 +1365,7 @@
         ],
         "required": false,
         "secondary_opts": [],
-        "type": "TyperPath"
+        "type": "path"
       },
       {
         "default": "None",
@@ -1379,7 +1379,7 @@
         ],
         "required": false,
         "secondary_opts": [],
-        "type": "TyperPath"
+        "type": "path"
       },
       {
         "default": "None",
@@ -1393,7 +1393,7 @@
         ],
         "required": false,
         "secondary_opts": [],
-        "type": "StringParamType"
+        "type": "str"
       },
       {
         "default": "None",
@@ -1407,7 +1407,7 @@
         ],
         "required": false,
         "secondary_opts": [],
-        "type": "IntRange"
+        "type": "int_range"
       }
     ]
   }

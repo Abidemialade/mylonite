@@ -73,9 +73,8 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
-import click
 from typer.main import get_command
 from typer.testing import CliRunner
 
@@ -144,13 +143,44 @@ def _assert_matches_golden(golden_name: str, result, expected_exit_code: int = 0
 # --- command-tree snapshot (replaces rendered --help goldens) ---------------
 
 
-def _param_snapshot(param: click.Parameter) -> dict[str, Any]:
+# Typer 0.29 stopped exposing Click ParamType objects (``param.type``) and
+# describes each parameter with a ``type_descriptor`` instead. Both map to the
+# same plain names, so one golden holds on either side of that release.
+_CLICK_TYPE_NAMES = {
+    "BoolParamType": "bool",
+    "IntParamType": "int",
+    "FloatParamType": "float",
+    "StringParamType": "str",
+    "Path": "path",
+    "TyperPath": "path",
+    "IntRange": "int_range",
+    "FloatRange": "float_range",
+}
+_ANNOTATION_NAMES = {bool: "bool", int: "int", float: "float", str: "str"}
+
+
+def _param_type_name(param: Any) -> str:
+    """A Typer-version-neutral name for a parameter's value type."""
+    descriptor = getattr(param, "type_descriptor", None)
+    if descriptor is None:  # Typer < 0.29: a Click ParamType instance
+        name = type(param.type).__name__
+        return _CLICK_TYPE_NAMES.get(name, name)
+    if descriptor.is_path:
+        return "path"
+    annotation = descriptor.annotation
+    if descriptor.is_list:
+        (annotation,) = get_args(annotation)
+    base = _ANNOTATION_NAMES.get(annotation, getattr(annotation, "__name__", repr(annotation)))
+    return f"{base}_range" if descriptor.is_ranged else base
+
+
+def _param_snapshot(param: Any) -> dict[str, Any]:
     """Everything about one Click parameter that ``--help`` is built from."""
     return {
         "name": param.name,
         "opts": sorted(param.opts),
         "secondary_opts": sorted(param.secondary_opts),
-        "type": type(param.type).__name__,
+        "type": _param_type_name(param),
         "required": bool(param.required),
         # repr()'d: every default in this CLI is a plain None/bool/int/float/
         # str today (no Path/enum/callable defaults), but repr() keeps this
@@ -163,7 +193,7 @@ def _param_snapshot(param: click.Parameter) -> dict[str, Any]:
     }
 
 
-def _command_snapshot(cmd: click.Command) -> dict[str, Any]:
+def _command_snapshot(cmd: Any) -> dict[str, Any]:
     """Everything about one command that ``--help`` is built from.
 
     ``hidden`` is tracked explicitly (not just inferred from absence in a
@@ -187,7 +217,7 @@ def _command_tree_snapshot() -> dict[str, Any]:
     version -- this is the input those renderers consume, not their output.
     """
     root = get_command(app)
-    commands: dict[str, click.Command] = getattr(root, "commands", {})
+    commands: dict[str, Any] = getattr(root, "commands", {})
     return {
         "root": _command_snapshot(root),
         "commands": {name: _command_snapshot(sub) for name, sub in sorted(commands.items())},
