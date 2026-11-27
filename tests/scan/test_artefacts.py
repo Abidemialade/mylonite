@@ -273,19 +273,36 @@ def test_write_artefacts_disambiguates_two_exploits_sharing_a_pattern_id(
         assert payload["pattern_id"] == same_id
 
 
-def test_timestamped_subdir_retries_past_an_existing_collision(tmp_path: Path) -> None:
+def test_timestamped_subdir_retries_past_an_existing_collision(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The exist_ok=False retry loop actually retries on a real collision,
-    not just a hypothetical one — pre-create the exact timestamp dir a write
-    would pick and confirm it lands on the -1 suffix instead of raising."""
+    not just a hypothetical one: pre-create the exact timestamp dir a write
+    would pick and confirm it lands on the -1 suffix instead of raising.
+
+    The clock is frozen so the name the code picks cannot change between the
+    pre-create and the call, however slow or coarse the real clock is.
+    """
     from datetime import UTC, datetime
 
-    from mylonite.scan.artefacts import _timestamped_subdir
+    import mylonite.scan.artefacts as artefacts
 
-    base = datetime.now(UTC).strftime("%Y-%m-%dT%H-%M-%SZ")
+    frozen = datetime(2026, 9, 7, 3, 19, 2, tzinfo=UTC)
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def]
+            return frozen
+
+    monkeypatch.setattr(artefacts, "datetime", _FrozenDatetime)
+
+    base = "2026-09-07T03-19-02Z"
     (tmp_path / base).mkdir(parents=True)
-    scan_dir = _timestamped_subdir(tmp_path)
+    scan_dir = artefacts._timestamped_subdir(tmp_path)
     assert scan_dir == tmp_path / f"{base}-1"
     assert scan_dir.exists()
+    # A second collision walks on to -2, so the loop is not a one-shot.
+    assert artefacts._timestamped_subdir(tmp_path) == tmp_path / f"{base}-2"
 
 
 # --- render_summary --------------------------------------------------------
