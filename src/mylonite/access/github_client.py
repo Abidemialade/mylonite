@@ -82,6 +82,7 @@ class GitHubClient:
         bearer_is_jwt: bool = False,
     ) -> None:
         register_masked_value(token)
+        self.kind: TokenKind = token_kind(token)
         self.base_url = base_url.rstrip("/")
         self.bearer_is_jwt = bearer_is_jwt
         self._base = httpx.URL(self.base_url)
