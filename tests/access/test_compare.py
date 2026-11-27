@@ -16,6 +16,7 @@ from mylonite.access import (
     Grant,
     Intent,
     Level,
+    NotTested,
     RepoGrant,
     compare_grant,
     escalation_findings,
@@ -272,6 +273,15 @@ def test_permission_not_intended() -> None:
     assert (f.code, f.status, f.subject) == ("PERMISSION_NOT_INTENDED", "over_grant", "issues")
 
 
+def test_mandatory_metadata_read_is_exempt_but_metadata_write_is_not() -> None:
+    intent = INTENT_APP.model_copy(
+        update={"permissions": {"contents": "write", "pull_requests": "write"}}
+    )
+    assert compare_grant(intent, GRANT_MATCHING) == []
+    [f] = compare_grant(intent, with_permission(GRANT_MATCHING, "metadata", "write"))
+    assert (f.code, f.subject) == ("PERMISSION_NOT_INTENDED", "metadata")
+
+
 def test_permissions_do_not_apply_to_a_classic_token() -> None:
     intent = with_intent_permission(INTENT_CLASSIC, "contents", "read")
     assert compare_grant(intent, GRANT_CLASSIC) == []
@@ -383,19 +393,94 @@ def test_other_integration_as_bypass_actor_is_silent() -> None:
     assert findings == []
 
 
-def test_classic_admin_with_role_bypass_fires_and_write_does_not() -> None:
-    admin = replace(GRANT_CLASSIC, repos=(RepoGrant(f"{ORG}/service-a", "admin", True),))
-    for actor_type in ("OrganizationAdmin", "RepositoryRole"):
-        findings, _ = escalation_findings(
-            INTENT_CLASSIC, admin, reader_with_bypass(actor_type=actor_type, actor_id=5)
-        )
-        assert codes(findings) == ["ESC_BRANCH_RULE_BYPASS"], actor_type
-    findings, _ = escalation_findings(
-        INTENT_CLASSIC,
-        GRANT_CLASSIC,
-        reader_with_bypass(actor_type="RepositoryRole", actor_id=5),
+def test_app_bypass_subject_has_the_ruleset_id_and_detail_the_enforcement() -> None:
+    repo = f"{ORG}/service-a"
+    reader = reader_from(
+        rulesets={repo: [{"id": 7, "name": "protect main"}]},
+        details={
+            (repo, 7): httpx.Response(
+                200,
+                json={
+                    "id": 7,
+                    "name": "protect main",
+                    "enforcement": "evaluate",
+                    "bypass_actors": [
+                        {"actor_id": APP_ID, "actor_type": "Integration", "bypass_mode": "always"}
+                    ],
+                },
+            )
+        },
     )
+    [f] = escalation_findings(INTENT_APP, GRANT_MATCHING, reader)[0]
+    assert f.subject == f"{repo} ruleset protect main (7)"
+    assert "evaluate" in f.detail
+    assert f.change == (
+        f"Remove the app coding-agent from the bypass list of the ruleset protect main on {repo}."
+    )
+
+
+def test_bypass_on_one_ruleset_and_404_on_another_gives_both() -> None:
+    repo = f"{ORG}/service-a"
+    bypass = {
+        "id": 7,
+        "name": "protect main",
+        "bypass_actors": [{"actor_id": APP_ID, "actor_type": "Integration"}],
+    }
+    reader = reader_from(
+        rulesets={repo: [{"id": 7, "name": "protect main"}, {"id": 8, "name": "tags"}]},
+        details={
+            (repo, 7): httpx.Response(200, json=bypass),
+            (repo, 8): httpx.Response(404, json={"message": "Not Found"}),
+        },
+    )
+    findings, not_tested = escalation_findings(INTENT_APP, GRANT_MATCHING, reader)
+    assert codes(findings) == ["ESC_BRANCH_RULE_BYPASS"]
+    assert NotTested(f"branch-rule bypass on {repo}", "404 reading rulesets") in not_tested
+
+
+def test_ruleset_with_a_non_integer_id_is_not_tested() -> None:
+    repo = f"{ORG}/service-a"
+    reader = reader_from(rulesets={repo: [{"id": "7", "name": "protect main"}]})
+    findings, not_tested = escalation_findings(INTENT_APP, GRANT_MATCHING, reader)
     assert findings == []
+    assert NotTested(f"branch-rule bypass on {repo}", "GitHub returned a ruleset with no id") in (
+        not_tested
+    )
+
+
+def test_classic_token_bypass_actors_are_not_evaluated_never_a_finding() -> None:
+    repo = f"{ORG}/service-a"
+    admin = replace(GRANT_CLASSIC, repos=(RepoGrant(repo, "admin", True),))
+    reader = reader_from(
+        rulesets={repo: [{"id": 7, "name": "protect main"}]},
+        details={
+            (repo, 7): httpx.Response(
+                200,
+                json={
+                    "id": 7,
+                    "name": "protect main",
+                    "bypass_actors": [
+                        {"actor_id": 5, "actor_type": "RepositoryRole"},
+                        {"actor_id": 11, "actor_type": "Team"},
+                        {"actor_id": 12, "actor_type": "Team"},
+                        {"actor_id": 99, "actor_type": "Integration"},
+                    ],
+                },
+            )
+        },
+    )
+    findings, not_tested = escalation_findings(INTENT_CLASSIC, admin, reader)
+    assert findings == []
+    rows = [n for n in not_tested if n.item == f"branch-rule bypass on {repo}"]
+    assert rows == [
+        NotTested(
+            f"branch-rule bypass on {repo}",
+            "bypass actor RepositoryRole not evaluated for a classic token",
+        ),
+        NotTested(
+            f"branch-rule bypass on {repo}", "bypass actor Team not evaluated for a classic token"
+        ),
+    ]
 
 
 def test_unreadable_rulesets_are_not_tested_never_clean() -> None:

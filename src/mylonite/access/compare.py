@@ -24,7 +24,8 @@ _WORKFLOW_DETAIL = (
     "The agent can change what the pipeline runs, and so reach the secrets the pipeline holds."
 )
 _CLASSIC_PROTECTION = NotTested("classic branch protection bypass", "only rulesets are read")
-_CLASSIC_BYPASS_ACTORS = ("OrganizationAdmin", "RepositoryRole")
+# Every GitHub App holds metadata: read; the owner cannot remove it.
+_MANDATORY_APP_PERMISSIONS = {"metadata": "read"}
 
 
 @dataclass(frozen=True)
@@ -161,6 +162,8 @@ def _permissions(intent: Intent, grant: Grant) -> list[Finding]:
     wanted = {k.casefold(): v for k, v in intent.permissions.items()}
     for name, level in grant.permissions.items():
         want = wanted.get(name.casefold())
+        if want is None and _MANDATORY_APP_PERMISSIONS.get(name.casefold()) == level.casefold():
+            continue
         if want is None:
             findings.append(
                 Finding(
@@ -240,21 +243,36 @@ def _read_failed(exc: GitHubError) -> str:
     return "no usable response reading rulesets"
 
 
-def _bypasses(actors: list[Any], grant: Grant, repo: RepoGrant) -> bool:
+def _app_bypasses(actors: list[Any], grant: Grant) -> bool:
+    """True when the App itself is listed as a bypass actor."""
+    if grant.app_id is None:
+        return False
+    return any(
+        isinstance(actor, dict)
+        and actor.get("actor_type") == "Integration"
+        and actor.get("actor_id") == grant.app_id
+        for actor in actors
+    )
+
+
+def _classic_unjudged(actors: list[Any], item: str) -> list[NotTested]:
+    """One note per non-Integration actor type a classic token cannot be judged against.
+
+    Whether the token's user is covered by a role, team, organisation-admin or
+    other actor needs membership data this slice does not read.
+    """
+    kinds: set[str] = set()
     for actor in actors:
         if not isinstance(actor, dict):
             continue
         kind = actor.get("actor_type")
-        if grant.identity_kind == "github_app":
-            if (
-                kind == "Integration"
-                and grant.app_id is not None
-                and actor.get("actor_id") == grant.app_id
-            ):
-                return True
-        elif kind in _CLASSIC_BYPASS_ACTORS and repo.level == "admin":
-            return True
-    return False
+        label = kind if isinstance(kind, str) and kind else "of unknown type"
+        if label != "Integration":
+            kinds.add(label)
+    return [
+        NotTested(item, f"bypass actor {kind} not evaluated for a classic token")
+        for kind in sorted(kinds)
+    ]
 
 
 def _repo_bypass(
@@ -268,11 +286,6 @@ def _repo_bypass(
         return [], [NotTested(item, _read_failed(exc))]
     findings: list[Finding] = []
     not_tested: list[NotTested] = []
-    who = (
-        f"the app {grant.identity_label}"
-        if grant.identity_kind == "github_app"
-        else f"the role that gives {grant.identity_label} admin"
-    )
     for row in listed:
         rid = row.get("id")
         if not isinstance(rid, int) or isinstance(rid, bool):
@@ -290,21 +303,32 @@ def _repo_bypass(
             body = response.json()
         except ValueError:
             body = None
-        actors = body.get("bypass_actors") if isinstance(body, dict) else None
-        if not isinstance(actors, list):
+        if not isinstance(body, dict) or not isinstance(body.get("bypass_actors"), list):
             not_tested.append(NotTested(item, f"ruleset {rid} returned no bypass_actors"))
             continue
-        if _bypasses(actors, grant, repo):
-            name = body.get("name") if isinstance(body.get("name"), str) else str(rid)
+        actors: list[Any] = body["bypass_actors"]
+        if grant.identity_kind != "github_app":
+            not_tested += _classic_unjudged(actors, item)
+            continue
+        if _app_bypasses(actors, grant):
+            raw_name = body.get("name")
+            name = raw_name if isinstance(raw_name, str) and raw_name else str(rid)
+            enforcement = body.get("enforcement")
+            state = (
+                f" The ruleset's enforcement is {enforcement}."
+                if isinstance(enforcement, str) and enforcement
+                else ""
+            )
             findings.append(
                 Finding(
                     code="ESC_BRANCH_RULE_BYPASS",
                     status="escalation",
-                    subject=f"{repo.name} ruleset {name}",
-                    detail=f"The agent can bypass the ruleset {name} on {repo.name}, so the "
-                    "branch rules it sets do not bind the agent.",
-                    change=f"Remove {who} from the bypass list of the ruleset {name} "
-                    f"on {repo.name}.",
+                    subject=f"{repo.name} ruleset {name} ({rid})",
+                    detail=f"The app {grant.identity_label} is a bypass actor on the ruleset "
+                    f"{name} on {repo.name}, so the branch rules it sets do not bind the "
+                    f"agent.{state}",
+                    change=f"Remove the app {grant.identity_label} from the bypass list of "
+                    f"the ruleset {name} on {repo.name}.",
                 )
             )
     return findings, not_tested
