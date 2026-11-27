@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-__all__ = ["code_span", "strip_controls"]
+__all__ = ["code_span", "strip_controls", "table_cell"]
 
 #: C0 controls (0x00-0x1F) and C1 controls / DEL (0x7F-0x9F) -- CR/LF
 #: included: a literal newline inside an inline code span ends the span's
@@ -76,3 +76,12 @@ def code_span(value: Any, *, table: bool = False) -> str:
     if text.startswith("`") or text.endswith("`"):
         text = f" {text} "
     return f"{fence}{text}{fence}"
+
+
+def table_cell(value: Any) -> str:
+    """Make ``value`` safe as plain text inside a Markdown table cell.
+
+    Each control character (newlines included) becomes a space and
+    a literal ``|`` is escaped, so the text cannot end the cell or the row.
+    """
+    return _CONTROL_RE.sub(" ", str(value)).replace("|", "\\|")
