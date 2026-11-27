@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-__all__ = ["code_span", "strip_controls", "table_cell"]
+__all__ = ["code_span", "strip_controls"]
 
 #: C0 controls (0x00-0x1F) and C1 controls / DEL (0x7F-0x9F) -- CR/LF
 #: included: a literal newline inside an inline code span ends the span's
@@ -33,7 +33,7 @@ __all__ = ["code_span", "strip_controls", "table_cell"]
 #: renderers. Unlike the terminal-output stripper in ``_cli_io.py``, this
 #: one does NOT keep ``\n``/``\t`` -- there is no legitimate multi-line or
 #: tab-formatted inline code span in a PR body/SARIF message/bundle label.
-_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]")
 
 _BACKTICK_RUN_RE = re.compile(r"`+")
 
@@ -76,12 +76,3 @@ def code_span(value: Any, *, table: bool = False) -> str:
     if text.startswith("`") or text.endswith("`"):
         text = f" {text} "
     return f"{fence}{text}{fence}"
-
-
-def table_cell(value: Any) -> str:
-    """Make ``value`` safe as plain text inside a Markdown table cell.
-
-    Each control character (newlines included) becomes a space and
-    a literal ``|`` is escaped, so the text cannot end the cell or the row.
-    """
-    return _CONTROL_RE.sub(" ", str(value)).replace("|", "\\|")

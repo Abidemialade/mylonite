@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from mylonite._markdown import table_cell
+from mylonite._markdown import code_span, strip_controls
 from mylonite.access.compare import Finding
 from mylonite.access.drill import ArmResult, DrillResult
 from mylonite.access.github_client import API_VERSION
@@ -96,6 +96,17 @@ def build_report(
     )
 
 
+def _clean(value: Any) -> Any:
+    """Strip control characters from every string in a JSON-bound structure."""
+    if isinstance(value, str):
+        return strip_controls(value)
+    if isinstance(value, dict):
+        return {strip_controls(k): _clean(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_clean(v) for v in value]
+    return value
+
+
 def to_json(report: AccessReport) -> str:
     data = {
         "digest": report.digest,
@@ -108,7 +119,7 @@ def to_json(report: AccessReport) -> str:
         "drill": dataclasses.asdict(report.drill),
         "not_tested": [dataclasses.asdict(n) for n in report.not_tested],
     }
-    return json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
+    return json.dumps(_clean(data), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
 def exit_code(report: AccessReport) -> int:
@@ -126,17 +137,21 @@ def _arm(name: str, arm: ArmResult | None) -> str:
     return f"| {name} | {revoked} | {arm.status_before} | {arm.status_after} | {arm.seconds:.1f} |"
 
 
+def _cell(value: Any) -> str:
+    return code_span(value, table=True)
+
+
 def to_markdown(report: AccessReport) -> str:
     intent = report.intent
     org = intent.organisation
     approved_on = intent.approved_on.isoformat() if intent.approved_on else "an unknown date"
     lines = [
-        f"# Access report: {table_cell(report.grant.identity_label)} in {table_cell(org)}",
+        f"# Access report: {code_span(report.grant.identity_label)} in {code_span(org)}",
         "",
         "## Summary",
         "",
-        f"Compared with the intent approved by {table_cell(intent.approved_by)} on {approved_on}. "
-        "This result is only as good as that file.",
+        f"Compared with the intent approved by {strip_controls(intent.approved_by)} "
+        f"on {approved_on}. This result is only as good as that file.",
         "",
         "## Could",
         "",
@@ -147,8 +162,8 @@ def to_markdown(report: AccessReport) -> str:
             "|---|---|---|---|---|",
         ]
         lines += [
-            f"| {table_cell(f.code)} | {table_cell(f.status)} | {table_cell(f.subject)} "
-            f"| {table_cell(f.detail)} | {table_cell(f.change)} |"
+            f"| {_cell(f.code)} | {_cell(f.status)} | {_cell(f.subject)} "
+            f"| {_cell(f.detail)} | {_cell(f.change)} |"
             for f in report.findings
         ]
     else:
@@ -158,7 +173,7 @@ def to_markdown(report: AccessReport) -> str:
         "",
         "## Held",
         "",
-        f"Revocation drill: {drill.status}. {table_cell(drill.reason)}",
+        f"Revocation drill: {drill.status}. {code_span(drill.reason)}",
         "",
         "| Arm | Revoked | Status before | Status after | Seconds |",
         "|---|---|---|---|---|",
@@ -170,12 +185,15 @@ def to_markdown(report: AccessReport) -> str:
         "| Item | Reason |",
         "|---|---|",
     ]
-    rows = [(n.item, n.reason) for n in report.not_tested]
-    rows += [
-        (item.replace("<organisation>", org), reason.replace("<organisation>", org))
-        for item, reason in _FIXED_NOT_TESTED
-    ]
-    lines += [f"| {table_cell(i)} | {table_cell(r)} |" for i, r in rows]
+    lines += [f"| {_cell(n.item)} | {_cell(n.reason)} |" for n in report.not_tested]
+    seen = {n.item for n in report.not_tested}
+    for item, reason in _FIXED_NOT_TESTED:
+        if item.replace("<organisation>", org) in seen:
+            continue
+        shown = code_span(org, table=True)
+        lines.append(
+            f"| {item.replace('<organisation>', shown)} | {reason.replace('<organisation>', shown)} |"
+        )
     lines += [
         "",
         "## About this report",
@@ -183,7 +201,7 @@ def to_markdown(report: AccessReport) -> str:
         f"- Digest: `{report.digest}`",
         f"- Tool version: {report.tool_version}",
         f"- API version: {report.api_version}",
-        f"- Plan tier: {table_cell(report.grant.plan or 'unknown')}",
+        f"- Plan tier: {code_span(report.grant.plan) if report.grant.plan else 'unknown'}",
         f"- Generated at: {report.generated_at}",
         "",
         "This report goes stale when the intent file or the grant changes.",

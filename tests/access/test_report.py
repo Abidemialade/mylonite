@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import replace
 from datetime import UTC, datetime
 
@@ -91,7 +92,7 @@ def test_markdown_never_says_safe_or_compliant() -> None:
 def test_markdown_headings_in_order() -> None:
     text = to_markdown(REPORT_CLEAN)
     heads = [
-        "# Access report: agent-app in my-test-org",
+        "# Access report: `agent-app` in `my-test-org`",
         "## Summary",
         "## Could",
         "## Held",
@@ -115,7 +116,7 @@ def test_not_tested_always_lists_the_fixed_rows() -> None:
         "what the agent did in real runs",
         "fine-grained tokens",
         "the model provider's key",
-        "anything outside my-test-org",
+        "anything outside `my-test-org`",
         "rulesets",
     ):
         assert row in text
@@ -163,7 +164,89 @@ def test_exit_codes() -> None:
     assert exit_code(build_report(INTENT, GRANT, [info], HELD, (), **VERSIONS)) == EXIT_SUCCESS
 
 
-def test_markdown_table_cells_escape_pipes_and_newlines() -> None:
+ESC = chr(0x1B)
+BIDI = chr(0x202E)
+LSEP = chr(0x2028)
+HOSTILE = (
+    "a" + chr(92) + "|b",
+    "<script>x</script>",
+    "[a](http://b)",
+    "tick`here",
+    ESC + "[31mred",
+    "bidi" + BIDI + "evil" + LSEP + "line",
+)
+_BAD_CHARS = re.compile(
+    "["
+    + chr(0)
+    + "-"
+    + chr(8)
+    + chr(0x0B)
+    + "-"
+    + chr(0x1F)
+    + chr(0x7F)
+    + "-"
+    + chr(0x9F)
+    + chr(0x2028)
+    + chr(0x2029)
+    + chr(0x202A)
+    + "-"
+    + chr(0x202E)
+    + chr(0x2066)
+    + "-"
+    + chr(0x2069)
+    + "]"
+)
+
+
+def _outside_code_spans(text: str) -> str:
+    return re.sub(r"(`+)(?:(?!\1).)+?\1", "", text, flags=re.S)
+
+
+def _hostile_report() -> AccessReport:
+    findings = [replace(FINDING, subject=v, detail=v, change=v) for v in HOSTILE]
+    grant = replace(GRANT, identity_label=HOSTILE[1], plan=HOSTILE[2])
+    drill = replace(HELD, reason="line one|x" + chr(10) + "line two " + ESC + "[31m<b>")
+    extra = (NotTested(HOSTILE[2], HOSTILE[0]),)
+    return build_report(INTENT, grant, findings, drill, extra, **VERSIONS)
+
+
+def test_hostile_values_stay_inside_code_spans() -> None:
+    text = to_markdown(_hostile_report())
+    outside = _outside_code_spans(text)
+    for raw in ("<script>", "[a](", "<b>", ESC):
+        assert raw not in outside
+    assert not _BAD_CHARS.search(text.replace("\n", ""))
+    held = next(line for line in text.splitlines() if line.startswith("Revocation drill"))
+    assert "line one\\|x" not in held or "`" in held
+    assert "line one" in held and "line two" in held and "x\nline" not in text
+
+
+def test_a_backslash_cannot_let_a_pipe_split_the_cell() -> None:
+    finding = replace(FINDING, subject="a\\|b")
+    report = build_report(INTENT, GRANT, [finding], HELD, (), **VERSIONS)
+    row = next(r for r in to_markdown(report).splitlines() if "REPO_NOT_INTENDED" in r)
+    # Cells split on a pipe not preceded by a backslash: five columns remain.
+    assert len(re.split(r"(?<!\\)\|", row.strip())) == 7
+    assert "a\\\\|b" in row
+
+
+def test_table_cell_newline_and_pipe_do_not_split_the_row() -> None:
     finding = replace(FINDING, subject="my-test-org/a|b\nc")
     report = build_report(INTENT, GRANT, [finding], HELD, (), **VERSIONS)
-    assert "a\\|b c" in to_markdown(report)
+    row = next(r for r in to_markdown(report).splitlines() if "REPO_NOT_INTENDED" in r)
+    assert "a\\|bc" in row
+    assert len(re.split(r"(?<!\\)\|", row.strip())) == 7
+
+
+def test_json_strips_control_characters() -> None:
+    finding = replace(FINDING, subject="x" + ESC + "[31m" + BIDI + "y")
+    raw = to_json(build_report(INTENT, GRANT, [finding], HELD, (), **VERSIONS))
+    assert ESC not in raw and BIDI not in raw and "\u001b" not in raw
+    assert json.loads(raw)["findings"][0]["subject"] == "x[31my"
+
+
+def test_collected_not_tested_replaces_the_fixed_row() -> None:
+    extra = (NotTested("attribution", "checked by hand"),)
+    text = to_markdown(build_report(INTENT, GRANT, [], HELD, extra, **VERSIONS))
+    assert text.count("attribution") == 1
+    assert "checked by hand" in text
