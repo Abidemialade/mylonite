@@ -332,6 +332,15 @@ filterwarnings = [
     # genuine unclosed resource introduced by this project still fails the build.
     "ignore:unclosed <socket:ResourceWarning",
     "ignore:unclosed event loop:ResourceWarning",
+    # The Windows twin of the socket entry above. On Windows the event loop is
+    # a ProactorEventLoop, and its transport's `__del__` warns "unclosed
+    # transport <_Proactor...Transport ...>" when the garbage collector reclaims
+    # a transport the third-party async stack left open. Under `error` that
+    # warning raises inside `__del__`, so pytest reports it as an unraisable
+    # exception against whichever test happens to be running: three different
+    # tests on three CI runs on 2026-11-27. `src/`
+    # creates no transports. Scoped to the Proactor transport message only.
+    "ignore:unclosed transport <_Proactor:ResourceWarning",
     # A THIRD "not ours to close" ResourceWarning, same third-party async
     # stack as the two entries above: the mcp SDK's
     # sse_client/streamablehttp_client open an anyio memory-object stream pair
