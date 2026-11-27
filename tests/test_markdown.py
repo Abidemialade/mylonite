@@ -72,3 +72,9 @@ def test_table_mode_escapes_a_literal_pipe():
 
 def test_non_table_mode_does_not_touch_a_pipe():
     assert code_span("a|b") == "`a|b`"
+
+
+def test_strip_controls_removes_bidi_and_line_separators() -> None:
+    from mylonite._markdown import strip_controls
+
+    assert strip_controls("a\u202eb\u2066c\u2069d\u2028e\u2029f") == "abcdef"

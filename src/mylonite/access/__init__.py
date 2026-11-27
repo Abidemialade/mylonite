@@ -28,8 +28,17 @@ from mylonite.access.intent import (
     load_intent,
     require_approved,
 )
+from mylonite.access.report import (
+    AccessReport,
+    build_report,
+    exit_code,
+    input_digest,
+    to_json,
+    to_markdown,
+)
 
 __all__ = [
+    "AccessReport",
     "ArmResult",
     "ControlsIntent",
     "DrillResult",
@@ -46,8 +55,11 @@ __all__ = [
     "NotTested",
     "RepoGrant",
     "RepoIntent",
+    "build_report",
     "compare_grant",
     "escalation_findings",
+    "exit_code",
+    "input_digest",
     "load_intent",
     "mint_app_jwt",
     "not_tested_drill",
@@ -55,4 +67,6 @@ __all__ = [
     "read_classic_token_grant",
     "require_approved",
     "run_revocation_drill",
+    "to_json",
+    "to_markdown",
 ]

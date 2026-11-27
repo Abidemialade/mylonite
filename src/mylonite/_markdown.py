@@ -33,7 +33,7 @@ __all__ = ["code_span", "strip_controls"]
 #: renderers. Unlike the terminal-output stripper in ``_cli_io.py``, this
 #: one does NOT keep ``\n``/``\t`` -- there is no legitimate multi-line or
 #: tab-formatted inline code span in a PR body/SARIF message/bundle label.
-_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_CONTROL_RE = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029\u202a-\u202e\u2066-\u2069]")
 
 _BACKTICK_RUN_RE = re.compile(r"`+")
 
