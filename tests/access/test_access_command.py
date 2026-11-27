@@ -496,6 +496,39 @@ def test_draft_refuses_to_overwrite(runner, tmp_path, matching_github):
     assert target.read_text(encoding="utf-8") == "keep"
 
 
+def test_draft_removes_a_partial_file_when_the_write_fails(
+    runner, tmp_path, matching_github, monkeypatch
+):
+    real_open = Path.open
+
+    class _FailingHandle:
+        def __init__(self, handle):
+            self._handle = handle
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            self._handle.close()
+            return False
+
+        def write(self, text):
+            self._handle.write(text[:10])
+            self._handle.flush()
+            raise OSError(28, "No space left on device")
+
+    def failing_open(self, mode="r", *args, **kwargs):
+        handle = real_open(self, mode, *args, **kwargs)
+        return _FailingHandle(handle) if mode == "x" else handle
+
+    monkeypatch.setattr(Path, "open", failing_open)
+    target = tmp_path / "draft.yaml"
+    result = runner.invoke(app, DRAFT_ARGS(target))
+    assert result.exit_code == EXIT_CONFIG
+    assert "No space left on device" in result.output
+    assert not target.exists()
+
+
 def test_draft_and_intent_are_exclusive(runner, tmp_path, intent_file, no_network):
     result = runner.invoke(app, [*DRAFT_ARGS(tmp_path / "d.yaml"), "--intent", str(intent_file)])
     assert result.exit_code == EXIT_CONFIG

@@ -180,7 +180,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "IntParamType"
+          "type": "int"
         },
         {
           "default": "None",
@@ -194,7 +194,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -208,7 +208,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -222,7 +222,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -236,7 +236,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "None",
@@ -250,7 +250,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -264,7 +264,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "path"
         },
         {
           "default": "False",
@@ -278,10 +278,10 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "BoolParamType"
+          "type": "bool"
         },
         {
-          "default": "WindowsPath('mylonite-access')",
+          "default": "'mylonite-access'",
           "envvar": null,
           "help": "Directory for report.md and report.json.",
           "is_flag": false,
@@ -292,7 +292,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "TyperPath"
+          "type": "str"
         },
         {
           "default": "None",
@@ -306,7 +306,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         },
         {
           "default": "None",
@@ -320,7 +320,7 @@
           ],
           "required": false,
           "secondary_opts": [],
-          "type": "StringParamType"
+          "type": "str"
         }
       ]
     },

@@ -17,6 +17,7 @@ so tests can replace both.
 
 from __future__ import annotations
 
+import contextlib
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -179,10 +180,20 @@ def _draft(
         reader.close()
     text = mask_registered_values(draft_intent_yaml(grant, organisation))
     try:
-        with path.open("x", encoding="utf-8") as handle:
-            handle.write(text)
+        handle = path.open("x", encoding="utf-8")
     except OSError as exc:
+        # Nothing was created here, so nothing is removed: the path may be someone else's.
         raise _refuse(f"could not write {path}: {exc.strerror or exc}") from None
+    try:
+        with handle:
+            handle.write(text)
+    except BaseException as exc:
+        # This call created the file; never leave a partial draft behind.
+        with contextlib.suppress(OSError):
+            path.unlink()
+        if isinstance(exc, OSError):
+            raise _refuse(f"could not write {path}: {exc.strerror or exc}") from None
+        raise
     echo(f"draft intent written to {path}; it is not approved.")
     echo("Remove what the agent should not have, then fill in approved_by and approved_on.")
     raise typer.Exit(code=0)
@@ -242,15 +253,16 @@ def access(
         typer.Option("--no-drill", help="Skip the revocation drill."),
     ] = False,
     out: Annotated[
-        Path,
+        str,
         typer.Option("--out", help="Directory for report.md and report.json."),
-    ] = Path("mylonite-access"),
+    ] = "mylonite-access",
 ) -> None:
     """Compare a coding agent's real GitHub grant with an owner-approved intent file.
 
     Reads grants, scopes, repository names and rule names; never file contents.
     The one write is revoking an installation token the drill minted itself.
     """
+    out_path = Path(out)
     if draft_intent is not None:
         if intent_path is not None:
             raise _refuse("--draft-intent and --intent cannot be used together")
@@ -312,13 +324,17 @@ def access(
         now=datetime.now(UTC),
     )
     try:
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "report.md").write_text(
+        out_path.mkdir(parents=True, exist_ok=True)
+        (out_path / "report.md").write_text(
             mask_registered_values(to_markdown(report)), encoding="utf-8"
         )
-        (out / "report.json").write_text(mask_registered_values(to_json(report)), encoding="utf-8")
+        (out_path / "report.json").write_text(
+            mask_registered_values(to_json(report)), encoding="utf-8"
+        )
     except OSError as exc:
-        raise _refuse(f"could not write the report under {out}: {exc.strerror or exc}") from None
+        raise _refuse(
+            f"could not write the report under {out_path}: {exc.strerror or exc}"
+        ) from None
     code = exit_code(report)
-    _print(list(report.findings), drill, out, code, len(report.not_tested))
+    _print(list(report.findings), drill, out_path, code, len(report.not_tested))
     raise typer.Exit(code=code)
