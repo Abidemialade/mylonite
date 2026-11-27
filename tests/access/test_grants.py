@@ -236,3 +236,47 @@ def test_app_repo_listing_failure_keeps_the_status():
     routes[("GET", "/user/installations/77/repositories")] = httpx.Response(500, json={})
     with pytest.raises(GrantError, match="500"):
         read_app_grant(mock_client(routes), ORG, "my-coding-agent")
+
+
+def test_classic_absent_scopes_header_is_not_treated_as_no_scopes():
+    routes = _classic_routes()
+    routes[("GET", "/user")] = httpx.Response(200, json={"login": "octo-owner"})
+    grant = read_classic_token_grant(mock_client(routes), ORG)
+    assert grant.scopes == ()
+    assert any(n.item == "token scopes" for n in grant.not_tested)
+    assert {r.name: r.level for r in grant.repos}["my-test-org/a"] == "write"
+
+
+def test_classic_empty_scopes_header_is_real_no_scopes():
+    grant = read_classic_token_grant(mock_client(_classic_routes(scopes="")), ORG)
+    assert grant.scopes == ()
+    assert not any(n.item == "token scopes" for n in grant.not_tested)
+    assert all(r.level == "read" for r in grant.repos)
+
+
+def test_classic_repo_without_full_name_is_noted_not_dropped_silently():
+    repos = [
+        _repo("my-test-org/a", push=True),
+        {"owner": {"login": ORG}, "private": True, "permissions": {"push": True}},
+        {"owner": {"login": ORG}, "private": True, "permissions": {"push": True}},
+    ]
+    grant = read_classic_token_grant(mock_client(_classic_routes(repos=repos)), ORG)
+    assert [r.name for r in grant.repos] == ["my-test-org/a"]
+    notes = [n for n in grant.not_tested if n.item == "a repository with no name"]
+    assert len(notes) == 2
+    assert grant.repos_outside_org == 0
+
+
+def test_app_outside_repo_counted_and_mixed_case_org_matches():
+    routes = _app_routes()
+    routes[("GET", "/user/installations/77/repositories")] = httpx.Response(
+        200,
+        json={
+            "total_count": 2,
+            "repositories": [_repo("My-Test-ORG/service-a"), _repo("other-org/secret")],
+        },
+    )
+    grant = read_app_grant(mock_client(routes), ORG, "my-coding-agent")
+    assert [r.name for r in grant.repos] == ["My-Test-ORG/service-a"]
+    assert grant.repos_outside_org == 1
+    assert "other-org" not in repr(grant)

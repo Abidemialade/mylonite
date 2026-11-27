@@ -72,10 +72,18 @@ def _in_org(repo: dict[str, Any], org: str) -> bool:
     return _owner_login(repo).casefold() == org.casefold()
 
 
-def _split_org(repos: list[dict[str, Any]], org: str) -> tuple[list[dict[str, Any]], int]:
-    inside = [r for r in repos if _in_org(r, org) and isinstance(r.get("full_name"), str)]
-    outside = sum(1 for r in repos if not _in_org(r, org))
-    return inside, outside
+def _split_org(
+    repos: list[dict[str, Any]], org: str
+) -> tuple[list[dict[str, Any]], int, tuple[NotTested, ...]]:
+    """In-org repos with a name, the outside count, and one note per nameless repo."""
+    in_org = [r for r in repos if _in_org(r, org)]
+    inside = [r for r in in_org if isinstance(r.get("full_name"), str)]
+    nameless = tuple(
+        NotTested("a repository with no name", "GitHub returned a repository without full_name")
+        for r in in_org
+        if not isinstance(r.get("full_name"), str)
+    )
+    return inside, len(repos) - len(in_org), nameless
 
 
 def _read_plan(client: GitHubClient, org: str) -> tuple[str | None, tuple[NotTested, ...]]:
@@ -144,17 +152,15 @@ def read_classic_token_grant(agent: GitHubClient, org: str) -> Grant:
     login = body.get("login") if isinstance(body, dict) else None
     if not isinstance(login, str) or not login:
         raise GrantError("GitHub GET /user returned no login")
-    scopes = tuple(
-        sorted(
-            s for s in (p.strip() for p in who.headers.get("X-OAuth-Scopes", "").split(",")) if s
-        )
-    )
+    header = who.headers.get("X-OAuth-Scopes")
+    scopes = tuple(sorted(s for s in (p.strip() for p in (header or "").split(",")) if s))
     try:
         all_repos = agent.get_all("/user/repos")
     except GitHubError as exc:
         raise _read_error(exc) from None
-    inside, outside = _split_org(all_repos, org)
-    has_repo = "repo" in scopes
+    inside, outside, nameless = _split_org(all_repos, org)
+    # An absent header is unknown, not "no scopes": do not cap, report as-is.
+    has_repo = header is None or "repo" in scopes
     has_public = "public_repo" in scopes
     repos = tuple(
         RepoGrant(
@@ -169,7 +175,13 @@ def read_classic_token_grant(agent: GitHubClient, org: str) -> Grant:
         )
         for r in inside
     )
-    plan, not_tested = _read_plan(agent, org)
+    plan, plan_note = _read_plan(agent, org)
+    not_tested = nameless + plan_note
+    if header is None:
+        not_tested = (
+            NotTested("token scopes", "GitHub did not return X-OAuth-Scopes"),
+            *not_tested,
+        )
     return Grant(
         identity_kind="classic_token",
         identity_label=login,
@@ -224,14 +236,15 @@ def read_app_grant(owner: GitHubClient, org: str, app_slug: str) -> Grant:
         )
     except GitHubError as exc:
         raise _read_error(exc) from None
-    inside, outside = _split_org(listed, org)
+    inside, outside, nameless = _split_org(listed, org)
     level = _app_level(permissions)
     repos = tuple(
         RepoGrant(name=str(r["full_name"]), level=level, private=bool(r.get("private")))
         for r in inside
     )
     app_id = row.get("app_id")
-    plan, not_tested = _read_plan(owner, org)
+    plan, plan_note = _read_plan(owner, org)
+    not_tested = nameless + plan_note
     return Grant(
         identity_kind="github_app",
         identity_label=app_slug,
