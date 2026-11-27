@@ -18,6 +18,7 @@ No token or private-key text appears in a result.
 
 from __future__ import annotations
 
+import contextlib
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -111,6 +112,12 @@ def _verdict(with_control: ArmResult, control_removed: ArmResult) -> tuple[Drill
             "the token left unrevoked was refused too, so the probe cannot tell"
             " revocation apart from a broken probe",
         )
+    if after_a == 200 and after_b == 401:
+        return (
+            "invalid",
+            "the revoked token still worked while the token left unrevoked was refused,"
+            " so the probe cannot tell the two arms apart",
+        )
     return (
         "not_tested",
         f"the probe gave an unexpected result: revoked token {after_a}, unrevoked token {after_b}",
@@ -130,16 +137,18 @@ def run_revocation_drill(
 ) -> DrillResult:
     """Run the revocation drill against one App installation.
 
-    Never raises on a GitHub or network failure; those become ``not_tested``
-    with the reason. Raises :class:`ValueError` on a non-positive deadline or
-    interval.
+    Never raises on a GitHub or network failure, or on any other error inside
+    the drill; those become ``not_tested`` with the reason (an unexpected
+    error is named by type only). Both tokens are revoked in cleanup either
+    way. Raises :class:`ValueError` on a non-positive deadline or interval.
     """
     if deadline_s <= 0 or interval_s <= 0:
         raise ValueError("deadline_s and interval_s must be positive")
 
     try:
         app_jwt = mint_app_jwt(app_id, private_key_pem, now=int(time.time()))
-    except ImportError:
+    except (ImportError, NotImplementedError):
+        # NotImplementedError: PyJWT is present but RS256 needs its crypto extra.
         return not_tested_drill(_PYJWT_HINT)
     except Exception as exc:  # any key failure; never echo its text
         return not_tested_drill(
@@ -160,14 +169,15 @@ def run_revocation_drill(
             sleep=sleep,
             clock=clock,
         )
+    except Exception as exc:  # anything _drill does not handle; never echo its text
+        result = not_tested_drill(
+            f"the drill stopped on an unexpected error ({type(exc).__name__})"
+        )
     finally:
         for label, client in zip("AB", token_clients, strict=False):
-            try:
-                client.delete_own_installation_token()
-            except GitHubError as exc:
-                cleanup_problems.append(f"token {label} could not be revoked in cleanup: {exc}")
-            finally:
-                client.close()
+            problem = _revoke_in_cleanup(client)
+            if problem:
+                cleanup_problems.append(f"token {label} could not be revoked in cleanup: {problem}")
         jwt_client.close()
 
     if cleanup_problems:
@@ -179,6 +189,24 @@ def run_revocation_drill(
             reason="; ".join([result.reason, *cleanup_problems]),
         )
     return result
+
+
+def _revoke_in_cleanup(client: GitHubClient) -> str | None:
+    """Revoke one token and close its client; return a problem, or ``None``.
+
+    204 is revoked; 401 and 404 mean the token is already gone. Any exception
+    is named by type only, since its message could carry secret text.
+    """
+    try:
+        status = client.delete_own_installation_token()
+    except Exception as exc:  # cleanup must never raise or skip the next token
+        return type(exc).__name__
+    finally:
+        with contextlib.suppress(Exception):  # closing is best effort
+            client.close()
+    if status in (204, 401, 404):
+        return None
+    return f"GitHub returned {status}"
 
 
 def _drill(

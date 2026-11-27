@@ -35,6 +35,7 @@ TEST_PUBLIC_PEM = (
     .decode()
 )
 
+LEAK_MARKER = "message-text-that-must-not-leak"
 INSTALLATION_ID = 7
 PROBE = "/installation/repositories"
 
@@ -64,7 +65,13 @@ class FakeGitHub:
         first_probe_status: dict[str, int] | None = None,
         delete_status: int | None = None,
         cleanup_network_error: bool = False,
+        probe_overrides: dict[tuple[str, int], int | str] | None = None,
+        delete_overrides: dict[tuple[str, int], int | str] | None = None,
     ) -> None:
+        # Keyed by (token label, nth call for that token). A value is a status,
+        # "network" (a connection failure) or "boom" (an unexpected exception).
+        self.probe_overrides = probe_overrides or {}
+        self.delete_overrides = delete_overrides or {}
         self.revocation_delay_probes = revocation_delay_probes
         self.revocation_never_applies = revocation_never_applies
         self.all_tokens_die_after_probes = all_tokens_die_after_probes
@@ -82,6 +89,14 @@ class FakeGitHub:
         self.probes_by_token: dict[str, int] = {}
         self.probe_count = 0
 
+    @staticmethod
+    def _override(value: int | str, request: httpx.Request) -> httpx.Response:
+        if value == "network":
+            raise httpx.ConnectError("network down", request=request)
+        if value == "boom":
+            raise RuntimeError(LEAK_MARKER)
+        return httpx.Response(int(value), json={"message": "x"})
+
     def _token(self, request: httpx.Request) -> str:
         return request.headers["Authorization"].removeprefix("Bearer ")
 
@@ -91,7 +106,7 @@ class FakeGitHub:
         if method == "POST" and path == f"/app/installations/{INSTALLATION_ID}/access_tokens":
             return self._mint()
         if method == "GET" and path == PROBE:
-            return self._probe(self._token(request))
+            return self._probe(self._token(request), request)
         if method == "DELETE" and path == "/installation/token":
             return self._delete(self._token(request), request)
         pytest.fail(f"unexpected request: {method} {path}")
@@ -107,10 +122,13 @@ class FakeGitHub:
         self.labels[token] = label
         return httpx.Response(201, json={"token": token, "expires_at": "2026-11-27T01:00:00Z"})
 
-    def _probe(self, token: str) -> httpx.Response:
+    def _probe(self, token: str, request: httpx.Request) -> httpx.Response:
         self.probe_count += 1
         label = self.labels.get(token, "?")
         self.probes_by_token[label] = self.probes_by_token.get(label, 0) + 1
+        override = self.probe_overrides.get((label, self.probes_by_token[label]))
+        if override is not None:
+            return self._override(override, request)
         if self.probes_by_token[label] == 1 and label in self.first_probe_status:
             return httpx.Response(self.first_probe_status[label], json={"message": "x"})
         if (
@@ -136,6 +154,9 @@ class FakeGitHub:
         label = self.labels.get(token, "?")
         calls = self.delete_calls_by_token.get(label, 0) + 1
         self.delete_calls_by_token[label] = calls
+        override = self.delete_overrides.get((label, calls))
+        if override is not None:
+            return self._override(override, request)
         if self.cleanup_network_error and (label == "B" or calls > 1):
             raise httpx.ConnectError("network down", request=request)
         if self.delete_status is not None and label == "A" and calls == 1:
@@ -305,3 +326,99 @@ def test_not_tested_drill():
         control_removed=None,
         reason="a classic token can only be revoked by hand in GitHub settings",
     )
+
+
+def test_invalid_when_the_revoked_token_works_and_the_unrevoked_one_is_refused():
+    fake = FakeGitHub(revocation_never_applies=True, probe_overrides={("B", 2): 401})
+    result = run_revocation_drill(**args(fake), deadline_s=4)
+    assert result.status == "invalid"
+    assert result.with_control is not None and result.with_control.status_after == 200
+    assert result.control_removed is not None and result.control_removed.status_after == 401
+
+
+def test_cleanup_reports_an_unexpected_delete_status():
+    fake = FakeGitHub(delete_overrides={("B", 1): 500})
+    result = run_revocation_drill(**args(fake))
+    assert result.status == "held"
+    assert "token B could not be revoked in cleanup: GitHub returned 500" in result.reason
+    assert "token A" not in result.reason
+
+
+def test_cleanup_treats_401_and_404_as_already_gone():
+    fake = FakeGitHub(delete_overrides={("B", 1): 404})
+    result = run_revocation_drill(**args(fake))
+    assert result.status == "held"
+    assert "cleanup" not in result.reason  # A's cleanup DELETE gets 401: already revoked
+
+
+def test_cleanup_failure_on_a_never_skips_b_and_names_only_the_type():
+    fake = FakeGitHub(delete_overrides={("A", 2): "boom"})
+    result = run_revocation_drill(**args(fake))
+    assert result.status == "held"
+    assert fake.delete_calls_by_token == {"A": 2, "B": 1}
+    assert "token A could not be revoked in cleanup: RuntimeError" in result.reason
+    assert LEAK_MARKER not in repr(result)
+
+
+def test_pyjwt_without_its_crypto_extra_gets_the_install_hint(monkeypatch):
+    def no_rs256(*_args, **_kwargs):
+        raise NotImplementedError("Algorithm 'RS256' could not be found")
+
+    monkeypatch.setattr(jwt, "encode", no_rs256)
+    fake = FakeGitHub()
+    result = run_revocation_drill(**args(fake))
+    assert result.status == "not_tested"
+    assert "PyJWT" in result.reason and "crypto" in result.reason
+    assert fake.requests == []
+
+
+@pytest.mark.parametrize(
+    "fake",
+    [
+        FakeGitHub(probe_overrides={("A", 2): "network"}),
+        FakeGitHub(probe_overrides={("B", 2): "network"}),
+        FakeGitHub(delete_overrides={("A", 1): "network"}),
+    ],
+    ids=["poll-probe", "control-removed-probe", "revoking-delete"],
+)
+def test_a_network_failure_in_the_drill_is_not_tested(fake):
+    result = run_revocation_drill(**args(fake))
+    assert result.status == "not_tested"
+    assert "could not reach GitHub" in result.reason
+    assert fake.delete_calls_by_token["B"] == 1
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"probe_overrides": {("A", 1): "boom"}},
+        {"probe_overrides": {("A", 2): "boom"}},
+        {"delete_overrides": {("A", 1): "boom"}},
+    ],
+    ids=["baseline-probe", "poll-probe", "revoking-delete"],
+)
+def test_an_unexpected_error_in_the_drill_is_not_tested_and_both_tokens_are_revoked(overrides):
+    fake = FakeGitHub(**overrides)
+    result = run_revocation_drill(**args(fake))
+    assert result.status == "not_tested"
+    assert result.with_control is None and result.control_removed is None
+    assert "unexpected error (RuntimeError)" in result.reason
+    assert LEAK_MARKER not in repr(result)
+    assert fake.delete_calls_by_token.get("A", 0) >= 1
+    assert fake.delete_calls_by_token.get("B", 0) == 1
+
+
+def test_an_unexpected_error_keeps_cleanup_problems_in_the_reason():
+    fake = FakeGitHub(probe_overrides={("A", 2): "boom"}, delete_overrides={("B", 1): 500})
+    result = run_revocation_drill(**args(fake))
+    assert result.status == "not_tested"
+    assert result.reason.startswith("the drill stopped on an unexpected error (RuntimeError)")
+    assert "token B could not be revoked in cleanup: GitHub returned 500" in result.reason
+    assert LEAK_MARKER not in repr(result)
+
+
+def test_a_server_error_while_polling_is_not_tested_with_the_status():
+    fake = FakeGitHub(revocation_never_applies=True, probe_overrides={("A", 3): 500})
+    result = run_revocation_drill(**args(fake))
+    assert result.status == "not_tested"
+    assert "500" in result.reason
